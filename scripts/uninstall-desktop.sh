@@ -163,14 +163,36 @@ collect_linux_paths() {
 
 stop_processes() {
   local binary="$1" product="$2"
-  # Best-effort: stop the main binary and any bundled sidecar Node runtime
-  # it spawned (matches the NSIS pre-uninstall hook behavior on Windows).
-  pkill -x "$binary" 2>/dev/null || true
+  local pid ppid pcomm mount_prefix
+  # Best-effort: stop this variant's bundled sidecar Node runtime, then the
+  # main binary (matches the NSIS pre-uninstall hook behavior on Windows).
+  # The sidecar kill is variant-scoped so uninstalling one variant never takes
+  # down another variant's running local API server.
+  #
+  # 1. Live sidecars: the sidecar is spawned by the variant binary, so match
+  #    sidecar Node processes whose PARENT command is this variant's binary.
+  for pid in $(pgrep -f "sidecar/node" 2>/dev/null || true); do
+    ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+    [ -n "$ppid" ] || continue
+    pcomm="$(ps -o comm= -p "$ppid" 2>/dev/null || true)"
+    case "$pcomm" in
+      *"$binary"*) kill "$pid" 2>/dev/null || true ;;
+    esac
+  done
+  # 2. Orphaned sidecars (parent already exited, reparented to init): match by
+  #    a variant-scoped executable path instead.
   if [ "$OS" = "Darwin" ]; then
-    pkill -f "${product}.app/Contents/Resources/resources/sidecar" 2>/dev/null || true
+    # Layout-agnostic under the bundle's Resources dir (Tauri places bundled
+    # resources at Contents/Resources/sidecar/...).
+    pkill -f "${product}\.app/Contents/Resources/.*sidecar" 2>/dev/null || true
   else
-    pkill -f "resources/sidecar/node" 2>/dev/null || true
+    # AppImages run from a FUSE mount named after the AppImage file
+    # (/tmp/.mount_<name-prefix>XXXXXX). The first characters of the product
+    # name distinguish the variants (World/Tech/Finance).
+    mount_prefix="$(printf '%s' "${product%% *}" | cut -c1-4)"
+    pkill -f "\.mount_${mount_prefix}.*sidecar/node" 2>/dev/null || true
   fi
+  pkill -x "$binary" 2>/dev/null || true
 }
 
 remove_keychain_secrets() {
