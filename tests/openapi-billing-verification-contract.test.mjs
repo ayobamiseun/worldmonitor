@@ -92,6 +92,22 @@ function assertOperationContract({ path, method, op }, label) {
     assert.ok(denial.headers?.[header], `${opLabel}: 503 must document ${header}`);
     assert.equal(denial.headers[header].schema?.type, 'string', `${opLabel}: ${header} header schema`);
   }
+
+  // The provider-confirmed lapse answers authed routes with a 403 that carries
+  // X-Billing-Verification too (ForbiddenError-backed 403 families only — the
+  // public Turnstile 403 gates never send it).
+  const forbidden = op.responses?.['403'];
+  if (forbidden?.content?.['application/json']?.schema?.$ref === '#/components/schemas/ForbiddenError') {
+    assert.ok(
+      forbidden.headers?.['X-Billing-Verification'],
+      `${opLabel}: ForbiddenError-backed 403 must document X-Billing-Verification`,
+    );
+    assert.equal(
+      forbidden.headers['X-Billing-Verification'].schema?.type,
+      'string',
+      `${opLabel}: 403 X-Billing-Verification header schema`,
+    );
+  }
 }
 
 describe('OpenAPI billing-verification contracts', () => {

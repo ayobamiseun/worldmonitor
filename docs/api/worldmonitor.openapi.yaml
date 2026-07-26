@@ -112,6 +112,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -223,6 +228,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -350,6 +360,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -473,6 +488,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -594,6 +614,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -740,6 +765,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -851,6 +881,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -1025,6 +1060,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -1154,6 +1194,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -1334,6 +1379,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -1523,6 +1573,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -1695,6 +1750,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -1832,6 +1892,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -1948,6 +2013,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -2046,6 +2116,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -2147,6 +2222,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -2246,6 +2326,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -2349,6 +2434,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -2616,6 +2706,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -2961,6 +3056,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -3060,6 +3160,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -3232,6 +3337,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -3343,6 +3453,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -3463,6 +3578,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -3586,6 +3706,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -3722,6 +3847,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -3838,6 +3968,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -3947,6 +4082,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -4121,6 +4261,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -4269,6 +4414,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -4403,6 +4553,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -4518,6 +4673,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -4661,6 +4821,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -4772,6 +4937,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -4893,6 +5063,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -4997,6 +5172,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -5119,6 +5299,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -5217,6 +5402,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -5315,6 +5505,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -5413,6 +5608,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -5588,6 +5788,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -5695,6 +5900,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -5797,6 +6007,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -5901,6 +6116,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: Pro subscription required.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -6008,6 +6228,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -6127,6 +6352,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -6243,6 +6473,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -6340,6 +6575,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -6437,6 +6677,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -6537,6 +6782,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -6651,6 +6901,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -6751,6 +7006,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -6850,6 +7110,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -6949,6 +7214,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -7051,6 +7321,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -7153,6 +7428,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -7267,6 +7547,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -7396,6 +7681,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -7512,6 +7802,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -7762,6 +8057,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -7913,6 +8213,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -8025,6 +8330,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -8133,6 +8443,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -8246,6 +8561,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -8422,6 +8742,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -8552,6 +8877,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -8652,6 +8982,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -8751,6 +9086,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -8880,6 +9220,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -9025,6 +9370,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -9136,6 +9486,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -9268,6 +9623,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -9363,6 +9723,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -9475,6 +9840,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -9590,6 +9960,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -9757,6 +10132,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -9860,6 +10240,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -9961,6 +10346,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -10067,6 +10457,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -10173,6 +10568,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -10291,6 +10691,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -10403,6 +10808,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -10534,6 +10944,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -10648,6 +11063,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -10760,6 +11180,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -10906,6 +11331,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -11077,6 +11507,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: Pro subscription required.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -11183,6 +11618,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -11295,6 +11735,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -11415,6 +11860,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -11539,6 +11989,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -11673,6 +12128,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -11814,6 +12274,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -11920,6 +12385,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -12020,6 +12490,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -12128,6 +12603,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -12229,6 +12709,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -12341,6 +12826,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: Pro subscription required.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -12440,6 +12930,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -12544,6 +13039,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -12679,6 +13179,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -12786,6 +13291,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -12931,6 +13441,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: Pro subscription required.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -13058,6 +13573,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: Pro subscription required.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -13171,6 +13691,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: Pro subscription required.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -13650,6 +14175,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -13777,6 +14307,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -13892,6 +14427,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -14004,6 +14544,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -14116,6 +14661,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -14221,6 +14771,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -14340,6 +14895,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -14447,6 +15007,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -14597,6 +15162,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -14696,6 +15266,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -14823,6 +15398,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -14959,6 +15539,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -15082,6 +15667,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -15204,6 +15794,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -15300,6 +15895,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -15400,6 +16000,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -15500,6 +16105,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -15600,6 +16210,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -15702,6 +16317,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -15818,6 +16438,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -15918,6 +16543,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -16022,6 +16652,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -16123,6 +16758,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -16263,6 +16903,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -16366,6 +17011,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -16575,6 +17225,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -16683,6 +17338,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -16789,6 +17449,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -16962,6 +17627,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -17055,6 +17725,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -17167,6 +17842,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -17362,6 +18042,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -17467,6 +18152,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -17589,6 +18279,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -17854,6 +18549,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -17959,6 +18659,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -18080,6 +18785,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -18180,6 +18890,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -18331,6 +19046,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -18439,6 +19159,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -18577,6 +19302,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -18708,6 +19438,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -18839,6 +19574,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -18986,6 +19726,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -19105,6 +19850,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: Pro subscription required.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -19216,6 +19966,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: Pro subscription required.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -19416,6 +20171,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -19533,6 +20293,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -19714,6 +20479,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -19836,6 +20606,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -19938,6 +20713,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -20214,6 +20994,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: Pro subscription required.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -20320,6 +21105,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: Pro subscription required.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -20493,6 +21283,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: Pro subscription required.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -20595,6 +21390,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -20699,6 +21499,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -20809,6 +21614,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -20913,6 +21723,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -21016,6 +21831,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -21137,6 +21957,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -21265,6 +22090,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -21388,6 +22218,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -21504,6 +22339,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -21635,6 +22475,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -21752,6 +22597,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -21900,6 +22750,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -22025,6 +22880,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -22147,6 +23007,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -22272,6 +23137,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -22393,6 +23263,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -22513,6 +23388,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -22651,6 +23531,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -22771,6 +23656,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -22900,6 +23790,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -23015,6 +23910,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -23137,6 +24037,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -23276,6 +24181,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -23398,6 +24308,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -23529,6 +24444,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -23629,6 +24549,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -23755,6 +24680,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: PRO entitlement access denied.
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -24085,6 +25015,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -24189,6 +25124,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
@@ -24375,6 +25315,11 @@ paths:
                                 $ref: '#/components/schemas/UnauthorizedError'
                 "403":
                     description: API access requires an active subscription (the API key's subscription is inactive or expired).
+                    headers:
+                        X-Billing-Verification:
+                            description: Present when the 403 is a billing-provider-confirmed subscription lapse (value subscription_lapsed, matching the body `code`).
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
