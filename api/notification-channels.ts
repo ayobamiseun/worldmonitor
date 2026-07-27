@@ -358,6 +358,15 @@ export default async function handler(req: Request, ctx: { waitUntil: (p: Promis
   }
 
   if (req.method === 'POST') {
+    // #5622 decision: deliberately stricter than checkEntitlementDetailed,
+    // which waives the Convex row for `clerkRole === 'pro'` on tier<=1 gates
+    // (complimentary / tester / legacy grants). Channel writes arm ongoing
+    // server-side deliveries (email/Telegram/Slack/Discord relays, welcome
+    // and digest sends), so they require a verifiable billed entitlement row
+    // — a role claim inside a session JWT is not enough to attach recurring
+    // delivery spend to. Role-only Pros keep GET access above and all
+    // frontend Pro unlocks. Pinned by
+    // tests/notification-channels-billing-denial.test.mts.
     const ent = await notificationChannelsDeps.getEntitlements(session.userId);
     if (!ent || ent.features.tier < 1) {
       // #5600: an entitlement the backend could not VERIFY (Convex 5xx/timeout,

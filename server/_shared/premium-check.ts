@@ -19,6 +19,19 @@ export type PremiumCallerIdentity =
 
 /**
  * Resolves premium status and the user-bound identity for spend controls.
+ *
+ * #5622 scope note — this helper deliberately does NOT adopt the retryable
+ * billing-verification contract (503 + Retry-After + X-Billing-Verification).
+ * It returns an identity object, not a Response, for endpoints that are
+ * PUBLIC to free callers and merely honor extra fields or higher limits for
+ * premium ones. During a transient entitlement outage (getEntitlements
+ * returns the tier-0 `verificationUnavailable` marker) the correct posture
+ * here is to degrade the caller to the free behavior the endpoint already
+ * serves — converting an otherwise-successful public request into a 503
+ * would take the free product down with the billing backend. Surfaces that
+ * hard-deny on tier must call getBillingVerificationDenial BEFORE their
+ * tier gate instead (see api/notification-channels.ts, the MCP grant
+ * handlers, and server/gateway.ts).
  */
 export async function resolvePremiumCallerIdentity(request: Request): Promise<PremiumCallerIdentity> {
   // Internal-MCP context: trusted markers are set by the gateway AFTER an

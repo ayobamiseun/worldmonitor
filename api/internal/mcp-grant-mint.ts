@@ -54,7 +54,7 @@
 export const config = { runtime: 'edge' };
 
 import { resolveClerkSession } from '../../server/_shared/auth-session';
-import { getEntitlements } from '../../server/_shared/entitlement-check';
+import { clampRetryAfterSeconds, getEntitlements } from '../../server/_shared/entitlement-check';
 // @ts-expect-error — JS module, no declaration file
 import { isAllowedRedirectUri } from '../oauth/register.js';
 import { GrantConfigError, signGrant } from '../_mcp-grant-hmac';
@@ -71,8 +71,40 @@ const NO_STORE_JSON: Record<string, string> = {
   'Cache-Control': 'no-store',
 };
 
-function jsonError(error: string, error_description: string, status: number): Response {
-  return new Response(JSON.stringify({ error, error_description }), { status, headers: NO_STORE_JSON });
+function jsonError(error: string, error_description: string, status: number, headers: Record<string, string> = {}): Response {
+  return new Response(JSON.stringify({ error, error_description }), { status, headers: { ...NO_STORE_JSON, ...headers } });
+}
+
+// #5622: a billing-verification state is not a confirmed tier denial. Answer
+// it with this endpoint's existing SERVICE_UNAVAILABLE vocabulary — callers
+// already treat that as "temporarily unavailable, retry" for the storage-blip
+// paths — instead of INSUFFICIENT_TIER, which tells a paying user mid-OAuth
+// that they lack a subscription. Retrying is protocol-safe here: the Pro gate
+// runs before any nonce/grant state is claimed or consumed. The provider-
+// confirmed subscription_lapsed status is NOT matched — that one is a real
+// denial and falls through to the hard INSUFFICIENT_TIER 403.
+function billingVerificationRetryDenial(
+  ent: {
+    verificationUnavailable?: boolean;
+    billingStatus?: string;
+    retryAfterSeconds?: number;
+  } | null,
+): Response | null {
+  const transient = ent?.verificationUnavailable === true
+    ? 'entitlement_verification_unavailable'
+    : ent?.billingStatus === 'renewal_verification_pending' || ent?.billingStatus === 'renewal_verification_failed'
+      ? ent.billingStatus
+      : null;
+  if (!transient) return null;
+  return jsonError(
+    'SERVICE_UNAVAILABLE',
+    'Unable to verify your subscription right now. Please try again in a few seconds.',
+    503,
+    {
+      'Retry-After': String(clampRetryAfterSeconds(ent?.retryAfterSeconds)),
+      'X-Billing-Verification': transient,
+    },
+  );
 }
 
 interface NonceData {
@@ -171,7 +203,13 @@ export interface MintDeps {
    */
   redisSetNxEx: (key: string, value: unknown, ttlSeconds: number) => Promise<boolean>;
   /** Returns Pro entitlement info or null. */
-  getEntitlements: (userId: string) => Promise<{ features: { tier: number; mcpAccess?: boolean }; validUntil: number } | null>;
+  getEntitlements: (userId: string) => Promise<{
+    features: { tier: number; mcpAccess?: boolean };
+    validUntil: number;
+    billingStatus?: string;
+    retryAfterSeconds?: number;
+    verificationUnavailable?: boolean;
+  } | null>;
   /** Same allowlist DCR uses. */
   isAllowedRedirectUri: (uri: string) => boolean;
   /** Signs the wire-format grant token. Throws GrantConfigError if env unset. */
@@ -235,6 +273,8 @@ export async function mintGrantHandler(req: Request, deps: MintDeps): Promise<Re
 
   const ent = await deps.getEntitlements(userId);
   const now = deps.now();
+  const retryDenial = billingVerificationRetryDenial(ent);
+  if (retryDenial) return retryDenial;
   // Mirror downstream MCP-edge gate: both tier ≥ 1 AND mcpAccess === true
   // are required. Reviewer round-2 P2 — gating on tier alone here lets a
   // tier-1 user without mcpAccess get a token row, then 401 every call.

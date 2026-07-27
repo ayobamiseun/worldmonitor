@@ -624,3 +624,70 @@ describe('authorizeProHandler — Cache-Control header invariant', () => {
     assert.equal(res.headers.get('Cache-Control'), 'no-store');
   });
 });
+
+// =========================================================================
+// #5622 — billing-verification states answer a retryable 503 page, not the
+// "Pro Subscription Required" 403 (which tells a paying user mid-blip that
+// their subscription is gone).
+// =========================================================================
+
+describe('authorizeProHandler — #5622 billing-verification retryable contract', () => {
+  const VERIFICATION_UNAVAILABLE_ENT = {
+    features: { tier: 0, mcpAccess: false },
+    validUntil: 0,
+    verificationUnavailable: true,
+    retryAfterSeconds: 7,
+  };
+  const RENEWAL_PENDING_ENT = {
+    features: { tier: 1, mcpAccess: true },
+    validUntil: FIXED_NOW - 1000,
+    billingStatus: 'renewal_verification_pending',
+    retryAfterSeconds: 3,
+  };
+  const LAPSED_ENT = {
+    features: { tier: 0, mcpAccess: false },
+    validUntil: FIXED_NOW - 1000,
+    billingStatus: 'subscription_lapsed',
+  };
+
+  it('verificationUnavailable → 503 HTML page with Retry-After + X-Billing-Verification and restart-the-flow copy', async () => {
+    const grant = await makeGrantToken();
+    const { deps, issueCalls } = await makeDeps({
+      getEntitlements: async () => VERIFICATION_UNAVAILABLE_ENT,
+    });
+    const res = await authorizeProHandler(makeReq({ nonce: NONCE, grant }), deps);
+    assert.equal(res.status, 503);
+    assert.equal(res.headers.get('Retry-After'), '7');
+    assert.equal(res.headers.get('X-Billing-Verification'), 'entitlement_verification_unavailable');
+    const html = await res.text();
+    assert.match(html, /Subscription Verification In Progress/);
+    // The nonce/grant were GETDEL-consumed in steps 3-4, so the page must
+    // direct the user to restart from the MCP client, not to reload this URL.
+    assert.match(html, /start the connection again/);
+    assert.doesNotMatch(html, /Pro Subscription Required/);
+    assert.equal(issueCalls.length, 0, 'no token row may be issued during a verification blip');
+  });
+
+  it('renewal_verification_pending → 503 with the status code and honored Retry-After', async () => {
+    const grant = await makeGrantToken();
+    const { deps } = await makeDeps({
+      getEntitlements: async () => RENEWAL_PENDING_ENT,
+    });
+    const res = await authorizeProHandler(makeReq({ nonce: NONCE, grant }), deps);
+    assert.equal(res.status, 503);
+    assert.equal(res.headers.get('Retry-After'), '3');
+    assert.equal(res.headers.get('X-Billing-Verification'), 'renewal_verification_pending');
+  });
+
+  it('subscription_lapsed stays the hard 403 "Pro Subscription Required" (provider-confirmed denial)', async () => {
+    const grant = await makeGrantToken();
+    const { deps } = await makeDeps({
+      getEntitlements: async () => LAPSED_ENT,
+    });
+    const res = await authorizeProHandler(makeReq({ nonce: NONCE, grant }), deps);
+    assert.equal(res.status, 403);
+    assert.equal(res.headers.get('Retry-After'), null);
+    const html = await res.text();
+    assert.match(html, /Pro Subscription Required/);
+  });
+});

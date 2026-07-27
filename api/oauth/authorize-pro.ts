@@ -65,7 +65,7 @@
 export const config = { runtime: 'edge' };
 
 import { verifyGrant, GrantConfigError } from '../_mcp-grant-hmac';
-import { getEntitlements } from '../../server/_shared/entitlement-check';
+import { clampRetryAfterSeconds, getEntitlements } from '../../server/_shared/entitlement-check';
 import {
   issueProMcpTokenForUser,
   revokeProMcpToken,
@@ -103,7 +103,7 @@ function escapeHtml(str: string): string {
  * Pro Clerk path. Status defaults to 400; pass 500/503 for server-side
  * issues so monitoring distinguishes them, but copy is vague to the user.
  */
-function htmlError(title: string, detail: string, status: number = 400): Response {
+function htmlError(title: string, detail: string, status: number = 400, extraHeaders: Record<string, string> = {}): Response {
   return new Response(
     `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Error &#x2014; WorldMonitor MCP</title>
 <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:ui-monospace,'SF Mono','Cascadia Code',monospace;background:#0a0a0a;color:#e8e8e8;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1.5rem}.wm-logo{display:flex;align-items:center;gap:.5rem;margin-bottom:2rem;text-decoration:none}.wm-logo svg{color:#2d8a6e}.wm-logo-text{font-size:.75rem;color:#555;letter-spacing:.1em;text-transform:uppercase}.card{width:100%;max-width:420px;background:#111;border:1px solid #1e1e1e;padding:2rem}h1{font-size:.95rem;font-weight:600;color:#ef4444;margin-bottom:.75rem;letter-spacing:.02em}p{font-size:.85rem;color:#666;line-height:1.6}.back{display:inline-block;margin-top:1.5rem;font-size:.75rem;color:#444;text-decoration:none;letter-spacing:.03em}.back:hover{color:#888}.footer{margin-top:1.5rem;font-size:.7rem;color:#2a2a2a;text-align:center}.footer a{color:#333;text-decoration:none}.footer a:hover{color:#555}</style></head>
@@ -111,7 +111,7 @@ function htmlError(title: string, detail: string, status: number = 400): Respons
 <div class="card"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(detail)}</p><a href="javascript:history.back()" class="back">&#8592; go back</a></div>
 <p class="footer"><a href="https://www.worldmonitor.app" target="_blank" rel="noopener">worldmonitor.app</a></p>
 </body></html>`,
-    { status, headers: PAGE_HEADERS },
+    { status, headers: { ...PAGE_HEADERS, ...extraHeaders } },
   );
 }
 
@@ -207,7 +207,13 @@ export interface AuthorizeProDeps {
   /** Verifies the wire-format HMAC grant. */
   verifyGrant: typeof verifyGrant;
   /** Returns Pro entitlement info or null. */
-  getEntitlements: (userId: string) => Promise<{ features: { tier: number; mcpAccess?: boolean }; validUntil: number } | null>;
+  getEntitlements: (userId: string) => Promise<{
+    features: { tier: number; mcpAccess?: boolean };
+    validUntil: number;
+    billingStatus?: string;
+    retryAfterSeconds?: number;
+    verificationUnavailable?: boolean;
+  } | null>;
   /** Issues the Convex mcpProTokens row. Throws ProMcpIssueFailed on failure. */
   issueProMcpTokenForUser: typeof issueProMcpTokenForUser;
   /** Best-effort revoke for the rollback path. Must NOT throw (matches U2 contract). */
@@ -359,6 +365,33 @@ export async function authorizeProHandler(req: Request, deps: AuthorizeProDeps):
   // row, then have every tools/call fail at the gateway.
   const ent = await deps.getEntitlements(userId);
   const now = deps.now();
+  // #5622: a billing-verification state (transient lookup failure or an
+  // in-flight renewal re-check) is not a confirmed tier denial — do not tell
+  // a paying user their subscription is missing. The retryable contract is
+  // adapted for this browser-facing surface: the grant/nonce were atomically
+  // GETDEL-consumed in steps 3-4, so THIS URL can never be retried — the copy
+  // sends the user back to their MCP client to restart the connection, and
+  // the 503 + Retry-After still let the client distinguish the state.
+  // English-only like every htmlError page here (no locale fan-out). The
+  // provider-confirmed subscription_lapsed status is NOT matched — it is a
+  // real denial and falls through to the hard 403 below.
+  if (
+    ent?.verificationUnavailable === true
+    || ent?.billingStatus === 'renewal_verification_pending'
+    || ent?.billingStatus === 'renewal_verification_failed'
+  ) {
+    return htmlError(
+      'Subscription Verification In Progress',
+      'We could not confirm your Pro subscription just now — this is usually a temporary hiccup and your subscription is not affected. Please return to your MCP client and start the connection again in a few seconds.',
+      503,
+      {
+        'Retry-After': String(clampRetryAfterSeconds(ent.retryAfterSeconds)),
+        'X-Billing-Verification': ent.verificationUnavailable === true
+          ? 'entitlement_verification_unavailable'
+          : String(ent.billingStatus),
+      },
+    );
+  }
   if (
     !ent ||
     ent.features.tier < 1 ||

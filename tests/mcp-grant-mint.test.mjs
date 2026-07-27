@@ -644,3 +644,90 @@ describe('grantContextHandler', () => {
     assert.equal(body.client_name, BASE_CLIENT_DATA.client_name);
   });
 });
+
+// =========================================================================
+// #5622 — billing-verification states answer retryable, not INSUFFICIENT_TIER
+// =========================================================================
+
+const VERIFICATION_UNAVAILABLE_ENT = {
+  features: { tier: 0, mcpAccess: false },
+  validUntil: 0,
+  verificationUnavailable: true,
+  retryAfterSeconds: 7,
+};
+
+const RENEWAL_PENDING_ENT = {
+  features: { tier: 1, mcpAccess: true },
+  validUntil: FIXED_NOW - 1000,
+  billingStatus: 'renewal_verification_pending',
+  retryAfterSeconds: 3,
+};
+
+const RENEWAL_FAILED_ENT = {
+  features: { tier: 1, mcpAccess: true },
+  validUntil: FIXED_NOW - 1000,
+  billingStatus: 'renewal_verification_failed',
+  retryAfterSeconds: 9,
+};
+
+const LAPSED_ENT = {
+  features: { tier: 0, mcpAccess: false },
+  validUntil: FIXED_NOW - 1000,
+  billingStatus: 'subscription_lapsed',
+};
+
+describe('#5622 billing-verification retryable contract (mint + context parity)', () => {
+  const handlers = [
+    ['mintGrantHandler', (deps) => mintGrantHandler(makePostReq({ nonce: 'nonce_xyz' }), deps), makeMintDeps],
+    ['grantContextHandler', (deps) => grantContextHandler(makeGetReq('nonce_xyz'), deps), makeContextDeps],
+  ];
+
+  for (const [name, run, makeDeps] of handlers) {
+    it(`${name}: verificationUnavailable answers 503 SERVICE_UNAVAILABLE with Retry-After + X-Billing-Verification`, async () => {
+      const { deps } = makeDeps({ getEntitlements: async () => VERIFICATION_UNAVAILABLE_ENT });
+      const res = await run(deps);
+      assert.equal(res.status, 503);
+      const json = await res.json();
+      assert.equal(json.error, 'SERVICE_UNAVAILABLE');
+      assert.equal(res.headers.get('Retry-After'), '7');
+      assert.equal(res.headers.get('X-Billing-Verification'), 'entitlement_verification_unavailable');
+      assert.equal(res.headers.get('Cache-Control'), 'no-store');
+    });
+
+    it(`${name}: renewal_verification_pending answers 503 with the status code and honored Retry-After`, async () => {
+      const { deps } = makeDeps({ getEntitlements: async () => RENEWAL_PENDING_ENT });
+      const res = await run(deps);
+      assert.equal(res.status, 503);
+      const json = await res.json();
+      assert.equal(json.error, 'SERVICE_UNAVAILABLE');
+      assert.equal(res.headers.get('Retry-After'), '3');
+      assert.equal(res.headers.get('X-Billing-Verification'), 'renewal_verification_pending');
+    });
+
+    it(`${name}: renewal_verification_failed answers 503 (still retryable, not a confirmed denial)`, async () => {
+      const { deps } = makeDeps({ getEntitlements: async () => RENEWAL_FAILED_ENT });
+      const res = await run(deps);
+      assert.equal(res.status, 503);
+      assert.equal(res.headers.get('X-Billing-Verification'), 'renewal_verification_failed');
+    });
+
+    it(`${name}: subscription_lapsed stays a hard 403 INSUFFICIENT_TIER (provider-confirmed denial)`, async () => {
+      const { deps } = makeDeps({ getEntitlements: async () => LAPSED_ENT });
+      const res = await run(deps);
+      assert.equal(res.status, 403);
+      const json = await res.json();
+      assert.equal(json.error, 'INSUFFICIENT_TIER');
+      assert.equal(res.headers.get('Retry-After'), null);
+    });
+  }
+
+  it('mintGrantHandler: the retryable denial fires before any nonce/grant state is claimed', async () => {
+    const { deps, setNxExCalls, setExCalls } = makeMintDeps({
+      getEntitlements: async () => VERIFICATION_UNAVAILABLE_ENT,
+    });
+    const res = await mintGrantHandler(makePostReq({ nonce: 'nonce_xyz' }), deps);
+    assert.equal(res.status, 503);
+    assert.equal(setNxExCalls.length, 0, 'no grant claim may be written for a retryable denial');
+    assert.equal(setExCalls.length, 0, 'no state may be consumed for a retryable denial');
+  });
+});

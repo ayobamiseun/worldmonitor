@@ -345,3 +345,32 @@ describe('/api/notification-channels POST billing-verification contract', () => 
     });
   });
 });
+
+describe('/api/notification-channels POST clerkRole allowance decision (#5622)', () => {
+  it('clerkRole === "pro" alone does NOT waive the entitlement row for channel writes', async () => {
+    // checkEntitlementDetailed waives the Convex row for role='pro' on
+    // tier<=1 gates (complimentary / tester / legacy grants). This endpoint
+    // is deliberately stricter: channel writes arm ongoing server-side
+    // deliveries, so a role claim inside a session JWT is not enough. This
+    // test pins that decision — if the gate ever adopts the allowance, the
+    // rationale comment in api/notification-channels.ts must go with it.
+    const mod = await importFreshNotificationChannels();
+    mod.__resetDenialCaptureDedupForTests();
+    mod.__setNotificationChannelsDepsForTests({
+      validateBearerToken: async () => ({ valid: true, userId: 'user-role-only-pro', role: 'pro' }),
+      // A role-only grant has no Convex row: a plain confirmed tier-0 answer
+      // (no billingStatus, no verificationUnavailable markers).
+      getEntitlements: async () => freeShapedEntitlements({}),
+      fetch: async () => {
+        throw new Error('relay must not be reached for a denied request');
+      },
+      captureSilentError: () => {},
+    });
+    mock.method(console, 'warn', () => {});
+
+    const res = await mod.default(makeSetChannelRequest(), ctx);
+    assert.equal(res.status, 403);
+    const body = await res.json() as { error?: string };
+    assert.equal(body.error, 'pro_required');
+  });
+});

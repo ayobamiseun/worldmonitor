@@ -1,3 +1,4 @@
+import { fetchWithBillingRetry } from '@/services/billing-retry';
 import { getClerkToken, getCurrentClerkUser } from '@/services/clerk';
 import { SITE_VARIANT } from '@/config/variant';
 
@@ -72,12 +73,21 @@ async function authFetch(
   // The token was resolved asynchronously. Re-check immediately before the
   // request so a modal opened by user A cannot write under user B's session.
   assertExpectedAccount(expectedUserId);
-  return fetch(path, {
-    ...init,
-    headers: {
-      ...(init?.headers ?? {}),
-      Authorization: `Bearer ${token}`,
-    },
+  // #5622: honor the retryable billing-verification 503 (Retry-After +
+  // X-Billing-Verification) with exactly one bounded retry, so a transient
+  // entitlement blip doesn't fail an activation step terminally. Safe for
+  // the POSTs here too: the server's billing denial fires before the request
+  // body is read or any mutation begins. The account re-check runs again
+  // before the retry for the same cross-account safety as the first attempt.
+  return fetchWithBillingRetry(() => {
+    assertExpectedAccount(expectedUserId);
+    return fetch(path, {
+      ...init,
+      headers: {
+        ...(init?.headers ?? {}),
+        Authorization: `Bearer ${token}`,
+      },
+    });
   });
 }
 

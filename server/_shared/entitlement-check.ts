@@ -221,7 +221,7 @@ export function isEntitlementBackendConfigured(): boolean {
   return Boolean(process.env.CONVEX_SITE_URL && getConvexSharedSecret());
 }
 
-function clampRetryAfterSeconds(raw: number | undefined): number {
+export function clampRetryAfterSeconds(raw: number | undefined): number {
   return Number.isFinite(raw)
     ? Math.max(1, Math.min(60, Math.ceil(raw!)))
     : 5;
@@ -303,6 +303,14 @@ export async function getEntitlements(userId: string): Promise<CachedEntitlement
   }
 }
 
+// Negative-cache TTL for the transient-failure marker below. During a Convex
+// outage every uncached request pays the full 3s fetch timeout before the
+// gates can answer their retryable 503 — and #5600 bounding the tier-0 marker
+// to 60s made this path more reachable. A few seconds of negative caching
+// bounds that amplification to one timed-out probe per user per window while
+// staying far below the shortest honest Retry-After the gates advertise (#5622).
+const UNAVAILABLE_NEGATIVE_CACHE_TTL_SECONDS = 5;
+
 // Free-shaped deny-side value for transient lookup failures. Grants nothing
 // (tier 0, no apiAccess/mcpAccess, validUntil 0); its only power is steering
 // the gates to the retryable 503 via getBillingVerificationDenial.
@@ -323,6 +331,22 @@ function unavailableEntitlements(): CachedEntitlements {
   };
 }
 
+// Returns the transient-failure marker after best-effort negative-caching it.
+// The write is fire-and-safe: when the failure that brought us here includes
+// Redis itself, setCachedJson's own error must not mask the marker return.
+async function negativeCacheUnavailable(userId: string): Promise<CachedEntitlements> {
+  const marker = unavailableEntitlements();
+  try {
+    await setCachedJson(
+      `entitlements:${ENV_PREFIX}:${userId}`,
+      marker,
+      UNAVAILABLE_NEGATIVE_CACHE_TTL_SECONDS,
+      true,
+    );
+  } catch { /* outage may include Redis — serve the marker regardless */ }
+  return marker;
+}
+
 async function _getEntitlementsImpl(userId: string): Promise<CachedEntitlements | null> {
   try {
     // Redis cache check (raw=true: entitlements use user-scoped keys, no deployment prefix)
@@ -330,6 +354,11 @@ async function _getEntitlementsImpl(userId: string): Promise<CachedEntitlements 
 
     if (cached && typeof cached === 'object') {
       const ent = cached as CachedEntitlements;
+      // Negative-cached transient-failure marker (negativeCacheUnavailable):
+      // serve it for its short Redis TTL. Its validUntil is 0, so without this
+      // it would fall through to Convex on every request and defeat the
+      // negative cache entirely (#5622).
+      if (ent.verificationUnavailable === true) return ent;
       // Verification markers have their own short Redis TTL. Serve them even
       // though validUntil is expired so cooldown requests stop at Redis instead
       // of repeating the Convex action/claim chain.
@@ -380,7 +409,7 @@ async function _getEntitlementsImpl(userId: string): Promise<CachedEntitlements 
       // 5xx = Convex/platform blip -> retryable-503 posture at the gates.
       // 4xx (bad shared secret, contract rejection) = deploy defect, not a
       // transient: keep the fail-closed null so callers hold the hard posture.
-      return response.status >= 500 ? unavailableEntitlements() : null;
+      return response.status >= 500 ? await negativeCacheUnavailable(userId) : null;
     }
     const result = await response.json() as CachedEntitlements | null;
 
@@ -420,7 +449,7 @@ async function _getEntitlementsImpl(userId: string): Promise<CachedEntitlements 
     // the on-demand provider re-check (#4770) overrunning the 3s fetch budget
     // reproduced exactly the hard-denial the rework exists to eliminate.
     console.warn('[entitlement-check] getEntitlements failed:', err instanceof Error ? err.message : String(err));
-    return unavailableEntitlements();
+    return negativeCacheUnavailable(userId);
   }
 }
 

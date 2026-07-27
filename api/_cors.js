@@ -35,6 +35,11 @@ const EXPOSED_HEADERS = [
   'Mcp-Session-Id',
   'WWW-Authenticate',
   'Retry-After',
+  // Billing-verification contract (#5447/#5622): mirrors the body `code` on
+  // the retryable 503 and the subscription_lapsed 403 so cross-origin browser
+  // clients can distinguish verification states without parsing the body —
+  // the docs and OpenAPI specs advertise the header.
+  'X-Billing-Verification',
   'Idempotency-Key',
   'Idempotent-Replayed',
   // IETF RateLimit fields (draft-ietf-httpapi-ratelimit-headers): RateLimit-Policy
