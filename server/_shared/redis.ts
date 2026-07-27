@@ -184,6 +184,51 @@ export async function getCachedJson(key: string, raw = false): Promise<unknown |
   return null;
 }
 
+/**
+ * Atomic SET ... EX ... NX — writes only when the key does NOT already exist.
+ * Returns true only when the write happened. For deny-side markers (e.g. the
+ * entitlement negative cache) where last-writer-wins would let a stale
+ * failure marker overwrite a fresher confirmed value written by another
+ * isolate or a webhook between the failed lookup and this write.
+ */
+export async function setCachedJsonNx(key: string, value: unknown, ttlSeconds: number, raw = false): Promise<boolean> {
+  if (process.env.LOCAL_API_MODE === 'tauri-sidecar') {
+    const { sidecarCacheGet, sidecarCacheSet } = await import('./sidecar-cache');
+    if (sidecarCacheGet(key) !== null) return false;
+    sidecarCacheSet(key, value, ttlSeconds);
+    return true;
+  }
+
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return false;
+  try {
+    const finalKey = raw ? key : prefixKey(key);
+    const resp = await fetch(`${url}/`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(['SET', finalKey, JSON.stringify(value), 'EX', String(ttlSeconds), 'NX']),
+      signal: AbortSignal.timeout(REDIS_PIPELINE_TIMEOUT_MS),
+    });
+    const data = (await resp.json().catch(() => null)) as {
+      result?: string | null;
+      error?: string;
+    } | null;
+    if (!resp.ok || data?.error) {
+      console.warn(`[redis] setCachedJsonNx failed:`, data?.error ?? `HTTP ${resp.status}`);
+      return false;
+    }
+    // Upstash returns {result: "OK"} when written, {result: null} on NX collision.
+    return data?.result === 'OK';
+  } catch (err) {
+    console.warn('[redis] setCachedJsonNx failed:', errMsg(err));
+    return false;
+  }
+}
+
 export async function setCachedJson(key: string, value: unknown, ttlSeconds: number, raw = false): Promise<boolean> {
   if (process.env.LOCAL_API_MODE === 'tauri-sidecar') {
     const { sidecarCacheSet } = await import('./sidecar-cache');

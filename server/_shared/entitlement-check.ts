@@ -17,7 +17,7 @@
  * retains a logged fail-open exception only when lookup is wholly unconfigured.
  */
 
-import { getCachedJson, setCachedJson } from './redis';
+import { getCachedJson, setCachedJson, setCachedJsonNx } from './redis';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -332,12 +332,19 @@ function unavailableEntitlements(): CachedEntitlements {
 }
 
 // Returns the transient-failure marker after best-effort negative-caching it.
-// The write is fire-and-safe: when the failure that brought us here includes
-// Redis itself, setCachedJson's own error must not mask the marker return.
+// NX semantics are load-bearing: a webhook or another isolate can write a
+// fresh CONFIRMED entitlement between this lookup's failure and this write,
+// and a plain SET would overwrite it — 503ing a paying user for the marker
+// TTL. SET..NX only lands the marker when the key is absent (the cache-miss
+// cohort). An expired-but-present row blocks the marker, so that cohort keeps
+// paying the Convex probe per request — the safe side of the trade, since
+// clobbering such a row could mask a concurrent confirmed refresh. The write
+// is fire-and-safe: when the outage includes Redis itself, its error must not
+// mask the marker return.
 async function negativeCacheUnavailable(userId: string): Promise<CachedEntitlements> {
   const marker = unavailableEntitlements();
   try {
-    await setCachedJson(
+    await setCachedJsonNx(
       `entitlements:${ENV_PREFIX}:${userId}`,
       marker,
       UNAVAILABLE_NEGATIVE_CACHE_TTL_SECONDS,

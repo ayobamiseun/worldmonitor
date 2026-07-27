@@ -20,11 +20,17 @@ const BILLING_RETRY_DEFAULT_DELAY_MS = 1_000;
 /**
  * Returns the delay (ms) to wait before the single retry, or null when the
  * response is not a retryable billing-verification denial. Honors Retry-After
- * (seconds) up to BILLING_RETRY_MAX_DELAY_MS. Only 503 is retryable — the
- * subscription_lapsed 403 is a provider-confirmed denial by design.
+ * (seconds) up to BILLING_RETRY_MAX_DELAY_MS.
+ *
+ * Only a 503 that carries the X-Billing-Verification marker is retryable:
+ * the billing denial fires before the request body is read or any mutation
+ * begins, so replaying it is safe. An UNMARKED 503 (relay outage, infra) may
+ * have failed mid-mutation, and replaying an unkeyed POST there would run
+ * delivery side effects twice. The subscription_lapsed 403 is a
+ * provider-confirmed denial by design — never retried.
  */
 export function billingRetryDelayMs(res: Pick<Response, 'status' | 'headers'>): number | null {
-  if (res.status !== 503) return null;
+  if (res.status !== 503 || !res.headers.get('X-Billing-Verification')) return null;
   const retryAfter = Number(res.headers.get('Retry-After'));
   const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
     ? retryAfter * 1_000
