@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
 
 import { createLoadDeduper } from '../src/workers/load-dedupe.ts';
@@ -21,6 +22,24 @@ function deferred() {
 }
 
 describe('createLoadDeduper', () => {
+  it('the ML worker binds one module-scoped deduper around the real pipeline load', async () => {
+    const workerSource = await readFile(
+      new URL('../src/workers/ml.worker.ts', import.meta.url),
+      'utf8',
+    );
+
+    assert.match(
+      workerSource,
+      /const modelLoads = createLoadDeduper<string>\(\);/,
+      'the worker must keep one shared deduper for the module lifetime',
+    );
+    assert.match(
+      workerSource,
+      /return modelLoads\.run\(modelId, async \(\) => \{/,
+      'loadModel must route the real pipeline construction through the shared deduper',
+    );
+  });
+
   it('concurrent callers share one loader invocation', async () => {
     const deduper = createLoadDeduper();
     const gate = deferred();
