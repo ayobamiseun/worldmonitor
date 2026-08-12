@@ -18,6 +18,7 @@ const DEFAULT_SCOPED_PROTO_FILES = new Set([
   'worldmonitor/maritime/v1/list_navigational_warnings.proto',
   'worldmonitor/market/v1/get_sector_summary.proto',
   'worldmonitor/market/v1/list_earnings_calendar.proto',
+  'worldmonitor/market/v1/list_stablecoin_markets.proto',
   'worldmonitor/military/v1/get_theater_posture.proto',
   'worldmonitor/military/v1/list_military_flights.proto',
   'worldmonitor/natural/v1/list_natural_events.proto',
@@ -62,7 +63,6 @@ const DEFAULT_FORCED_NOOP_QUERY_PARAMS = new Set([
   'worldmonitor/market/v1/list_earnings_calendar.proto:fromDate',
   'worldmonitor/market/v1/list_earnings_calendar.proto:toDate',
   'worldmonitor/military/v1/get_theater_posture.proto:theater',
-  'worldmonitor/military/v1/list_military_flights.proto:cursor',
   'worldmonitor/military/v1/list_military_flights.proto:operator',
   'worldmonitor/military/v1/list_military_flights.proto:aircraft_type',
   'worldmonitor/natural/v1/list_natural_events.proto:days',
@@ -110,7 +110,11 @@ function slash(path) {
   return path.split(sep).join('/');
 }
 
-function snakeToCamel(value) {
+// Exported so every proto-contract gate converts proto field names the same way.
+// tests/freight-indices.test.mjs's ShippingIndex gate (#6078) reads field names
+// out of a .proto exactly like parseProtoQueryFields does below; two private
+// copies of this rule would let the two gates disagree on the same field.
+export function snakeToCamel(value) {
   return value.replace(/_([a-z0-9])/g, (_, ch) => ch.toUpperCase());
 }
 

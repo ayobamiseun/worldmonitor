@@ -234,6 +234,115 @@ test('preserves Railway relay fallback for direct-fetch transport failures', asy
   assert.equal(calls[1].headers['x-relay-key'], 'relay-secret');
 });
 
+test('does not cache stale RSS bodies returned by the Railway relay', async () => {
+  process.env.WS_RELAY_URL = 'wss://relay.example.com';
+  process.env.RELAY_SHARED_SECRET = 'relay-secret';
+  const calls = [];
+
+  globalThis.fetch = async (input, init = {}) => {
+    calls.push({ url: String(input), headers: init.headers });
+    if (calls.length === 1) return new Response('Forbidden', { status: 403 });
+    return new Response('<rss><channel><title>stale</title></channel></rss>', {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/xml',
+        'X-Cache': 'BACKOFF-STALE',
+        'X-Relay-Stale': '1',
+      },
+    });
+  };
+
+  const res = await handler(makeRequest('https://techcrunch.com/feed'));
+
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  assert.equal(res.headers.get('cdn-cache-control'), 'no-store');
+  assert.equal(res.headers.get('x-cache'), 'BACKOFF-STALE');
+  assert.equal(res.headers.get('x-relay-stale'), '1');
+  assert.match(await res.text(), /stale/);
+  assert.equal(calls.length, 2);
+});
+
+test('keeps legacy plain STALE relay responses non-cacheable during rollout', async () => {
+  process.env.WS_RELAY_URL = 'wss://relay.example.com';
+  process.env.RELAY_SHARED_SECRET = 'relay-secret';
+  const calls = [];
+
+  globalThis.fetch = async (input, init = {}) => {
+    calls.push({ url: String(input), headers: init.headers });
+    if (calls.length === 1) return new Response('Forbidden', { status: 403 });
+    return new Response('<rss><channel><title>legacy stale</title></channel></rss>', {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/xml',
+        'X-Cache': 'STALE',
+      },
+    });
+  };
+
+  const res = await handler(makeRequest('https://techcrunch.com/feed'));
+
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  assert.equal(res.headers.get('cdn-cache-control'), 'no-store');
+  assert.equal(res.headers.get('x-cache'), 'STALE');
+  assert.equal(res.headers.get('x-relay-stale'), null);
+  assert.match(await res.text(), /legacy stale/);
+  assert.equal(calls.length, 2);
+});
+
+test('preserves the original direct-fetch error when the relay fallback itself throws (#5398)', async () => {
+  // Both legs fail, but the relay's throw must not replace directError as the
+  // reported failure — the #5378 suite only ever covered relay returning
+  // null/Response, never throwing.
+  process.env.WS_RELAY_URL = 'wss://relay.example.com';
+  for (const relayError of [new Error('boom relay leg'), null]) {
+    const calls = [];
+
+    globalThis.fetch = async (input) => {
+      calls.push(String(input));
+      if (calls.length === 1) {
+        throw new Error('boom direct fetch');
+      }
+      throw relayError;
+    };
+
+    const feedUrl = 'https://techcrunch.com/feed';
+    const res = await handler(makeRequest(feedUrl));
+    const body = await res.json();
+
+    assert.equal(res.status, 502);
+    assert.equal(body.error, 'Failed to fetch feed');
+    assert.equal(body.details, 'boom direct fetch');
+    assert.equal(calls.length, 2);
+  }
+});
+
+test('preserves the original non-ok direct response when the relay retry itself throws (#5398)', async () => {
+  // Direct fetch succeeds but is non-ok; the relay retry then throws instead
+  // of returning null/a Response. The original non-ok direct response must
+  // still be what's returned, not an unhandled relay exception.
+  process.env.WS_RELAY_URL = 'wss://relay.example.com';
+  for (const relayError of [new Error('boom relay retry'), null]) {
+    const calls = [];
+
+    globalThis.fetch = async (input) => {
+      calls.push(String(input));
+      if (calls.length === 1) {
+        return new Response('not found', { status: 404 });
+      }
+      throw relayError;
+    };
+
+    const feedUrl = 'https://techcrunch.com/feed';
+    const res = await handler(makeRequest(feedUrl));
+
+    assert.equal(res.status, 404);
+    assert.equal(await res.text(), 'not found');
+    assert.equal(calls.length, 2);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Initial-host SSRF allowlist guard (#5378)
 //

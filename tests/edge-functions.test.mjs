@@ -1,49 +1,50 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { listTrackedApiSourceFiles } from '../scripts/check-edge-function-bundles.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 const apiDir = join(root, 'api');
-const apiOauthDir = join(root, 'api', 'oauth');
+const apiOauthDir = join(apiDir, 'oauth');
 const sharedDir = join(root, 'shared');
 const scriptsSharedDir = join(root, 'scripts', 'shared');
 
-// All .js files in api/ except underscore-prefixed helpers (_cors.js, _api-key.js)
-const edgeFunctions = readdirSync(apiDir)
-  .filter((f) => f.endsWith('.js') && !f.startsWith('_'))
-  .map((f) => ({ name: f, path: join(apiDir, f) }));
+const trackedApiSources = listTrackedApiSourceFiles(root);
 
-// Also include api/oauth/ subdir edge functions
-const oauthEdgeFunctions = readdirSync(apiOauthDir)
-  .filter((f) => f.endsWith('.js') && !f.startsWith('_'))
-  .map((f) => ({ name: `oauth/${f}`, path: join(apiOauthDir, f) }));
+// Both api-wide guards below register one `it()` PER DISCOVERED FILE, so an
+// empty discovery makes them emit zero assertions and this suite reports green
+// while checking nothing — a `node:` import smuggled into an edge function
+// would ship unnoticed. `git ls-files` exits 0 with empty output whenever the
+// pathspec matches nothing, so that is reachable; the previous readdirSync
+// implementation threw instead. Fail closed, mirroring the checker's own
+// zero-entry guard.
+describe('tracked api/ discovery', () => {
+  it('finds at least one tracked api/ source', () => {
+    assert.ok(
+      trackedApiSources.length > 0,
+      'listTrackedApiSourceFiles returned nothing — the guards below would pass vacuously',
+    );
+  });
+});
 
-const allEdgeFunctions = [...edgeFunctions, ...oauthEdgeFunctions];
+// Legacy JS entrypoints at api/ and api/oauth/ have stricter isolation rules.
+const allEdgeFunctions = trackedApiSources
+  .filter((file) => file.endsWith('.js'))
+  .filter((file) => ['api', 'api/oauth'].includes(dirname(file)))
+  .map((file) => ({ name: file.slice('api/'.length), path: join(root, file) }));
 
-// ALL .js AND .ts files under api/ (recursively) — used for node: built-in checks.
+// All tracked .js and .ts files under api/ are used for node: built-in checks.
 // Note: .ts edge functions are intentionally excluded from the
 // module-isolation describe below because Vercel bundles them at build time, so
 // imports from '../server/' are valid. The node: built-in check still applies
 // regardless of depth, since Vercel Edge Runtime rejects node: imports at runtime.
-function walkApi(dir, relPrefix = '') {
-  const out = [];
-  for (const entry of readdirSync(dir)) {
-    if (entry.startsWith('_')) continue; // underscore helpers are not routed
-    const full = join(dir, entry);
-    const rel = relPrefix ? `${relPrefix}/${entry}` : entry;
-    if (statSync(full).isDirectory()) {
-      out.push(...walkApi(full, rel));
-    } else if (entry.endsWith('.js') || entry.endsWith('.ts')) {
-      out.push({ name: rel, path: full });
-    }
-  }
-  return out;
-}
-
-const allApiFiles = walkApi(apiDir);
+const allApiFiles = trackedApiSources.map((file) => ({
+  name: file.slice('api/'.length),
+  path: join(root, file),
+}));
 
 describe('scripts/shared/ stays in sync with shared/', () => {
   // Historical scope: .json (data) + .cjs (helpers).
@@ -54,6 +55,12 @@ describe('scripts/shared/ stays in sync with shared/', () => {
   const explicitMirroredFiles = new Set([
     'brief-llm-core.js',
     'brief-llm-core.d.ts',
+    'correlation-runtime-mode.js',
+    // #6428: publisher-family resolution for corroboration counting, consumed
+    // by scripts/_clustering.mjs (Railway rootDirectory=scripts) and by the
+    // edge digest. Must stay byte-identical.
+    'publisher-families.js',
+    'publisher-families.d.ts',
     // U6/U7: pure URL classifier consumed by the brief filter (edge) AND
     // by the audit script under scripts/. Must stay byte-identical.
     'url-classifier.js',
@@ -77,8 +84,20 @@ describe('Edge Function shared helpers resolve', () => {
     const mod = await import(pathToFileURL(join(apiDir, '_rss-allowed-domains.js')).href);
     const domains = mod.default;
     assert.ok(Array.isArray(domains), 'Expected default export to be an array');
-    assert.ok(domains.length > 200, `Expected 200+ domains, got ${domains.length}`);
-    assert.ok(domains.includes('feeds.bbci.co.uk'), 'Expected BBC feed domain in list');
+    // Content parity, not just a smoke check. api/_rss-allowed-domains.js is a
+    // hand-maintained literal mirror of the shared JSON (Vercel edge esbuild
+    // cannot import JSON via import attributes, and api/*.js cannot import from
+    // ../shared), so this assertion is the only thing stopping it drifting from
+    // the source of truth. A domain added to shared/ but missed here 403s in the
+    // edge proxy while every other consumer works — the same silent-drift class
+    // the scripts/shared/ check above already guards against.
+    const shared = JSON.parse(readFileSync(join(sharedDir, 'rss-allowed-domains.json'), 'utf8'));
+    assert.deepStrictEqual(
+      domains,
+      shared,
+      'api/_rss-allowed-domains.js is out of sync with shared/rss-allowed-domains.json — ' +
+        'update the literal array in api/_rss-allowed-domains.js to match',
+    );
   });
 });
 
@@ -238,15 +257,19 @@ describe('api/slack/oauth/callback.ts safety', () => {
     );
   });
 
-  it('consumes CSRF state from Upstash after validation (prevents replay)', () => {
+  it('atomically consumes CSRF state from Upstash (prevents concurrent replay)', () => {
     const src = readFileSync(callbackPath, 'utf-8');
-    const getIdx = src.indexOf('upstashGet');
-    const delIdx = src.indexOf('upstashDel');
-    assert.ok(getIdx !== -1, 'callback.ts: must call upstashGet to validate state');
-    assert.ok(delIdx !== -1, 'callback.ts: must call upstashDel to consume state after validation');
     assert.ok(
-      getIdx < delIdx,
-      'callback.ts: must validate state (upstashGet) before consuming it (upstashDel)',
+      src.includes('upstashGetDel'),
+      'callback.ts: must use a single atomic upstashGetDel operation to validate and consume state',
+    );
+    assert.ok(
+      src.includes('/getdel/'),
+      'callback.ts: state consumption must use Upstash GETDEL, not separate GET and DEL requests',
+    );
+    assert.ok(
+      !src.includes('/get/') && !src.includes('/del/'),
+      'callback.ts: split GET/DEL state consumption permits concurrent replay',
     );
   });
 

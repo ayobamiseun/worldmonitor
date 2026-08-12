@@ -2,9 +2,20 @@ import { Panel } from './Panel';
 import { t } from '@/services/i18n';
 import type { StockAnalysisResult } from '@/services/stock-analysis';
 import { isAnalyzableSymbol } from '@/services/stock-analysis';
+import {
+  getStockAnalysisRatingAction,
+  getStockAnalysisRatingBullishFactors,
+  getStockAnalysisRatingConfidence,
+  getStockAnalysisRatingRiskFactors,
+  getStockAnalysisRatingScore,
+  getStockAnalysisRatingSignal,
+  getStockAnalysisRatingSummary,
+  getStockAnalysisRatingWhyNow,
+} from '@/services/stock-analysis-rating';
 import { getMarketWatchlistEntries } from '@/services/market-watchlist';
 import type { AnalystConsensus, PriceTarget, UpgradeDowngrade } from '@/generated/client/worldmonitor/market/v1/service_client';
 import type { InsiderTransactionsResult } from '@/services/insider-transactions';
+import { buildFundamentalDisplayCells } from '@/services/stock-fundamentals-display';
 import { escapeHtml, sanitizeUrl, unsafeRawHtml } from '@/utils/sanitize';
 import type { StockAnalysisHistory } from '@/services/stock-analysis-history';
 import { sparkline } from '@/utils/sparkline';
@@ -14,6 +25,12 @@ import { WatchlistTableView } from './WatchlistTableView';
 function formatChange(change: number): string {
   const rounded = Number.isFinite(change) ? change.toFixed(2) : '0.00';
   return `${change >= 0 ? '+' : ''}${rounded}%`;
+}
+
+function formatNewsSentiment(score: number): string {
+  const rounded = Number.isFinite(score) ? score.toFixed(2) : '0.00';
+  const label = score >= 0.15 ? 'Bullish' : score <= -0.15 ? 'Bearish' : 'Neutral';
+  return `${label} (${score >= 0 ? '+' : ''}${rounded})`;
 }
 
 function formatPrice(price: number, currency: string): string {
@@ -30,7 +47,7 @@ function stockSignalClass(signal: string): string {
 
 function list(items: string[], cssClass: string): string {
   if (items.length === 0) return '';
-  return `<ul class="${cssClass}" style="margin:8px 0 0;padding-left:18px;font-size:12px;line-height:1.5">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+  return `<ul class="${cssClass}" style="margin:8px 0 0;padding-left:18px;font-size:calc(12px * var(--wm-panel-effective-scale, 1));line-height:1.5">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
 }
 
 function formatDollarCompact(value: number): string {
@@ -67,6 +84,11 @@ export class StockAnalysisPanel extends Panel {
     this.header.appendChild(createWatchlistButton('Edit Watchlist'));
   }
 
+  public override destroy(): void {
+    this.tableView?.destroy();
+    super.destroy();
+  }
+
   public setInsiderData(symbol: string, data: InsiderTransactionsResult): void {
     this.insiderBySymbol[symbol] = data;
   }
@@ -97,11 +119,14 @@ export class StockAnalysisPanel extends Panel {
           },
           {
             key: 'signal', label: 'Signal',
-            cell: (i) => `<span class="signal-badge ${stockSignalClass(i.signal)}">${escapeHtml(i.signal)}</span>`,
+            cell: (i) => {
+              const signal = getStockAnalysisRatingSignal(i);
+              return `<span class="signal-badge ${stockSignalClass(signal)}">${escapeHtml(signal)}</span>`;
+            },
           },
           {
             key: 'score', label: 'Score', align: 'right', sortable: true, sortOptionKey: 'score-desc',
-            cell: (i) => escapeHtml(String(i.signalScore)),
+            cell: (i) => escapeHtml(String(getStockAnalysisRatingScore(i))),
           },
           {
             key: 'change', label: '1d %', align: 'right', sortable: true, sortOptionKey: 'change-desc',
@@ -110,13 +135,16 @@ export class StockAnalysisPanel extends Panel {
         ],
         filters: [
           { key: 'all', label: 'All', match: () => true },
-          { key: 'strong-buy', label: 'Strong Buy', match: (i) => i.signal.toLowerCase().includes('strong buy') },
-          { key: 'buy', label: 'Buy+', match: (i) => i.signal.toLowerCase().includes('buy') },
-          { key: 'hold', label: 'Hold', match: (i) => i.signal.toLowerCase().includes('hold') || i.signal.toLowerCase().includes('watch') },
-          { key: 'sell', label: 'Sell', match: (i) => i.signal.toLowerCase().includes('sell') },
+          { key: 'strong-buy', label: 'Strong Buy', match: (i) => getStockAnalysisRatingSignal(i).toLowerCase().includes('strong buy') },
+          { key: 'buy', label: 'Buy+', match: (i) => getStockAnalysisRatingSignal(i).toLowerCase().includes('buy') },
+          { key: 'hold', label: 'Hold', match: (i) => {
+            const signal = getStockAnalysisRatingSignal(i).toLowerCase();
+            return signal.includes('hold') || signal.includes('watch');
+          } },
+          { key: 'sell', label: 'Sell', match: (i) => getStockAnalysisRatingSignal(i).toLowerCase().includes('sell') },
         ],
         sortOptions: [
-          { key: 'score-desc', label: 'Score ↓', cmp: (a, b) => b.signalScore - a.signalScore },
+          { key: 'score-desc', label: 'Score ↓', cmp: (a, b) => getStockAnalysisRatingScore(b) - getStockAnalysisRatingScore(a) },
           { key: 'change-desc', label: '1d % ↓', cmp: (a, b) => b.changePercent - a.changePercent },
           { key: 'symbol-asc', label: 'Symbol A-Z', cmp: (a, b) => (a.display || a.symbol).localeCompare(b.display || b.symbol) },
         ],
@@ -181,7 +209,7 @@ export class StockAnalysisPanel extends Panel {
       ? `${item.dividendCagr > 0 ? '+' : ''}${item.dividendCagr.toFixed(1)}%`
       : 'N/A';
     const freqBadge = item.dividendFrequency
-      ? `<span class="badge-neutral" style="font-size:10px;padding:2px 6px;border-radius:3px">${escapeHtml(item.dividendFrequency)}</span>`
+      ? `<span class="badge-neutral" style="font-size:calc(10px * var(--wm-panel-effective-scale, 1));padding:2px 6px;border-radius:3px">${escapeHtml(item.dividendFrequency)}</span>`
       : '';
     const exDateStr = item.exDividendDate > 0
       ? new Date(item.exDividendDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -195,8 +223,8 @@ export class StockAnalysisPanel extends Panel {
 
     return `
       <div style="border:1px solid var(--border);padding:10px 12px">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim);margin-bottom:8px">Dividend Profile</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;font-size:11px">
+        <div style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim);margin-bottom:8px">Dividend Profile</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;font-size:calc(11px * var(--wm-panel-effective-scale, 1))">
           <div><div style="color:var(--text-dim)">Yield</div><div style="margin-top:3px">${escapeHtml(yieldStr)}${escapeHtml(rateStr)}</div></div>
           <div><div style="color:var(--text-dim)">5Y CAGR</div><div style="margin-top:3px">${escapeHtml(cagrStr)}</div></div>
           <div><div style="color:var(--text-dim)">Frequency</div><div style="margin-top:3px">${freqBadge || 'N/A'}</div></div>
@@ -208,15 +236,18 @@ export class StockAnalysisPanel extends Panel {
   }
 
   private renderCard(item: StockAnalysisResult, history: StockAnalysisResult[]): string {
-    const tone = stockSignalClass(item.signal);
+    const ratingSignal = getStockAnalysisRatingSignal(item);
+    const tone = stockSignalClass(ratingSignal);
     const priorRuns = history.filter((entry) => entry.generatedAt !== item.generatedAt).slice(0, 3);
     const previous = priorRuns[0];
-    const signalDelta = previous ? item.signalScore - previous.signalScore : null;
+    const signalDelta = previous
+      ? getStockAnalysisRatingScore(item) - getStockAnalysisRatingScore(previous)
+      : null;
     const headlines = item.headlines.slice(0, 2).map((headline) => {
       const href = sanitizeUrl(headline.link);
       const title = escapeHtml(headline.title);
       const source = escapeHtml(headline.source || 'Source');
-      return `<a href="${href}" target="_blank" rel="noreferrer" style="display:block;color:var(--text);text-decoration:none;padding:8px 10px;border:1px solid var(--border);background:rgba(255,255,255,0.02)"><div style="font-size:12px;line-height:1.45">${title}</div><div style="margin-top:4px;font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">${source}</div></a>`;
+      return `<a href="${href}" target="_blank" rel="noreferrer" style="display:block;color:var(--text);text-decoration:none;padding:8px 10px;border:1px solid var(--border);background:rgba(255,255,255,0.02)"><div style="font-size:calc(12px * var(--wm-panel-effective-scale, 1));line-height:1.45">${title}</div><div style="margin-top:4px;font-size:calc(10px * var(--wm-panel-effective-scale, 1));color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">${source}</div></a>`;
     }).join('');
 
     return `
@@ -224,61 +255,62 @@ export class StockAnalysisPanel extends Panel {
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
           <div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-              <strong style="font-size:16px;letter-spacing:-0.02em">${escapeHtml(item.name || item.symbol)}</strong>
-              <span style="font-size:11px;color:var(--text-dim);font-family:var(--font-mono);text-transform:uppercase">${escapeHtml(item.display || item.symbol)}</span>
-              <span class="signal-badge ${tone}" style="font-family:var(--font-mono)">${escapeHtml(item.signal)}</span>
+              <strong style="font-size:calc(16px * var(--wm-panel-effective-scale, 1));letter-spacing:-0.02em">${escapeHtml(item.name || item.symbol)}</strong>
+              <span style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));color:var(--text-dim);font-family:var(--font-mono);text-transform:uppercase">${escapeHtml(item.display || item.symbol)}</span>
+              <span class="signal-badge ${tone}" style="font-family:var(--font-mono)">${escapeHtml(ratingSignal)}</span>
             </div>
-            <div style="margin-top:6px;font-size:12px;color:var(--text-dim);line-height:1.5">${escapeHtml(item.summary)}</div>
+            <div style="margin-top:6px;font-size:calc(12px * var(--wm-panel-effective-scale, 1));color:var(--text-dim);line-height:1.5">${escapeHtml(getStockAnalysisRatingSummary(item))}</div>
           </div>
           <div style="text-align:right;min-width:110px">
-            <div style="font-size:18px;font-weight:700">${escapeHtml(formatPrice(item.currentPrice, item.currency))}</div>
-            <div style="font-size:12px;color:${item.changePercent >= 0 ? 'var(--semantic-normal)' : 'var(--semantic-critical)'}">${escapeHtml(formatChange(item.changePercent))}</div>
-            <div style="margin-top:6px;font-size:11px;color:var(--text-dim)">Score ${escapeHtml(String(item.signalScore))} · ${escapeHtml(item.confidence)}</div>
+            <div style="font-size:calc(18px * var(--wm-panel-effective-scale, 1));font-weight:700">${escapeHtml(formatPrice(item.currentPrice, item.currency))}</div>
+            <div style="font-size:calc(12px * var(--wm-panel-effective-scale, 1));color:${item.changePercent >= 0 ? 'var(--semantic-normal)' : 'var(--semantic-critical)'}">${escapeHtml(formatChange(item.changePercent))}</div>
+            <div style="margin-top:6px;font-size:calc(11px * var(--wm-panel-effective-scale, 1));color:var(--text-dim)">Score ${escapeHtml(String(getStockAnalysisRatingScore(item)))} · ${escapeHtml(getStockAnalysisRatingConfidence(item))}</div>
           </div>
           ${history.length >= 2 ? (() => {
-            const scores = history.slice(0, 6).reverse().map(e => e.signalScore);
+            const scores = history.slice(0, 6).reverse().map(getStockAnalysisRatingScore);
             const last = scores[scores.length - 1] ?? 0;
             const prev = scores[scores.length - 2] ?? last;
             return sparkline(scores, last >= prev ? 'var(--semantic-normal)' : 'var(--semantic-critical)', 60, 20, 'display:block;margin-top:4px;align-self:flex-end');
           })() : ''}
         </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;font-size:11px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;font-size:calc(11px * var(--wm-panel-effective-scale, 1))">
           <div style="border:1px solid var(--border);padding:8px"><div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">Trend</div><div style="margin-top:4px">${escapeHtml(item.trendStatus)}</div></div>
           <div style="border:1px solid var(--border);padding:8px"><div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">MA5 Bias</div><div style="margin-top:4px">${escapeHtml(formatChange(item.biasMa5))}</div></div>
           <div style="border:1px solid var(--border);padding:8px"><div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">RSI 12</div><div style="margin-top:4px">${escapeHtml(item.rsi12.toFixed(1))}</div></div>
           <div style="border:1px solid var(--border);padding:8px"><div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">Volume</div><div style="margin-top:4px">${escapeHtml(item.volumeStatus)}</div></div>
+          ${item.newsSentiment != null ? `<div style="border:1px solid var(--border);padding:8px"><div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">News</div><div style="margin-top:4px">${escapeHtml(formatNewsSentiment(item.newsSentiment))}</div></div>` : ''}
         </div>
         ${this.renderDividendProfile(item)}
-        <div style="font-size:12px;line-height:1.55;color:var(--text)"><strong style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Action</strong><div style="margin-top:4px">${escapeHtml(item.action)}</div></div>
+        <div style="font-size:calc(12px * var(--wm-panel-effective-scale, 1));line-height:1.55;color:var(--text)"><strong style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Action</strong><div style="margin-top:4px">${escapeHtml(getStockAnalysisRatingAction(item))}</div></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
           <div>
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Bullish Factors</div>
-            ${list(item.bullishFactors.slice(0, 3), 'badge-bullish')}
+            <div style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Bullish Factors</div>
+            ${list(getStockAnalysisRatingBullishFactors(item).slice(0, 3), 'badge-bullish')}
           </div>
           <div>
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Risk Factors</div>
-            ${list(item.riskFactors.slice(0, 3), 'badge-bearish')}
+            <div style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Risk Factors</div>
+            ${list(getStockAnalysisRatingRiskFactors(item).slice(0, 3), 'badge-bearish')}
           </div>
         </div>
-        <div style="font-size:12px;line-height:1.55;color:var(--text-dim)">
-          <strong style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Why Now</strong>
-          <div style="margin-top:4px">${escapeHtml(item.whyNow)}</div>
+        <div style="font-size:calc(12px * var(--wm-panel-effective-scale, 1));line-height:1.55;color:var(--text-dim)">
+          <strong style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Why Now</strong>
+          <div style="margin-top:4px">${escapeHtml(getStockAnalysisRatingWhyNow(item))}</div>
         </div>
         ${previous ? `
-          <div style="font-size:12px;line-height:1.55;color:var(--text-dim)">
-            <strong style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Signal Drift</strong>
+          <div style="font-size:calc(12px * var(--wm-panel-effective-scale, 1));line-height:1.55;color:var(--text-dim)">
+            <strong style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Signal Drift</strong>
             <div style="margin-top:4px">
-              Previous run was ${escapeHtml(previous.signal)} at score ${escapeHtml(String(previous.signalScore))}.
+              Previous run was ${escapeHtml(getStockAnalysisRatingSignal(previous))} at score ${escapeHtml(String(getStockAnalysisRatingScore(previous)))}.
               Current drift is ${escapeHtml(`${signalDelta && signalDelta > 0 ? '+' : ''}${(signalDelta || 0).toFixed(1)}`)}.
             </div>
           </div>
         ` : ''}
         ${priorRuns.length > 0 ? `
           <div style="display:grid;gap:6px">
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Recent History</div>
+            <div style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Recent History</div>
             ${priorRuns.map((entry) => `
-              <div style="display:flex;justify-content:space-between;gap:12px;padding:8px 10px;border:1px solid var(--border);background:rgba(255,255,255,0.02);font-size:11px">
-                <span>${escapeHtml(entry.signal)} · score ${escapeHtml(String(entry.signalScore))}</span>
+              <div style="display:flex;justify-content:space-between;gap:12px;padding:8px 10px;border:1px solid var(--border);background:rgba(255,255,255,0.02);font-size:calc(11px * var(--wm-panel-effective-scale, 1))">
+                <span>${escapeHtml(getStockAnalysisRatingSignal(entry))} · score ${escapeHtml(String(getStockAnalysisRatingScore(entry)))}</span>
                 <span style="color:var(--text-dim)">${escapeHtml(new Date(entry.generatedAt).toLocaleString())}</span>
               </div>
             `).join('')}
@@ -287,7 +319,25 @@ export class StockAnalysisPanel extends Panel {
         ${this.renderInsiderSection(item.symbol)}
         ${headlines ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px">${headlines}</div>` : ''}
         ${this.renderAnalystConsensus(item)}
+        ${this.renderFundamentals(item)}
       </section>
+    `;
+  }
+
+  private renderFundamentals(item: StockAnalysisResult): string {
+    const cell = (label: string, value: string, color?: string): string =>
+      `<div style="border:1px solid var(--border);padding:6px 8px;flex:1;min-width:88px"><div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">${escapeHtml(label)}</div><div style="margin-top:2px${color ? `;color:${color}` : ''}">${escapeHtml(value)}</div></div>`;
+
+    const cells = buildFundamentalDisplayCells(item.fundamentals, item.currency)
+      .map((entry) => cell(entry.label, entry.value, entry.color));
+
+    if (cells.length === 0) return '';
+
+    return `
+      <div style="border-top:1px solid var(--border);margin-top:4px;padding-top:10px">
+        <div style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim);margin-bottom:8px">Fundamentals</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${cells.join('')}</div>
+      </div>
     `;
   }
 
@@ -305,7 +355,7 @@ export class StockAnalysisPanel extends Panel {
 
     return `
       <div style="border-top:1px solid var(--border);margin-top:4px;padding-top:10px">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim);margin-bottom:8px">Analyst Consensus</div>
+        <div style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim);margin-bottom:8px">Analyst Consensus</div>
         ${hasConsensus ? this.renderRatingBar(consensus) : ''}
         ${hasPriceTarget ? this.renderPriceTarget(pt, item.currentPrice, item.currency) : ''}
         ${hasUpgrades ? this.renderRecentUpgrades(upgrades) : ''}
@@ -335,7 +385,7 @@ export class StockAnalysisPanel extends Panel {
     return `
       <div style="margin-bottom:8px">
         <div style="display:flex;gap:1px;border-radius:4px;overflow:hidden;margin-bottom:4px">${bar}</div>
-        <div style="font-size:10px;color:var(--text-dim);display:flex;align-items:center;flex-wrap:wrap;gap:2px">${legend}<span style="margin-left:6px;color:var(--text-dim)">(${total} analysts)</span></div>
+        <div style="font-size:calc(10px * var(--wm-panel-effective-scale, 1));color:var(--text-dim);display:flex;align-items:center;flex-wrap:wrap;gap:2px">${legend}<span style="margin-left:6px;color:var(--text-dim)">(${total} analysts)</span></div>
       </div>
     `;
   }
@@ -371,7 +421,7 @@ export class StockAnalysisPanel extends Panel {
       cells.push(`<div style="border:1px solid var(--border);padding:6px 8px;flex:1;min-width:90px"><div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">vs Current</div><div style="margin-top:2px;color:${upsideColor}">${escapeHtml(upsideStr)}</div></div>`);
     }
 
-    return `<div style="display:flex;flex-wrap:wrap;gap:8px;font-size:11px;margin-bottom:8px">${cells.join('')}</div>`;
+    return `<div style="display:flex;flex-wrap:wrap;gap:8px;font-size:calc(11px * var(--wm-panel-effective-scale, 1));margin-bottom:8px">${cells.join('')}</div>`;
   }
 
   private renderRecentUpgrades(upgrades: UpgradeDowngrade[]): string {
@@ -381,7 +431,7 @@ export class StockAnalysisPanel extends Panel {
       const gradeChange = u.fromGrade ? `${escapeHtml(u.fromGrade)} → ${escapeHtml(u.toGrade)}` : escapeHtml(u.toGrade);
 
       return `
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 8px;border:1px solid var(--border);background:rgba(255,255,255,0.02);font-size:11px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 8px;border:1px solid var(--border);background:rgba(255,255,255,0.02);font-size:calc(11px * var(--wm-panel-effective-scale, 1))">
           <span style="font-weight:500">${escapeHtml(u.firm)}</span>
           <span style="color:${actionColor};white-space:nowrap">${actionLabel}</span>
           <span style="color:var(--text-dim);white-space:nowrap">${gradeChange}</span>
@@ -391,7 +441,7 @@ export class StockAnalysisPanel extends Panel {
 
     return `
       <div style="display:grid;gap:4px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Recent Actions</div>
+        <div style="font-size:calc(10px * var(--wm-panel-effective-scale, 1));text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Recent Actions</div>
         ${rows}
       </div>
     `;
@@ -408,13 +458,13 @@ export class StockAnalysisPanel extends Panel {
     }
     if (data.unavailable) {
       return `
-        <div style="font-size:11px;color:var(--text-dim);padding:8px;border:1px solid var(--border)">
+        <div style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));color:var(--text-dim);padding:8px;border:1px solid var(--border)">
           Insider data unavailable
         </div>`;
     }
     if (data.transactions.length === 0 && data.totalBuys === 0 && data.totalSells === 0) {
       return `
-        <div style="font-size:11px;color:var(--text-dim);padding:8px;border:1px solid var(--border)">
+        <div style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));color:var(--text-dim);padding:8px;border:1px solid var(--border)">
           No insider transactions in the last 6 months
         </div>`;
     }
@@ -425,7 +475,7 @@ export class StockAnalysisPanel extends Panel {
     const netColor = data.netValue >= 0 ? 'var(--semantic-normal)' : 'var(--semantic-critical)';
 
     const summary = `
-      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;font-family:var(--font-mono)">
+      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:calc(12px * var(--wm-panel-effective-scale, 1));font-family:var(--font-mono)">
         <span>Buys: <span style="color:var(--semantic-normal)">${escapeHtml(buysStr)}</span></span>
         <span>Sells: <span style="color:var(--semantic-critical)">${escapeHtml(sellsStr)}</span></span>
         <span>Net: <span style="color:${netColor};font-weight:600">${escapeHtml(netStr)}</span></span>
@@ -433,7 +483,7 @@ export class StockAnalysisPanel extends Panel {
 
     const rows = data.transactions.slice(0, 5);
     const table = rows.length > 0 ? `
-      <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:6px">
+      <table style="width:100%;border-collapse:collapse;font-size:calc(11px * var(--wm-panel-effective-scale, 1));margin-top:6px">
         <thead>
           <tr style="color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em;text-align:left">
             <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Name</th>
@@ -468,7 +518,7 @@ export class StockAnalysisPanel extends Panel {
 
     return `
       <div style="display:grid;gap:6px">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Insider Activity (6 months)</div>
+        <div style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Insider Activity (6 months)</div>
         ${summary}
         ${table}
       </div>`;

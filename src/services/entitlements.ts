@@ -7,7 +7,13 @@
  * is not configured or ConvexClient is unavailable.
  */
 
-import { getConvexClient, getConvexApi, waitForConvexAuth } from './convex-client';
+import {
+  getConvexClient,
+  getConvexApi,
+  waitForConvexAuth,
+  waitForConvexAuthForUser,
+} from './convex-client';
+import { getCurrentClerkUser } from './clerk';
 
 export interface EntitlementState {
   planKey: string;
@@ -20,6 +26,7 @@ export interface EntitlementState {
       apiBurstRequestsPerMinute: number | null;
       mcpCallsPerDay: number | null;
       mcpBurstRequestsPerMinute: number | null;
+      dashboardAiCallsPerDay?: number | null;
     };
     maxDashboards: number;
     prioritySupport: boolean;
@@ -32,34 +39,113 @@ export interface EntitlementState {
      * Dodo's next webhook repopulates the field).
      */
     mcpAccess?: boolean;
+    /**
+     * Data-export entitlement (plan 2026-07-25-001). This controls the locked
+     * state while `exportFormats` controls which CSV/JSON/PDF actions the
+     * unlocked menu exposes; `tier` cannot discriminate because Pro Business
+     * shares tier 1 with Pro.
+     * Undefined on legacy snapshots: the export gate treats undefined on a
+     * `tier >= 2` snapshot as entitled (permanent fail-open) so a stale row
+     * never locks a paying customer out of their own data.
+     */
+    dataExport?: boolean;
   };
   validUntil: number;
 }
 
+/**
+ * Account-scoped progress for resolving the current entitlement snapshot.
+ *
+ * `currentState === null` alone is ambiguous: it can mean that a signed-in
+ * account is still moving through the bounded Clerk/Convex auth retries, or
+ * that the handoff reached a terminal failure. Keep that distinction explicit
+ * so billing UI never converts an in-flight retry into a failure message.
+ */
+export type EntitlementVerificationStatus =
+  | 'idle'
+  | 'pending'
+  | 'ready'
+  | 'unavailable';
+
 // Module-level state
 let currentState: EntitlementState | null = null;
 const listeners = new Set<(state: EntitlementState | null) => void>();
+let verificationStatus: EntitlementVerificationStatus = 'idle';
+const verificationListeners = new Set<(status: EntitlementVerificationStatus) => void>();
 let initialized = false;
 let unsubscribeFn: (() => void) | null = null;
+
+function setEntitlementVerificationStatus(status: EntitlementVerificationStatus): void {
+  if (verificationStatus === status) return;
+  verificationStatus = status;
+  for (const cb of verificationListeners) {
+    try {
+      cb(status);
+    } catch (err) {
+      console.warn('[entitlements] verification listener threw; continuing fan-out:', err);
+    }
+  }
+}
+
+export function beginEntitlementVerification(): void {
+  setEntitlementVerificationStatus('pending');
+}
+
+export function markEntitlementVerificationUnavailable(): void {
+  if (currentState === null) setEntitlementVerificationStatus('unavailable');
+}
+
+export function resetEntitlementVerification(): void {
+  setEntitlementVerificationStatus('idle');
+}
+
+/**
+ * Fan a new snapshot out to every subscriber, isolating failures.
+ *
+ * One listener must not block the rest: subscribers are independent UI
+ * surfaces, and an unguarded loop silently stops updating every listener
+ * registered after the one that threw — a failure with no error path, since
+ * the survivors just quietly hold their last verdict. Both emission sites
+ * (the Convex watch below and `resetEntitlementState`) route through here so
+ * they cannot drift apart on that guarantee.
+ */
+function notifyListeners(state: EntitlementState | null): void {
+  for (const cb of listeners) {
+    try {
+      cb(state);
+    } catch (err) {
+      console.warn('[entitlements] listener threw; continuing fan-out:', err);
+    }
+  }
+}
 
 /**
  * Initialize the entitlement subscription for the authenticated user.
  * Idempotent — calling multiple times is a no-op after the first.
  * Failures are logged but never thrown (dashboard must not break).
  */
-export async function initEntitlementSubscription(_userId?: string): Promise<void> {
-  if (initialized) return;
+export async function initEntitlementSubscription(
+  _userId?: string,
+  isCurrent: () => boolean = () => true,
+): Promise<void> {
+  const isExpectedAccount = (): boolean => (
+    isCurrent() && (_userId === undefined || getCurrentClerkUser()?.id === _userId)
+  );
+  if (initialized || !isExpectedAccount()) return;
+  if (currentState === null) beginEntitlementVerification();
 
   try {
     const client = await getConvexClient();
     if (!client) {
       console.log('[entitlements] No VITE_CONVEX_URL — skipping Convex subscription');
+      if (isExpectedAccount()) markEntitlementVerificationUnavailable();
       return;
     }
 
     const api = await getConvexApi();
     if (!api) {
       console.log('[entitlements] Could not load Convex API — skipping subscription');
+      if (isExpectedAccount()) markEntitlementVerificationUnavailable();
       return;
     }
 
@@ -69,21 +155,29 @@ export async function initEntitlementSubscription(_userId?: string): Promise<voi
     // decision (the UI renders as free before the auth-ready pro snapshot
     // arrives). Unauthenticated visitors time out after 10s and we skip the
     // subscription entirely — they don't need entitlement updates.
-    const authed = await waitForConvexAuth(10_000);
+    const authed = _userId
+      ? await waitForConvexAuthForUser(_userId, 10_000)
+      : await waitForConvexAuth(10_000);
     if (!authed) {
       console.log('[entitlements] Convex auth not established — skipping subscription');
+      if (isExpectedAccount()) markEntitlementVerificationUnavailable();
       return;
     }
+    if (!isExpectedAccount()) return;
 
     const watch = client.onUpdate(
       api.entitlements.getEntitlementsForUser,
       {},
       (result: EntitlementState | null) => {
+        if (!isExpectedAccount()) return;
         currentState = result;
-        for (const cb of listeners) cb(result);
+        setEntitlementVerificationStatus('ready');
+        notifyListeners(result);
       },
       (err: Error) => {
+        if (!isExpectedAccount()) return;
         console.warn('[entitlements] Subscription query error:', err.message);
+        markEntitlementVerificationUnavailable();
       },
     );
 
@@ -91,6 +185,7 @@ export async function initEntitlementSubscription(_userId?: string): Promise<voi
     initialized = true;
   } catch (err) {
     console.error('[entitlements] Failed to initialize Convex subscription:', err);
+    if (isExpectedAccount()) markEntitlementVerificationUnavailable();
     // Do not rethrow — entitlement service failure must not break the dashboard
   }
 }
@@ -116,9 +211,15 @@ export function destroyEntitlementSubscription(): void {
  * Explicitly nulls currentState. Call on sign-out to prevent the previous
  * user's entitlements from leaking into a subsequent session.
  * Distinct from destroyEntitlementSubscription() which preserves state for reconnects.
+ *
+ * Notifies listeners with `null` so UI that subscribed via onEntitlementChange
+ * (e.g. Pro banner #5728) re-evaluates immediately. Without this, a sign-out
+ * that only cleared state left free-tier surfaces stuck on the previous
+ * account's premium snapshot until the next real Convex update.
  */
 export function resetEntitlementState(): void {
   currentState = null;
+  notifyListeners(null);
 }
 
 /**
@@ -139,6 +240,25 @@ export function onEntitlementChange(
   return () => {
     listeners.delete(cb);
   };
+}
+
+/**
+ * Register a callback for entitlement-verification progress.
+ * The current status is replayed immediately so late UI subscribers cannot
+ * recreate a local timeout with a different lifecycle.
+ */
+export function onEntitlementVerificationChange(
+  cb: (status: EntitlementVerificationStatus) => void,
+): () => void {
+  verificationListeners.add(cb);
+  cb(verificationStatus);
+  return () => {
+    verificationListeners.delete(cb);
+  };
+}
+
+export function getEntitlementVerificationStatus(): EntitlementVerificationStatus {
+  return verificationStatus;
 }
 
 /**
@@ -165,15 +285,26 @@ export function hasTier(minTier: number): boolean {
 }
 
 /**
+ * The "is this a paying user" predicate, over an injected snapshot and clock.
+ *
+ * Split out of `isEntitled()` so tests can evaluate the REAL rule against a
+ * snapshot they control — `currentState` is module-private and has no setter,
+ * so the alternative is re-implementing these three conditions in a mock,
+ * where they silently drift the moment this rule changes (#5632).
+ */
+export function isEntitlementActive(
+  state: EntitlementState | null,
+  now: number,
+): boolean {
+  return state !== null && state.planKey !== 'free' && state.validUntil >= now;
+}
+
+/**
  * Simple "is this a paying user" check.
  * Returns true if entitlement data exists, plan is not free, and hasn't expired.
  */
 export function isEntitled(): boolean {
-  return (
-    currentState !== null &&
-    currentState.planKey !== 'free' &&
-    currentState.validUntil >= Date.now()
-  );
+  return isEntitlementActive(currentState, Date.now());
 }
 
 /**

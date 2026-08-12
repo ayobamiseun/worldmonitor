@@ -17,6 +17,7 @@ import {
 // (api/rss-proxy.js) so dev and prod agree on allow/deny. Previously a
 // hand-maintained Set here had drifted ~138 domains from prod.
 import { isAllowedDomain } from './api/_rss-allowed-domain-match.js';
+import { validateGeneratedRequest } from './server/request-validator';
 
 // Env-dependent constants moved inside defineConfig function
 
@@ -98,6 +99,7 @@ const PANEL_CLUSTER: Record<string, PanelChunkName> = {
   AAIISentiment: 'panels-markets', CotPositioning: 'panels-markets',
   ETFFlows: 'panels-markets', EarningsCalendar: 'panels-markets',
   EconomicCalendar: 'panels-markets', FearGreed: 'panels-markets',
+  Fx: 'panels-markets',
   GoldIntelligence: 'panels-markets', LiquidityShifts: 'panels-markets',
   MacroSignals: 'panels-markets', Market: 'panels-markets',
   MarketBreadth: 'panels-markets', MarketImplications: 'panels-markets',
@@ -129,7 +131,9 @@ const PANEL_CLUSTER: Record<string, PanelChunkName> = {
   GroceryBasket: 'panels-economy', GulfEconomies: 'panels-economy',
   Investments: 'panels-economy', MacroTiles: 'panels-economy',
   NationalDebt: 'panels-economy', SanctionsPressure: 'panels-economy',
-  SupplyChain: 'panels-economy', TradePolicy: 'panels-economy',
+  ChinaActivityNowcast: 'panels-economy', ChinaCorridor: 'panels-economy',
+  SupplyChain: 'panels-economy',
+  TradePolicy: 'panels-economy',
   // Country briefs / signals / monitors / agent surfaces.
   // CorrelationPanel base lives here, so all *Correlation consumers MUST stay
   // in this cluster — splitting them across clusters caused TDZ on init.
@@ -522,7 +526,10 @@ function sebufApiPlugin(): Plugin {
         import('./server/worldmonitor/shipping/v2/handler'),
       ]);
 
-    const serverOptions = { onError: errorMod.mapErrorToResponse };
+    const serverOptions = {
+      onError: errorMod.mapErrorToResponse,
+      validateRequest: validateGeneratedRequest,
+    };
     const allRoutes = [
       ...seismologyServerMod.createSeismologyServiceRoutes(seismologyHandlerMod.seismologyHandler, serverOptions),
       ...wildfireServerMod.createWildfireServiceRoutes(wildfireHandlerMod.wildfireHandler, serverOptions),
@@ -846,6 +853,27 @@ function gpsjamDevPlugin(): Plugin {
   };
 }
 
+// Mirror the WebMCP security gates during local development. Chrome's
+// #enable-webmcp-testing flag bypasses origin-trial enrollment, but it does not
+// bypass origin isolation or Permissions Policy. Keeping these headers in the
+// dev server makes the documented local smoke meaningful while preserving the
+// production boundary: no Origin-Trial token is ever served locally.
+function webMcpDevSecurityHeadersPlugin(): Plugin {
+  return {
+    name: 'wm-webmcp-dev-security-headers',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
+        const isEmbedDocument = pathname === '/embed' || pathname === '/embed.html';
+        res.setHeader('Origin-Agent-Cluster', '?1');
+        res.setHeader('Permissions-Policy', isEmbedDocument ? 'tools=()' : 'tools=(self)');
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   // Inject environment variables from .env files into process.env.
@@ -905,6 +933,7 @@ export default defineConfig(({ mode }) => {
       // which is always the 'full' build (variant selection is runtime by
       // hostname). Desktop and dedicated VITE_VARIANT builds skip it.
       !isDesktopBuild && activeVariant === 'full' && variantDashboardHtmlPlugin(),
+      webMcpDevSecurityHeadersPlugin(),
       polymarketPlugin(),
       rssProxyPlugin(),
       youtubeLivePlugin(),
@@ -1192,7 +1221,8 @@ export default defineConfig(({ mode }) => {
             // lazy-load it via dynamic import. Kept off the eager @/config
             // barrel. Co-chunk both files so the merged list and its raw data
             // ship together off the entry chunk. (#4478)
-            if (id.endsWith('/src/config/military-bases.ts') || id.endsWith('/src/config/bases-expanded.ts')) {
+            if (id.endsWith('/src/config/military-bases.ts') || id.endsWith('/src/config/bases-expanded.ts')
+                || id.endsWith('/shared/military-bases-data.ts')) {
               return 'military-bases-data';
             }
             // Correlation engine (engine + 4 adapters) is dynamic-imported at its
@@ -1633,12 +1663,15 @@ export default defineConfig(({ mode }) => {
             });
           },
         },
-        // OpenSky Network - Aircraft tracking (military flight detection)
+        // OpenSky Network - Aircraft tracking (military flight detection).
+        // Prod routes /api/opensky through the relay (api/opensky.js), which calls
+        // OpenSky's states/all endpoint. Dev has no relay, so proxy straight to
+        // states/all — stripping the prefix to '' would hit the invalid /api root (404).
         '/api/opensky': {
           target: 'https://opensky-network.org/api',
           changeOrigin: true,
           secure: true,
-          rewrite: (path) => path.replace(/^\/api\/opensky/, ''),
+          rewrite: (path) => path.replace(/^\/api\/opensky/, '/states/all'),
           configure: (proxy) => {
             proxy.on('error', (err) => {
               console.log('OpenSky proxy error:', err.message);

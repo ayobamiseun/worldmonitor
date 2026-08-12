@@ -1,12 +1,14 @@
 import { isDesktopRuntime } from '../services/runtime';
 import { invokeTauri } from '../services/tauri-bridge';
 import { t } from '../services/i18n';
-import { h, replaceChildren, safeHtml as sanitizeHtmlFragment, setTrustedHtml, trustedHtml } from '../utils/dom-utils';
+import { type DomChild, h, replaceChildren, safeHtml as sanitizeHtmlFragment, setTrustedHtml, trustedHtml } from '../utils/dom-utils';
 import { safeHtmlToString, type SafeHtml } from '@/utils/sanitize';
 import { trackPanelResized } from '@/services/analytics';
 import { getAiFlowSettings } from '@/services/ai-flow-settings';
 import { getSecretState } from '@/services/runtime-config';
 import { PanelGateReason } from '@/services/panel-gating';
+import { openExternalUrl } from '@/services/external-navigation';
+import { lockSvg, upgradeSvg } from '@/components/gate-icons';
 import { dataFreshness, type PanelFreshnessSummary } from '@/services/data-freshness';
 import { formatPanelFreshnessDisplay } from '@/services/panel-freshness-display';
 import {
@@ -42,10 +44,6 @@ export interface PanelOptions {
   collapsible?: boolean;
   defaultRowSpan?: number;
 }
-
-const lockSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>`;
-
-const upgradeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="16 12 12 8 8 12"/><line x1="12" y1="16" x2="12" y2="8"/></svg>`;
 
 const ROW_RESIZE_STEP_PX = 80;
 const COL_RESIZE_STEP_PX = 80;
@@ -83,7 +81,12 @@ function getRowSpan(element: HTMLElement): number {
   if (element.classList.contains('span-4')) return 4;
   if (element.classList.contains('span-3')) return 3;
   if (element.classList.contains('span-2')) return 2;
-  return 1;
+  if (element.classList.contains('span-1')) return 1;
+  // A natural wide panel already occupies two dashboard rows even when it
+  // has no explicit span-N class. Treat that footprint as the resize baseline
+  // so the first vertical drag changes the visible height instead of being a
+  // no-op against the existing grid-row: span 2 rule.
+  return element.classList.contains('panel-wide') ? 2 : 1;
 }
 
 function deltaToRowSpan(startSpan: number, deltaY: number): number {
@@ -138,6 +141,20 @@ export class Panel {
   private colSpanReconcileRaf: number | null = null;
   private readonly contentDebounceMs = 150;
   private pendingContentHtml: string | null = null;
+  /**
+   * The exact string last written by `setContentImmediate`, or `null` when the
+   * content was replaced by any other path (loading/error/locked states, clear,
+   * saved-content restore) and is therefore no longer a known string.
+   *
+   * Exists to keep the two content dirty-checks off `this.content.innerHTML`:
+   * reading that getter serializes the whole panel subtree to a string, and it
+   * was read twice per update — once to decide whether to schedule the write and
+   * again to decide whether to perform it. Panels re-render on every data tick,
+   * so that serialization was pure overhead on the render path. `null` compares
+   * unequal to any candidate, so an unknown state always falls through to a
+   * write — the safe direction.
+   */
+  private lastCommittedHtml: string | null = null;
   private contentDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingContentCallback: (() => void) | null = null;
   private retryCallback: (() => void) | null = null;
@@ -145,6 +162,10 @@ export class Panel {
   private retryAttempt = 0;
   private _fetching = false;
   private _locked = false;
+  // Last reason rendered by showGatedCta, so repeat gating passes with an
+  // unchanged verdict skip the DOM teardown/rebuild (#4771 re-runs gating on
+  // every subscription-row change, including fields irrelevant to gating).
+  private _lastGateReason: PanelGateReason | null = null;
   // Snapshot of this.content's children at the moment showLocked /
   // showGatedCta replaces them with a lock CTA. unlockPanel re-attaches
   // these nodes so subclasses whose UI is constructed once (typically in
@@ -613,7 +634,16 @@ export class Panel {
   }
 
 
-  protected setDataBadge(state: 'live' | 'cached' | 'unavailable', detail?: string): void {
+  /**
+   * `detailTitle` explains a `detail` the badge is too small to justify on its
+   * own (e.g. a partial source count). Cleared when absent so a stale
+   * explanation can't outlive the detail it described.
+   */
+  protected setDataBadge(
+    state: 'live' | 'cached' | 'unavailable',
+    detail?: string,
+    detailTitle?: string,
+  ): void {
     if (!this.statusBadgeEl) return;
     const labels = {
       live: t('common.live'),
@@ -622,6 +652,13 @@ export class Panel {
     } as const;
     this.statusBadgeEl.textContent = detail ? `${labels[state]} · ${detail}` : labels[state];
     this.statusBadgeEl.className = `panel-data-badge ${state}`;
+    if (detailTitle) {
+      this.statusBadgeEl.title = detailTitle;
+      this.statusBadgeEl.setAttribute('aria-label', detailTitle);
+    } else {
+      this.statusBadgeEl.removeAttribute('title');
+      this.statusBadgeEl.removeAttribute('aria-label');
+    }
     this.statusBadgeEl.style.display = 'inline-flex';
   }
 
@@ -842,7 +879,7 @@ export class Panel {
     if (this._locked) return;
     this.setErrorState(false);
     this.clearRetryCountdown();
-    replaceChildren(this.content,
+    this.replaceContent(
       h('div', { className: 'panel-loading' },
         h('div', { className: 'panel-loading-radar' },
           h('div', { className: 'panel-radar-sweep' }),
@@ -886,10 +923,23 @@ export class Panel {
         countdownEl.textContent = `${t('common.retrying')} (${remaining}s)`;
       }, 1000);
     }
-    replaceChildren(this.content, h('div', { className: 'panel-error-state' }, ...children));
+    this.replaceContent(h('div', { className: 'panel-error-state' }, ...children));
   }
 
   public resetRetryBackoff(): void {
+    this.retryAttempt = 0;
+  }
+
+  /**
+   * Drop the error badge, the pending auto-retry countdown, and the backoff.
+   * `setContentHtml` does this implicitly, but panels that paint their content
+   * with `replaceChildren` bypass it — without this, a showError() countdown
+   * scheduled before a successful load keeps ticking and fires one redundant
+   * refresh after the panel has already recovered.
+   */
+  public clearErrorState(): void {
+    this.setErrorState(false);
+    this.clearRetryCountdown();
     this.retryAttempt = 0;
   }
 
@@ -921,7 +971,9 @@ export class Panel {
 
     const ctaBtn = h('button', { type: 'button', className: 'panel-locked-cta' }, 'Upgrade to Pro');
     if (isDesktopRuntime()) {
-      ctaBtn.addEventListener('click', () => void invokeTauri<void>('open_url', { url: 'https://worldmonitor.app/pro' }).catch(() => window.open('https://worldmonitor.app/pro', '_blank', 'noopener,noreferrer')));
+      ctaBtn.addEventListener('click', () => {
+        void openExternalUrl('https://worldmonitor.app/pro');
+      });
     } else {
       ctaBtn.addEventListener('click', () => {
         import('@/services/checkout').then(m => import('@/config/products').then(p => m.startCheckout(p.DEFAULT_UPGRADE_PRODUCT))).catch(() => {
@@ -931,25 +983,72 @@ export class Panel {
     }
     lockedChildren.push(ctaBtn);
 
-    replaceChildren(this.content, h('div', { className: 'panel-locked-state' }, ...lockedChildren));
+    this.replaceContent(h('div', { className: 'panel-locked-state' }, ...lockedChildren));
+  }
+
+  /**
+   * CTA copy per gate reason, resolved lazily so each call translates only
+   * the two strings it renders. #4771 billing-aware states: the user has
+   * (or had) paid evidence, so the CTA must never read as a fresh upsell
+   * (duplicate-checkout risk). Their keys live under components.billingState
+   * (NOT premium.*): premium. is a first-paint shell namespace and these
+   * CTAs only render after the Convex entitlement round-trip, well past
+   * full-locale load.
+   */
+  private static gatedCtaEntry(
+    reason: PanelGateReason,
+  ): { icon: string; desc: string; cta: string } | null {
+    switch (reason) {
+      case PanelGateReason.ANONYMOUS:
+        return {
+          icon: lockSvg,
+          desc: t('premium.signInToUnlock'),
+          cta: t('premium.signIn'),
+        };
+      case PanelGateReason.FREE_TIER:
+        return {
+          icon: upgradeSvg,
+          desc: t('premium.upgradeDesc'),
+          cta: t('premium.upgradeToPro'),
+        };
+      case PanelGateReason.PAYMENT_ON_HOLD:
+        return {
+          icon: lockSvg,
+          desc: t('components.billingState.onHoldDesc'),
+          cta: t('components.billingState.updatePayment'),
+        };
+      case PanelGateReason.RENEWAL_PENDING:
+        return {
+          icon: lockSvg,
+          desc: t('components.billingState.renewalPendingDesc'),
+          cta: t('components.billingState.refreshStatus'),
+        };
+      case PanelGateReason.RENEWAL_FAILED:
+        return {
+          icon: lockSvg,
+          desc: t('components.billingState.renewalFailedDesc'),
+          cta: t('components.billingState.manageBilling'),
+        };
+      case PanelGateReason.LAPSED:
+        return {
+          icon: upgradeSvg,
+          desc: t('components.billingState.lapsedDesc'),
+          cta: t('components.billingState.resubscribe'),
+        };
+      default:
+        return null;
+    }
   }
 
   public showGatedCta(reason: PanelGateReason, onAction: () => void): void {
-    const config: Record<string, { icon: string; desc: string; cta: string }> = {
-      [PanelGateReason.ANONYMOUS]: {
-        icon: lockSvg,
-        desc: t('premium.signInToUnlock'),
-        cta: t('premium.signIn'),
-      },
-      [PanelGateReason.FREE_TIER]: {
-        icon: upgradeSvg,
-        desc: t('premium.upgradeDesc'),
-        cta: t('premium.upgradeToPro'),
-      },
-    };
-
-    const entry = config[reason];
+    const entry = Panel.gatedCtaEntry(reason);
     if (!entry) return; // PanelGateReason.NONE should never reach here
+
+    // Same verdict already rendered — skip the DOM teardown/rebuild.
+    // Gating re-runs on every subscription-row change (#4771), including
+    // Convex updates to fields irrelevant to the gate verdict.
+    if (this._locked && this._lastGateReason === reason) return;
+    this._lastGateReason = reason;
 
     // Bail-out done — now commit to the locked state. Doing this AFTER the
     // guard avoids a half-locked DOM (header siblings hidden, panel-is-locked
@@ -973,12 +1072,13 @@ export class Panel {
     const ctaBtn = h('button', { type: 'button', className: 'panel-locked-cta' }, entry.cta);
     ctaBtn.addEventListener('click', onAction);
 
-    replaceChildren(this.content, h('div', { className: 'panel-locked-state' }, iconEl, descEl, ctaBtn));
+    this.replaceContent(h('div', { className: 'panel-locked-state' }, iconEl, descEl, ctaBtn));
   }
 
   public unlockPanel(): void {
     if (!this._locked) return;
     this._locked = false;
+    this._lastGateReason = null;
     this.element.classList.remove('panel-is-locked');
     // Re-show hidden elements
     for (let child = this.header.nextElementSibling; child && child !== this.content; child = child.nextElementSibling) {
@@ -991,10 +1091,10 @@ export class Panel {
     // ChatAnalystPanel, …) that would otherwise end up with an empty body.
     // Fall back to the legacy empty-content behaviour if nothing was saved.
     if (this._savedContent !== null) {
-      replaceChildren(this.content, ...this._savedContent);
+      this.replaceContent(...this._savedContent);
       this._savedContent = null;
     } else {
-      replaceChildren(this.content);
+      this.replaceContent();
     }
   }
 
@@ -1012,7 +1112,7 @@ export class Panel {
       clearTimeout(this.contentDebounceTimer);
       this.contentDebounceTimer = null;
     }
-    if (!this._locked) replaceChildren(this.content);
+    if (!this._locked) this.replaceContent();
   }
 
   // Capture this.content's current child nodes so unlockPanel can put them
@@ -1054,7 +1154,7 @@ export class Panel {
       }, 1000);
     }
 
-    replaceChildren(this.content,
+    this.replaceContent(
       h('div', { className: 'panel-error-state' }, ...children),
     );
   }
@@ -1091,7 +1191,7 @@ export class Panel {
         }, t('components.panel.openSettings')),
       );
     }
-    replaceChildren(this.content, msgEl);
+    this.replaceContent(msgEl);
   }
 
   public setCount(count: number): void {
@@ -1115,6 +1215,18 @@ export class Panel {
     }
   }
 
+  /**
+   * The single non-`setContentImmediate` way to replace panel content.
+   *
+   * Every such write invalidates `lastCommittedHtml`, so routing them through
+   * here makes that invariant structural instead of something each new call site
+   * has to remember. Do not call `replaceChildren(this.content, …)` directly.
+   */
+  private replaceContent(...children: DomChild[]): void {
+    replaceChildren(this.content, ...children);
+    this.lastCommittedHtml = null;
+  }
+
   public setSafeContent(html: SafeHtml, afterUpdate?: () => void): void {
     this.setContentHtml(safeHtmlToString(html), afterUpdate);
   }
@@ -1128,7 +1240,21 @@ export class Panel {
       if (afterUpdate) this.pendingContentCallback = afterUpdate;
       return;
     }
-    if (this.content.innerHTML === html) {
+    if (this.lastCommittedHtml === html) {
+      // The DOM already shows `html`, but a DIFFERENT write may still be queued
+      // behind the debounce — and returning without cancelling it lets that
+      // stale write land afterwards, permanently. World Clock reproduces it:
+      // open settings, then close within the debounce window, and the settings
+      // markup commits after the clock has been asked to come back (which also
+      // strands the cached row handles, so the clock stops ticking).
+      if (this.pendingContentHtml !== null) {
+        this.pendingContentHtml = null;
+        this.pendingContentCallback = null;
+        if (this.contentDebounceTimer) {
+          clearTimeout(this.contentDebounceTimer);
+          this.contentDebounceTimer = null;
+        }
+      }
       afterUpdate?.();
       return;
     }
@@ -1155,8 +1281,9 @@ export class Panel {
     this.pendingContentHtml = null;
     const afterUpdate = this.pendingContentCallback;
     this.pendingContentCallback = null;
-    if (this.content.innerHTML !== html) {
+    if (this.lastCommittedHtml !== html) {
       setTrustedHtml(this.content, trustedHtml(html, 'legacy direct innerHTML migration'));
+      this.lastCommittedHtml = html;
     }
     afterUpdate?.();
   }

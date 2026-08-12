@@ -1,0 +1,76 @@
+{
+  "$comment": [
+    "Accepted-problem baseline for scripts/check-seed-freshness.mjs.",
+    "",
+    "The acceptance gate fails on any compact-health problem that is NOT listed here.",
+    "An entry means: this degradation is known, has an owner record, and must not page.",
+    "It does NOT mean the problem is acceptable forever -- expiresAt forces a re-review,",
+    "and the gate fails outright once that date passes.",
+    "",
+    "A temporary rollout entry may add an entry-level `expiresAt` bounded to the first",
+    "scheduled cron window. At or after that instant, its live problem blocks even when",
+    "the root expiresAt is later. A health-probe cutover requires either a completed",
+    "Railway-side pre-seed or this owner-bound, expiring acknowledgement.",
+    "",
+    "Entries are matched on name:status exactly. A source that recovers is reported as",
+    "'recovered' on the next run (prune it); a source that fails with a DIFFERENT status",
+    "than the one baselined is treated as new and blocks, which is the point.",
+    "",
+    "Every entry carries a real tracking issue, never the PR that introduced the entry:",
+    "a merged PR closes, and a suppression pointing at a closed PR has no owner.",
+    "",
+    "Softening fault statuses is the marketImplications blind spot the ON_DEMAND_KEYS policy",
+    "block in api/health.js exists to prevent."
+  ],
+  "expiresAt": "2026-08-27",
+  "acknowledged": [
+    {
+      "name": "consumerPricesCoverage",
+      "status": "COVERAGE_PARTIAL",
+      "issue": 6355,
+      "reason": "AE aggregate: records match the enabled retailer roster (4) and coverage age stays inside maxStaleMin. summarizeMarketCoverage grades any retailer dirty scrape run as market-wide partial, which fires nearly every day, so the monitor has been red on every scheduled run since #5970 exposed these keys on 2026-07-30. Producer-side tolerance or a warn-level mapping is tracked in the issue."
+    },
+    {
+      "name": "consumerPricesCoverageAU",
+      "status": "COVERAGE_PARTIAL",
+      "issue": 6356,
+      "reason": "AU: records match the enabled retailer roster (2), age fresh. Same daily dirty-scrape-run partial grading as consumerPricesCoverage; parent evidence in #6355."
+    },
+    {
+      "name": "consumerPricesCoverageBR",
+      "status": "COVERAGE_PARTIAL",
+      "issue": 6357,
+      "reason": "BR: records match the enabled retailer roster (2), age fresh. Same daily dirty-scrape-run partial grading as consumerPricesCoverage; parent evidence in #6355."
+    },
+    {
+      "name": "consumerPricesCoverageGB",
+      "status": "COVERAGE_PARTIAL",
+      "issue": 6358,
+      "reason": "GB: records match the enabled retailer roster (2), age fresh. Same daily dirty-scrape-run partial grading as consumerPricesCoverage; parent evidence in #6355."
+    },
+    {
+      "name": "consumerPricesCoverageIN",
+      "status": "COVERAGE_PARTIAL",
+      "issue": 6359,
+      "reason": "IN: records match the enabled retailer roster (2), age fresh. Same daily dirty-scrape-run partial grading as consumerPricesCoverage; parent evidence in #6355."
+    },
+    {
+      "name": "consumerPricesCoverageSA",
+      "status": "COVERAGE_PARTIAL",
+      "issue": 6360,
+      "reason": "SA: records match the enabled retailer roster (3), age fresh. Same daily dirty-scrape-run partial grading as consumerPricesCoverage; parent evidence in #6355."
+    },
+    {
+      "name": "consumerPricesCoverageSG",
+      "status": "COVERAGE_PARTIAL",
+      "issue": 6361,
+      "reason": "SG: records match the enabled retailer roster (2), age fresh. Same daily dirty-scrape-run partial grading as consumerPricesCoverage; parent evidence in #6355."
+    },
+    {
+      "name": "consumerPricesCoverageUS",
+      "status": "COVERAGE_PARTIAL",
+      "issue": 6362,
+      "reason": "US: records match the enabled retailer roster (2), age fresh. Same daily dirty-scrape-run partial grading as consumerPricesCoverage; parent evidence in #6355."
+    }
+  ]
+}

@@ -188,21 +188,47 @@ export default async function handler(req, ctx) {
         response = await fetchDirect();
       } catch (directError) {
         if (directError instanceof RssProxyPolicyError) throw directError;
-        response = await fetchViaRailway(feedUrl, timeout);
+        // A throwing relay leg here must not replace directError — a null or
+        // non-ok relay response already falls through to it below, so a thrown
+        // relay error should too, rather than becoming the reported failure.
+        let relayResponse = null;
+        try {
+          relayResponse = await fetchViaRailway(feedUrl, timeout);
+        } catch (relayError) {
+          console.error('RSS proxy relay fallback error:', feedUrl, relayError instanceof Error ? relayError.message : String(relayError));
+        }
+        response = relayResponse;
         usedRelay = !!response;
         if (!response) throw directError;
       }
 
       if (!response.ok && !usedRelay) {
-        const relayResponse = await fetchViaRailway(feedUrl, timeout);
+        // Same reasoning: a throwing relay retry must not discard the original
+        // non-ok direct response — fall through to it exactly as a null or
+        // non-ok relay response already would.
+        let relayResponse = null;
+        try {
+          relayResponse = await fetchViaRailway(feedUrl, timeout);
+        } catch (relayError) {
+          console.error('RSS proxy relay retry error:', feedUrl, relayError instanceof Error ? relayError.message : String(relayError));
+          captureSilentError(relayError, { tags: { route: 'api/rss-proxy', step: 'relay-retry', feed: feedUrl }, ctx });
+        }
         if (relayResponse?.ok) {
           response = relayResponse;
+          usedRelay = true;
         }
       }
     }
 
     const data = await response.text();
     const isSuccess = response.status >= 200 && response.status < 300;
+    const relayCacheState = usedRelay ? response.headers.get('x-cache') : null;
+    const relayStaleMarker = usedRelay ? response.headers.get('x-relay-stale') : null;
+    // New relays identify stale fallback explicitly. Keep the label fallback
+    // while Railway and Vercel revisions roll out independently.
+    const legacyStaleCacheLabel = relayCacheState === 'STALE' || relayCacheState?.endsWith('-STALE');
+    const isStaleRelay = relayStaleMarker === '1' || legacyStaleCacheLabel;
+    const isCacheableSuccess = isSuccess && !isStaleRelay;
     // Relay-only feeds are slow-updating institutional sources — cache longer
     const cdnTtl = isRelayOnly ? 3600 : 900;
     const swr = isRelayOnly ? 7200 : 1800;
@@ -212,10 +238,13 @@ export default async function handler(req, ctx) {
       status: response.status,
       headers: {
         'Content-Type': response.headers.get('content-type') || 'application/xml',
-        'Cache-Control': isSuccess
+        'Cache-Control': isCacheableSuccess
           ? `public, max-age=${browserTtl}, s-maxage=${cdnTtl}, stale-while-revalidate=${swr}, stale-if-error=${sie}`
-          : 'public, max-age=15, s-maxage=60, stale-while-revalidate=120',
-        ...(isSuccess && { 'CDN-Cache-Control': `public, s-maxage=${cdnTtl}, stale-while-revalidate=${swr}, stale-if-error=${sie}` }),
+          : isStaleRelay ? 'no-store' : 'public, max-age=15, s-maxage=60, stale-while-revalidate=120',
+        ...(isCacheableSuccess && { 'CDN-Cache-Control': `public, s-maxage=${cdnTtl}, stale-while-revalidate=${swr}, stale-if-error=${sie}` }),
+        ...(isStaleRelay && { 'CDN-Cache-Control': 'no-store' }),
+        ...(relayCacheState && { 'X-Cache': relayCacheState }),
+        ...(relayStaleMarker && { 'X-Relay-Stale': relayStaleMarker }),
         ...corsHeaders,
       },
     });

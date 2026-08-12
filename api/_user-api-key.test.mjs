@@ -14,6 +14,15 @@ async function sha256HexForTest(input) {
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+// `userKeyInFlight` is module-scope state keyed by the SHA-256 of the API key.
+// Handing every coalescing/cache test its own canonical key makes cross-test
+// contamination structurally impossible rather than cleanup-dependent.
+let userKeySeq = 0;
+function uniqueUserKey() {
+  userKeySeq += 1;
+  return `wm_${userKeySeq.toString(16).padStart(40, '0')}`;
+}
+
 function snapshotEnv(names) {
   const values = new Map();
   for (const name of names) values.set(name, process.env[name]);
@@ -157,6 +166,80 @@ test('valid user key validation posts only a SHA-256 hash to Convex', async () =
   });
 });
 
+test('fresh Company Monitoring key is denied generically but cached with its exact binding', async () => {
+  const scopedKey = uniqueUserKey();
+  const binding = {
+    id: 'key_company_monitoring',
+    userId: 'user_company_monitoring',
+    name: 'monitoring',
+    scopes: ['company_monitoring:read', 'company_monitoring:write'],
+    companyMonitoringAccountId: 'cm_account_01K1A2B3C4D5E6F7G8H9J0K1M2',
+  };
+  await withMockedConvex(async (calls) => {
+    const result = await validateBootstrapUserApiKey(scopedKey);
+    assert.deepEqual(result, {
+      ok: false,
+      status: 401,
+      error: 'Invalid API key',
+      reason: 'invalid',
+    });
+    const cacheWrite = calls.find((call) => call.url.startsWith('https://upstash.test') && call.body.includes('"SET"'));
+    assert.ok(cacheWrite);
+    const setCommand = JSON.parse(cacheWrite.body).find((cmd) => cmd[0] === 'SET');
+    assert.deepEqual(JSON.parse(setCommand[2]), {
+      userId: binding.userId,
+      keyId: binding.id,
+      name: binding.name,
+      scopes: binding.scopes,
+      companyMonitoringAccountId: binding.companyMonitoringAccountId,
+    });
+  }, { validateResponse: binding });
+});
+
+test('warm cached Company Monitoring principal is denied without Convex or negative-cache writes', async () => {
+  const scopedKey = uniqueUserKey();
+  const keyHash = await sha256HexForTest(scopedKey);
+  const cachedPrincipal = {
+    userId: 'user_company_monitoring',
+    keyId: 'key_company_monitoring',
+    name: 'monitoring',
+    scopes: ['company_monitoring:read', 'company_monitoring:write'],
+    companyMonitoringAccountId: 'cm_account_01K1A2B3C4D5E6F7G8H9J0K1M2',
+  };
+
+  await withMockedConvex(async (calls) => {
+    const result = await validateBootstrapUserApiKey(scopedKey);
+
+    assert.deepEqual(result, {
+      ok: false,
+      status: 401,
+      error: 'Invalid API key',
+      reason: 'invalid',
+    });
+    assert.equal(calls.some((call) => call.url.endsWith('/api/internal-validate-api-key')), false);
+    assert.equal(
+      calls.some((call) => call.url.startsWith('https://upstash.test') && call.body.includes('"SET"')),
+      false,
+    );
+  }, { redisCache: { [`user-api-key:${keyHash}`]: cachedPrincipal } });
+});
+
+test('ownerless Company Monitoring scope payload is not cached or authenticated', async () => {
+  const scopedKey = uniqueUserKey();
+  await withMockedConvex(async (calls) => {
+    const result = await validateBootstrapUserApiKey(scopedKey);
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 401);
+    assert.equal(calls.some((call) => call.body.includes('"SET"') && call.body.includes('user-api-key:')), false);
+  }, {
+    validateResponse: {
+      id: 'ownerless',
+      userId: 'user_company_monitoring',
+      scopes: ['company_monitoring:read'],
+    },
+  });
+});
+
 test('valid user key validation uses cached hash result without Convex', async () => {
   const keyHash = await sha256HexForTest(USER_KEY);
   await withMockedConvex(async (calls) => {
@@ -168,7 +251,7 @@ test('valid user key validation uses cached hash result without Convex', async (
   }, { redisCache: { [`user-api-key:${keyHash}`]: { userId: 'cached_owner' } } });
 });
 
-test('preview deploy user-key cache matches server Redis prefix for invalidation parity', async () => {
+test('preview deploy user-key cache matches the server Redis namespace', async () => {
   const keyHash = await sha256HexForTest(USER_KEY);
   const expectedCacheKey = `preview:abcdef12:user-api-key:${keyHash}`;
 
@@ -275,6 +358,192 @@ test('revoked key served from bootstrap negative sentinel cache returns 401 with
   }, { redisCache: { [`bootstrap-user-api-key-invalid:${keyHash}`]: '__WM_NEG__' } });
 });
 
+// --- Cached user-key entry must be shape-checked before it authenticates ---
+// The cache is shared with the gateway (server/_shared/user-api-key.ts) and is
+// reachable by anything that can write `user-api-key:<hash>`. A malformed or
+// truncated entry must never short-circuit into an authenticated identity; control
+// has to fall through to the negative-cache / Convex path instead.
+const UNTRUSTWORTHY_CACHED_USER_KEY_ENTRIES = [
+  // Kills the `userId.length > 0` conjunct: an empty userId is a valid string.
+  ['an empty userId', { userId: '' }],
+  // Kills the `typeof userId === "string"` conjunct: an array is truthy, is an
+  // object, and has a length > 0, so only the typeof check rejects it.
+  ['an array userId', { userId: ['user_evil'] }],
+  ['a numeric userId', { userId: 123 }],
+  ['a null userId', { userId: null }],
+  // Kills the `cached.value &&` conjunct: typeof null === 'object', so the
+  // truthiness check is the only thing standing between us and a TypeError.
+  ['a null entry', null],
+  ['a bare string entry', 'user_evil'],
+  ['a bare array entry', []],
+  ['a bare number entry', 42],
+];
+
+for (const [label, cachedValue] of UNTRUSTWORTHY_CACHED_USER_KEY_ENTRIES) {
+  test(`cached user-key entry with ${label} is not trusted and re-validates against Convex`, async () => {
+    const key = uniqueUserKey();
+    const keyHash = await sha256HexForTest(key);
+    await withMockedConvex(async (calls) => {
+      const result = await validateBootstrapUserApiKey(key);
+
+      // "Not trusted" is not the same as 401: the entry is ignored and the
+      // request proceeds, so the authoritative Convex answer is what wins.
+      assert.deepEqual(result, { ok: true, userId: 'user_api_owner' });
+      assert.equal(calls.some((call) => call.url.endsWith('/api/internal-validate-api-key')), true);
+    }, { redisCache: { [`user-api-key:${keyHash}`]: cachedValue } });
+  });
+}
+
+test('control: a well-formed cached user-key entry does authenticate without Convex', async () => {
+  const key = uniqueUserKey();
+  const keyHash = await sha256HexForTest(key);
+  await withMockedConvex(async (calls) => {
+    const result = await validateBootstrapUserApiKey(key);
+
+    assert.deepEqual(result, { ok: true, userId: 'user_abc' });
+    assert.equal(calls.some((call) => call.url.endsWith('/api/internal-validate-api-key')), false);
+  }, { redisCache: { [`user-api-key:${keyHash}`]: { userId: 'user_abc' } } });
+});
+
+// --- Request coalescing collapses a burst onto one Convex round-trip ---
+// Without it, N concurrent requests carrying the same key amplify 1:1 onto
+// Convex, turning one leaked key into a validation-service DoS lever.
+async function withSlowConvex(fn, options = {}) {
+  const delayMs = options.delayMs ?? 25;
+  await withMockedConvex(async (calls) => {
+    globalThis.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const body = typeof init?.body === 'string' ? init.body : '';
+      calls.push({ url, init, body });
+
+      if (url.startsWith('https://upstash.test')) {
+        const commands = JSON.parse(body || '[]');
+        const result = commands[0]?.[0] === 'SET' ? 'OK' : null;
+        return new Response(JSON.stringify([{ result }]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Slow enough that every concurrent caller is still in flight when the
+      // next one arrives — otherwise the test would pass even without coalescing.
+      await new Promise((resolve) => { setTimeout(resolve, delayMs); });
+      return new Response(JSON.stringify({ id: 'key_1', userId: 'user_api_owner', name: 'pipeline' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+
+    return fn(calls, (c) => c.url.endsWith('/api/internal-validate-api-key'));
+  });
+}
+
+test('concurrent validations of one user key coalesce into a single Convex round-trip', async () => {
+  const key = uniqueUserKey();
+  await withSlowConvex(async (calls, isConvexCall) => {
+    const results = await Promise.all(Array.from({ length: 5 }, () => validateBootstrapUserApiKey(key)));
+
+    for (const result of results) {
+      assert.deepEqual(result, { ok: true, userId: 'user_api_owner' });
+    }
+    const convexCalls = calls.filter(isConvexCall);
+    assert.equal(convexCalls.length, 1, `5 concurrent callers must amplify to 1 Convex call, got ${convexCalls.length}`);
+  });
+});
+
+test('negative control: concurrent validations of distinct keys are not coalesced', async () => {
+  const keys = Array.from({ length: 5 }, () => uniqueUserKey());
+  await withSlowConvex(async (calls, isConvexCall) => {
+    const results = await Promise.all(keys.map((key) => validateBootstrapUserApiKey(key)));
+
+    for (const result of results) {
+      assert.deepEqual(result, { ok: true, userId: 'user_api_owner' });
+    }
+    // Proves the previous test measures coalescing on the key hash rather than
+    // some blanket cache or a stubbed-out backend.
+    assert.equal(calls.filter(isConvexCall).length, 5);
+  });
+});
+
+test('the in-flight coalescing map releases its entry once validation settles', async () => {
+  const key = uniqueUserKey();
+  await withSlowConvex(async (calls, isConvexCall) => {
+    await validateBootstrapUserApiKey(key);
+    assert.equal(calls.filter(isConvexCall).length, 1);
+
+    // A settled promise left behind in the map would serve this second call
+    // forever (a stale-auth bug and an unbounded module-scope memory leak).
+    await validateBootstrapUserApiKey(key);
+    assert.equal(calls.filter(isConvexCall).length, 2, 'in-flight entry was not released after the first call settled');
+  });
+});
+
+// --- The Convex auth fetch must be bounded by a timeout ---
+test('Convex key-validation fetch is bounded by an AbortSignal timeout', async () => {
+  const key = uniqueUserKey();
+  const realAbortTimeout = AbortSignal.timeout;
+  const delayBySignal = new WeakMap();
+
+  // Record the delay production asked for, but arm the real timer far shorter
+  // so the bound is proven behaviourally without a multi-second wall-clock wait.
+  AbortSignal.timeout = function timeout(ms) {
+    const signal = realAbortTimeout.call(AbortSignal, 20);
+    delayBySignal.set(signal, ms);
+    return signal;
+  };
+  // AbortSignal.timeout unrefs its timer, so nothing here would keep the event
+  // loop alive while we await a promise that only settles on abort.
+  const keepAlive = setInterval(() => {}, 5);
+
+  let convexSignal;
+  let abortedWhenHandedToFetch;
+  try {
+    await withMockedConvex(async (calls) => {
+      globalThis.fetch = async (input, init) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        const body = typeof init?.body === 'string' ? init.body : '';
+        calls.push({ url, init, body });
+
+        if (url.startsWith('https://upstash.test')) {
+          return new Response(JSON.stringify([{ result: null }]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        convexSignal = init?.signal;
+        if (!(convexSignal instanceof AbortSignal)) {
+          // No signal => an unbounded auth fetch. Answer immediately rather than
+          // hanging the suite forever; the assertions below report the failure.
+          return new Response(JSON.stringify({ id: 'key_1', userId: 'user_api_owner', name: 'pipeline' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        abortedWhenHandedToFetch = convexSignal.aborted;
+        // Never settles on its own: only the timeout can end this request.
+        return await new Promise((_resolve, reject) => {
+          convexSignal.addEventListener('abort', () => reject(convexSignal.reason), { once: true });
+        });
+      };
+
+      const result = await validateBootstrapUserApiKey(key);
+
+      assert.ok(convexSignal instanceof AbortSignal, 'Convex validation fetch must be given an AbortSignal');
+      assert.equal(delayBySignal.get(convexSignal), 3_000, 'must use VALIDATION_TIMEOUT_MS');
+      assert.equal(abortedWhenHandedToFetch, false, 'signal must not arrive pre-aborted');
+      assert.equal(convexSignal.aborted, true, 'signal must abort on its own timer, unprompted');
+      // A hung validator is an outage, not a credential verdict.
+      assert.equal(result.ok, false);
+      assert.equal(result.status, 503);
+      assert.equal(result.unavailable, true);
+    });
+  } finally {
+    AbortSignal.timeout = realAbortTimeout;
+    clearInterval(keepAlive);
+  }
+});
+
 test('current apiAccess entitlement is required', async () => {
   await withMockedConvex(async (calls) => {
     const result = await validateBootstrapUserApiAccess('user_api_owner');
@@ -303,6 +572,31 @@ test('current apiAccess entitlement can be served from Redis cache without Conve
   });
 });
 
+for (const billingStatus of [
+  'subscription_lapsed',
+  'renewal_verification_pending',
+  'renewal_verification_failed',
+]) {
+  test(`current cached apiAccess remains usable with ${billingStatus}`, async () => {
+    await withMockedConvex(async (calls) => {
+      const result = await validateBootstrapUserApiAccess('user_api_owner');
+
+      assert.equal(result.ok, true);
+      assert.equal(calls.some((call) => call.url.endsWith('/api/internal-entitlements')), false);
+    }, {
+      redisCache: {
+        'entitlements:test:user_api_owner': {
+          planKey: 'api_starter',
+          validUntil: Date.now() + 86_400_000,
+          features: { apiAccess: true },
+          billingStatus,
+          retryAfterSeconds: 19,
+        },
+      },
+    });
+  });
+}
+
 async function withMockedEntitlement(entitlement, fn) {
   await withMockedConvex(async (calls) => {
     globalThis.fetch = async (input, init) => {
@@ -316,6 +610,26 @@ async function withMockedEntitlement(entitlement, fn) {
     };
 
     return fn(calls);
+  });
+}
+
+for (const billingStatus of [
+  'subscription_lapsed',
+  'renewal_verification_pending',
+  'renewal_verification_failed',
+]) {
+  test(`current fresh apiAccess remains usable with ${billingStatus}`, async () => {
+    await withMockedEntitlement({
+      planKey: 'api_starter',
+      validUntil: Date.now() + 86_400_000,
+      features: { apiAccess: true },
+      billingStatus,
+      retryAfterSeconds: 19,
+    }, async () => {
+      const result = await validateBootstrapUserApiAccess('user_api_owner');
+
+      assert.equal(result.ok, true);
+    });
   });
 }
 
@@ -425,6 +739,30 @@ test('recent not-applicable freshness marker is served from Redis without anothe
   });
 });
 
+test('not-applicable freshness marker past the bounded window falls through to Convex', async () => {
+  // #5600: mirrors the gateway bound — the pre-purchase no-history answer must
+  // stop being served-sticky within a minute so a fresh subscriber does not eat
+  // a 15-minute wrongful denial while the Dodo webhook lands.
+  await withMockedConvex(async (calls) => {
+    const result = await validateBootstrapUserApiAccess('user_api_owner');
+
+    assert.equal(result.ok, true);
+    assert.equal(calls.some((call) => call.url.endsWith('/api/internal-entitlements')), true);
+  }, {
+    redisCache: {
+      'entitlements:test:user_api_owner': {
+        planKey: 'free',
+        validUntil: 0,
+        features: { apiAccess: false },
+        renewalVerificationFreshness: {
+          status: 'not_applicable',
+          checkedAt: Date.now() - 61_000,
+        },
+      },
+    },
+  });
+});
+
 test('expired not-applicable freshness marker falls through to Convex', async () => {
   await withMockedConvex(async (calls) => {
     const result = await validateBootstrapUserApiAccess('user_api_owner');
@@ -446,7 +784,7 @@ test('expired not-applicable freshness marker falls through to Convex', async ()
   });
 });
 
-test('not-applicable freshness marker is cached for at most 900 seconds', async () => {
+test('not-applicable freshness marker is cached for at most 60 seconds', async () => {
   await withMockedConvex(async (calls) => {
     const result = await validateBootstrapUserApiAccess('user_api_owner');
 
@@ -459,8 +797,11 @@ test('not-applicable freshness marker is cached for at most 900 seconds', async 
     });
     assert.ok(cacheWrite);
     const setCommand = JSON.parse(cacheWrite.body).find((entry) => entry[0] === 'SET');
+    // Exact value, not a window — see the sibling assertion in
+    // server/__tests__/entitlement-check.test.ts for why a range let a drift to
+    // anything in [31, 59] through.
     const ttl = Number(setCommand[4]);
-    assert.ok(ttl > 0 && ttl <= 900, `unexpected marker TTL: ${ttl}`);
+    assert.equal(ttl, 60, `unexpected marker TTL: ${ttl}`);
   }, {
     entitlementResponse: {
       planKey: 'free',

@@ -6,6 +6,7 @@ import {
   USER_PREFS_WRITE_RATE_LIMIT,
   USER_PREFS_WRITE_RATE_WINDOW_MS,
 } from "./constants";
+import { ROLLING_DEPLOYMENT_PREFERENCE_KEYS } from "../shared/cloud-preferences-contract";
 
 export const getPreferencesByUserId = internalQuery({
   args: { userId: v.string(), variant: v.string() },
@@ -58,6 +59,33 @@ type UserPrefsWriteRateLimitResult =
 
 const RATE_LIMIT_COUNTER_SCAN_LIMIT = USER_PREFS_WRITE_RATE_LIMIT + 1;
 const RATE_LIMIT_STALE_CLEANUP_LIMIT = 5;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Older clients replace the complete preference blob without fields added by
+ * a newer deployment. Preserve only these omission-safe fields from an
+ * existing row; explicit reset values such as "[]" and "1" remain authoritative.
+ */
+export function preserveOmittedRollingDeploymentFields(
+  existingData: unknown,
+  incomingData: unknown,
+): unknown {
+  if (!isRecord(existingData) || !isRecord(incomingData)) return incomingData;
+
+  let merged: Record<string, unknown> | null = null;
+  for (const key of ROLLING_DEPLOYMENT_PREFERENCE_KEYS) {
+    if (
+      !Object.prototype.hasOwnProperty.call(incomingData, key)
+      && typeof existingData[key] === "string"
+    ) {
+      merged ??= { ...incomingData };
+      merged[key] = existingData[key];
+    }
+  }
+  return merged ?? incomingData;
+}
 
 async function checkUserPrefsWriteRateLimit(
   ctx: MutationCtx,
@@ -143,7 +171,15 @@ export const setPreferences = mutation({
     const rateLimit = await checkUserPrefsWriteRateLimit(ctx, userId);
     if (!rateLimit.ok) return rateLimit;
 
-    const blobSize = JSON.stringify(args.data).length;
+    const existing = await ctx.db
+      .query("userPreferences")
+      .withIndex("by_user_variant", (q) =>
+        q.eq("userId", userId).eq("variant", args.variant),
+      )
+      .unique();
+
+    const data = preserveOmittedRollingDeploymentFields(existing?.data, args.data);
+    const blobSize = JSON.stringify(data).length;
     if (blobSize > MAX_PREFS_BLOB_SIZE) {
       return {
         ok: false,
@@ -152,13 +188,6 @@ export const setPreferences = mutation({
         max: MAX_PREFS_BLOB_SIZE,
       };
     }
-
-    const existing = await ctx.db
-      .query("userPreferences")
-      .withIndex("by_user_variant", (q) =>
-        q.eq("userId", userId).eq("variant", args.variant),
-      )
-      .unique();
 
     if (existing && existing.syncVersion !== args.expectedSyncVersion) {
       // CAS-guard "no-op". Returns rather than throws — see SetPreferencesResult
@@ -176,7 +205,7 @@ export const setPreferences = mutation({
 
     if (existing) {
       await ctx.db.patch(existing._id, {
-        data: args.data,
+        data,
         schemaVersion,
         updatedAt: Date.now(),
         syncVersion: nextSyncVersion,
@@ -185,7 +214,7 @@ export const setPreferences = mutation({
       await ctx.db.insert("userPreferences", {
         userId,
         variant: args.variant,
-        data: args.data,
+        data,
         schemaVersion,
         updatedAt: Date.now(),
         syncVersion: nextSyncVersion,

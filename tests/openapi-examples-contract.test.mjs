@@ -5,6 +5,8 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { load as loadYaml } from 'js-yaml';
+
+import { loadUnifiedOpenApiSpec } from './_lib/openapi-spec-cache.mjs';
 import { normalizeKey } from '../scripts/lib/openapi-codegen.mjs';
 
 // Guards the generated OpenAPI examples injected by
@@ -17,6 +19,20 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const apiDir = resolve(root, 'docs/api');
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch', 'options', 'head']);
 const JSON_MEDIA = 'application/json';
+const GIVING_PUBLISHED_ESTIMATE_CLAIMS = JSON.parse(
+  readFileSync(resolve(root, 'scripts/shared/giving-published-estimate-claims.json'), 'utf8'),
+);
+const GIVING_CATEGORY_SENTINELS = [
+  'Medical & Health',
+  'Disaster Relief',
+  'Education',
+  'Community',
+  'Memorials',
+  'Animals & Pets',
+  'Environment',
+  'Hunger & Food',
+  'Other',
+];
 
 const serviceSpecs = readdirSync(apiDir)
   .filter((f) => /Service\.openapi\.json$/.test(f))
@@ -364,6 +380,20 @@ function collectParamExamples(spec, label, operationId, paramName) {
   return found;
 }
 
+// Like collectParamExamples but tolerates a missing parameter (returns []),
+// for assertions that operate across several specs where one may not define it.
+function collectionForOperation(spec, label, operationId, paramName) {
+  const found = [];
+  for (const { path, method, op } of operationEntries(spec)) {
+    if (op.operationId !== operationId) continue;
+    const param = (op.parameters ?? []).find((p) => p?.name === paramName);
+    if (!param) continue;
+    const values = Array.isArray(param.example) ? param.example : [param.example];
+    for (const value of values) found.push({ value, where: `${label} ${method.toUpperCase()} ${path} param ${paramName}` });
+  }
+  return found;
+}
+
 function assertParamExampleSet(specs, operationId, paramName, acceptedValues) {
   for (const [label, spec] of specs) {
     for (const { value, where } of collectParamExamples(spec, label, operationId, paramName)) {
@@ -499,6 +529,65 @@ function assertScenarioStatusPollExample(spec, label) {
   }
 }
 
+function assertGivingPublishedEstimateExample(spec, label) {
+  const example = spec.paths?.['/api/giving/v1/get-giving-summary']?.get
+    ?.responses?.['200']?.content?.[JSON_MEDIA]?.example;
+  assert.ok(example, `${label}: Giving response example missing`);
+  assert.equal(example.dataAvailable, true, `${label}: populated Giving example must be available`);
+  assert.ok(example.fetchedAt > 0, `${label}: populated Giving example needs a cache-generation time`);
+  assert.equal(example.summary?.dataMode, 'partial_estimate', `${label}: initial Giving mode`);
+  assert.equal(example.summary?.activityIndex, 0, `${label}: activity index is a compatibility sentinel`);
+  assert.equal(example.summary?.activityIndexAvailable, false, `${label}: activity index must be unavailable`);
+  assert.equal(example.summary?.trend, 'stable', `${label}: trend string is a compatibility sentinel`);
+  assert.equal(example.summary?.trendAvailable, false, `${label}: trend must be unavailable`);
+  assert.ok(example.summary?.estimatedDailyFlowUsd > 0, `${label}: verified annualized platform flow missing`);
+  assert.ok(Array.isArray(example.summary?.provenance) && example.summary.provenance.length > 0, `${label}: provenance missing`);
+  assert.deepEqual(
+    example.summary.provenance.map((entry) => entry.subject),
+    GIVING_PUBLISHED_ESTIMATE_CLAIMS.map((entry) => entry.subject),
+    `${label}: Giving provenance must derive from the shared claim registry`,
+  );
+  assert.ok(
+    example.summary.provenance.some((entry) =>
+      entry.sourceName === 'GoFundMe'
+      && entry.status === 'verified'
+      && entry.includedInHighlightedAggregate === true
+      && /^https:\/\//.test(entry.sourceUrl)),
+    `${label}: verified GoFundMe provenance missing`,
+  );
+  assert.ok(
+    example.summary.provenance.some((entry) =>
+      entry.sourceName === 'GlobalGiving'
+      && entry.status === 'verified'
+      && entry.includedInHighlightedAggregate === true
+      && entry.reportedValue === 84_000_000),
+    `${label}: verified GlobalGiving provenance missing`,
+  );
+  for (const platform of example.summary?.platforms ?? []) {
+    assert.equal(platform.activeCampaignsSampled, undefined, `${label}: must not fabricate sampled campaign counts`);
+    assert.equal(platform.newCampaigns24h, undefined, `${label}: must not fabricate 24-hour campaign counts`);
+    assert.equal(platform.donationVelocity, undefined, `${label}: must not fabricate live donation velocity`);
+  }
+  for (const category of example.summary?.categories ?? []) {
+    assert.equal(category.share, 0, `${label}: category share must remain an unavailable sentinel`);
+    assert.equal(category.change24h, 0, `${label}: category change must remain a not-collected sentinel`);
+    assert.equal(category.activeCampaigns, 0, `${label}: category campaign count must remain a not-collected sentinel`);
+    assert.equal(category.trending, false, `${label}: category trend must remain unavailable`);
+  }
+  assert.deepEqual(
+    example.summary?.categories?.map((category) => category.category),
+    GIVING_CATEGORY_SENTINELS,
+    `${label}: Giving category compatibility projection must match the live builder`,
+  );
+  assert.deepEqual(example.summary?.crypto, {
+    dailyInflowUsd: 0,
+    trackedWallets: 0,
+    transactions24h: 0,
+    topReceivers: [],
+    pctOfTotal: 0,
+  }, `${label}: crypto compatibility projection must match the live builder`);
+}
+
 // Honeypot fields are hidden anti-bot inputs (marked by a schema description
 // containing "honeypot"). The handlers silently discard any non-empty value, so
 // a populated request example is a fake-success trap and contradicts the field's
@@ -557,12 +646,12 @@ function honeypotRequestViolations(spec, label) {
 describe('OpenAPI examples contract', () => {
   // Bump these exact surface counts when adding or removing proto services/RPCs.
   it('audits the known service operation surface', () => {
-    assert.equal(serviceSpecs.length, 35, `expected 35 service specs, found ${serviceSpecs.length}`);
+    assert.equal(serviceSpecs.length, 36, `expected 36 service specs, found ${serviceSpecs.length}`);
     const total = serviceSpecs.reduce((sum, file) => {
       const spec = JSON.parse(readFileSync(resolve(apiDir, file), 'utf8'));
       return sum + operationEntries(spec).length;
     }, 0);
-    assert.equal(total, 196, `expected 196 OpenAPI operations, found ${total}`);
+    assert.equal(total, 214, `expected 214 OpenAPI operations, found ${total}`);
   });
 
   it('adds schema-valid request and response examples to every service JSON spec', () => {
@@ -574,9 +663,9 @@ describe('OpenAPI examples contract', () => {
       totals.requestExpected += result.requestExpected;
       totals.responseExpected += result.responseExpected;
     }
-    assert.equal(totals.operations, 196);
+    assert.equal(totals.operations, 214);
     assert.ok(totals.requestExpected >= 137, `expected at least 137 request example targets, found ${totals.requestExpected}`);
-    assert.equal(totals.responseExpected, 196);
+    assert.equal(totals.responseExpected, 214);
   });
 
   // record-baseline-snapshot's nested updates[].type is a bare string (no schema
@@ -600,7 +689,7 @@ describe('OpenAPI examples contract', () => {
         'InfrastructureService.openapi.yaml',
         loadYaml(readFileSync(resolve(apiDir, 'InfrastructureService.openapi.yaml'), 'utf8')),
       ],
-      ['worldmonitor.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'worldmonitor.openapi.yaml'), 'utf8'))],
+      ['worldmonitor.openapi.yaml', loadUnifiedOpenApiSpec()],
     ];
 
     for (const [label, spec] of specs) {
@@ -615,14 +704,14 @@ describe('OpenAPI examples contract', () => {
       const spec = loadYaml(readFileSync(resolve(apiDir, yamlFile), 'utf8'));
       operations += assertOperationExamples(spec, yamlFile).operations;
     }
-    assert.equal(operations, 196);
+    assert.equal(operations, 214);
   });
 
   it('adds request and response examples to the unified OpenAPI bundle', () => {
-    const bundle = loadYaml(readFileSync(resolve(apiDir, 'worldmonitor.openapi.yaml'), 'utf8'));
+    const bundle = loadUnifiedOpenApiSpec();
     const result = assertOperationExamples(bundle, 'worldmonitor.openapi.yaml');
-    assert.equal(result.operations, 196);
-    assert.equal(result.responseExpected, 196);
+    assert.equal(result.operations, 214);
+    assert.equal(result.responseExpected, 214);
   });
 
   // A honeypot field (hidden anti-bot input) is silently discarded by the
@@ -642,7 +731,7 @@ describe('OpenAPI examples contract', () => {
       const yamlSpec = loadYaml(readFileSync(resolve(apiDir, yamlFile), 'utf8'));
       violations.push(...honeypotRequestViolations(yamlSpec, yamlFile));
     }
-    const bundle = loadYaml(readFileSync(resolve(apiDir, 'worldmonitor.openapi.yaml'), 'utf8'));
+    const bundle = loadUnifiedOpenApiSpec();
     violations.push(...honeypotRequestViolations(bundle, 'worldmonitor.openapi.yaml'));
 
     assert.ok(guardedFields >= 2, `expected honeypot-marked schema fields to guard, found ${guardedFields}`);
@@ -723,7 +812,7 @@ describe('OpenAPI curated example values', () => {
     const specs = [
       ['NewsService.openapi.json', JSON.parse(readFileSync(resolve(apiDir, 'NewsService.openapi.json'), 'utf8'))],
       ['NewsService.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'NewsService.openapi.yaml'), 'utf8'))],
-      ['worldmonitor.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'worldmonitor.openapi.yaml'), 'utf8'))],
+      ['worldmonitor.openapi.yaml', loadUnifiedOpenApiSpec()],
     ];
 
     for (const [label, spec] of specs) {
@@ -740,7 +829,7 @@ describe('OpenAPI curated example values', () => {
     const intelligenceSpecs = [
       ['IntelligenceService.openapi.json', JSON.parse(readFileSync(resolve(apiDir, 'IntelligenceService.openapi.json'), 'utf8'))],
       ['IntelligenceService.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'IntelligenceService.openapi.yaml'), 'utf8'))],
-      ['worldmonitor.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'worldmonitor.openapi.yaml'), 'utf8'))],
+      ['worldmonitor.openapi.yaml', loadUnifiedOpenApiSpec()],
     ];
     assertParamExampleSet(intelligenceSpecs, 'GetGdeltTopicTimeline', 'topic', CURATED.gdeltTopics);
     assertParamExampleSet(intelligenceSpecs, 'GetRegionalSnapshot', 'region_id', CURATED.regionIds);
@@ -753,7 +842,7 @@ describe('OpenAPI curated example values', () => {
     const consumerSpecs = [
       ['ConsumerPricesService.openapi.json', JSON.parse(readFileSync(resolve(apiDir, 'ConsumerPricesService.openapi.json'), 'utf8'))],
       ['ConsumerPricesService.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'ConsumerPricesService.openapi.yaml'), 'utf8'))],
-      ['worldmonitor.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'worldmonitor.openapi.yaml'), 'utf8'))],
+      ['worldmonitor.openapi.yaml', loadUnifiedOpenApiSpec()],
     ];
     for (const operationId of ['GetConsumerPriceOverview', 'GetConsumerPriceBasketSeries', 'ListConsumerPriceCategories', 'ListRetailerPriceSpreads']) {
       assertParamExampleSet(consumerSpecs, operationId, 'basket_slug', CURATED.consumerBaskets);
@@ -765,7 +854,7 @@ describe('OpenAPI curated example values', () => {
     const aviationSpecs = [
       ['AviationService.openapi.json', JSON.parse(readFileSync(resolve(apiDir, 'AviationService.openapi.json'), 'utf8'))],
       ['AviationService.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'AviationService.openapi.yaml'), 'utf8'))],
-      ['worldmonitor.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'worldmonitor.openapi.yaml'), 'utf8'))],
+      ['worldmonitor.openapi.yaml', loadUnifiedOpenApiSpec()],
     ];
     const flightOps = ['SearchGoogleFlights', 'SearchGoogleDates'];
     for (const operationId of flightOps) {
@@ -786,7 +875,7 @@ describe('OpenAPI curated example values', () => {
     const newsSpecs = [
       ['NewsService.openapi.json', JSON.parse(readFileSync(resolve(apiDir, 'NewsService.openapi.json'), 'utf8'))],
       ['NewsService.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'NewsService.openapi.yaml'), 'utf8'))],
-      ['worldmonitor.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'worldmonitor.openapi.yaml'), 'utf8'))],
+      ['worldmonitor.openapi.yaml', loadUnifiedOpenApiSpec()],
     ];
     for (const [label, spec] of newsSpecs) {
       const mode = spec.paths?.['/api/news/v1/summarize-article']?.post
@@ -809,7 +898,7 @@ describe('OpenAPI curated example values', () => {
       const yamlSpec = loadYaml(readFileSync(resolve(apiDir, yamlFile), 'utf8'));
       checked += assertClosedValueParamExamples(yamlSpec, yamlFile);
     }
-    const bundle = loadYaml(readFileSync(resolve(apiDir, 'worldmonitor.openapi.yaml'), 'utf8'));
+    const bundle = loadUnifiedOpenApiSpec();
     checked += assertClosedValueParamExamples(bundle, 'worldmonitor.openapi.yaml');
     assert.ok(checked >= 20, `expected at least 20 prose-enumerated parameter examples, checked ${checked}`);
   });
@@ -826,7 +915,7 @@ describe('OpenAPI curated example values', () => {
       ['DisplacementService.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'DisplacementService.openapi.yaml'), 'utf8'))],
       ['MilitaryService.openapi.json', JSON.parse(readFileSync(resolve(apiDir, 'MilitaryService.openapi.json'), 'utf8'))],
       ['MilitaryService.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'MilitaryService.openapi.yaml'), 'utf8'))],
-      ['worldmonitor.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'worldmonitor.openapi.yaml'), 'utf8'))],
+      ['worldmonitor.openapi.yaml', loadUnifiedOpenApiSpec()],
     ];
     assertIssue4827Cluster7ResidueFixed(specs);
   });
@@ -835,11 +924,23 @@ describe('OpenAPI curated example values', () => {
     const specs = [
       ['ScenarioService.openapi.json', JSON.parse(readFileSync(resolve(apiDir, 'ScenarioService.openapi.json'), 'utf8'))],
       ['ScenarioService.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'ScenarioService.openapi.yaml'), 'utf8'))],
-      ['worldmonitor.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'worldmonitor.openapi.yaml'), 'utf8'))],
+      ['worldmonitor.openapi.yaml', loadUnifiedOpenApiSpec()],
     ];
 
     for (const [label, spec] of specs) {
       assertScenarioStatusPollExample(spec, label);
+    }
+  });
+
+  it('uses a truthful partial-estimate Giving response example', () => {
+    const specs = [
+      ['GivingService.openapi.json', JSON.parse(readFileSync(resolve(apiDir, 'GivingService.openapi.json'), 'utf8'))],
+      ['GivingService.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'GivingService.openapi.yaml'), 'utf8'))],
+      ['worldmonitor.openapi.yaml', loadUnifiedOpenApiSpec()],
+    ];
+
+    for (const [label, spec] of specs) {
+      assertGivingPublishedEstimateExample(spec, label);
     }
   });
 
@@ -853,11 +954,50 @@ describe('OpenAPI curated example values', () => {
         'ShippingV2Service.openapi.yaml',
         loadYaml(readFileSync(resolve(apiDir, 'ShippingV2Service.openapi.yaml'), 'utf8')),
       ],
-      ['worldmonitor.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'worldmonitor.openapi.yaml'), 'utf8'))],
+      ['worldmonitor.openapi.yaml', loadUnifiedOpenApiSpec()],
     ];
 
     for (const [label, spec] of specs) {
       assertRouteIntelligenceHs2Example(spec, label);
+    }
+  });
+
+  // ListCommodityQuotes only accepts supported commodity symbols (see #6307);
+  // the generic `symbol` heuristic emits `AAPL`, which the handler now rejects
+  // with HTTP 400. The injector must pin the sample to a supported symbol.
+  it('uses only supported commodity symbols in ListCommodityQuotes examples', () => {
+    const supported = new Set(
+      JSON.parse(readFileSync(resolve(root, 'shared/commodities.json'), 'utf8'))
+        .commodities.map((c) => c.symbol),
+    );
+    assert.ok(supported.has('GC=F'), 'expected gold futures GC=F in the configured commodity set');
+
+    const specs = [
+      ['MarketService.openapi.json', JSON.parse(readFileSync(resolve(apiDir, 'MarketService.openapi.json'), 'utf8'))],
+      ['MarketService.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'MarketService.openapi.yaml'), 'utf8'))],
+      ['worldmonitor.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'worldmonitor.openapi.yaml'), 'utf8'))],
+    ];
+
+    for (const [label, spec] of specs) {
+      const found = collectionForOperation(spec, label, 'ListCommodityQuotes', 'symbols');
+      assert.ok(found.length > 0, `${label}: expected ListCommodityQuotes symbols parameter examples`);
+      for (const { value, where } of found) {
+        assert.notEqual(value, 'example', `${where}: placeholder commodity symbol`);
+        assert.ok(supported.has(String(value)), `${where}: commodity symbol '${value}' is not in the supported seed set`);
+      }
+
+      // Response examples also used singular `symbol` (generic inject defaulted to AAPL).
+      for (const { path, method, op } of operationEntries(spec)) {
+        if (op.operationId !== 'ListCommodityQuotes') continue;
+        const example = op.responses?.['200']?.content?.['application/json']?.example;
+        const quotes = example?.quotes;
+        if (!Array.isArray(quotes)) continue;
+        for (const [i, q] of quotes.entries()) {
+          const where = `${label} ${method.toUpperCase()} ${path} response.quotes[${i}].symbol`;
+          assert.ok(q && typeof q.symbol === 'string', `${where}: missing symbol`);
+          assert.ok(supported.has(q.symbol), `${where}: commodity symbol '${q.symbol}' is not in the supported seed set`);
+        }
+      }
     }
   });
 });
