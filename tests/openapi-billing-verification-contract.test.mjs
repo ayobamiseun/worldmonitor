@@ -83,12 +83,20 @@ function assertOperationContract({ path, method, op }, label) {
     return;
   }
   assert.ok(denial, `${opLabel}: missing billing-verification 503 response`);
-  assert.equal(
-    denial.content?.['application/json']?.schema?.$ref,
-    '#/components/schemas/BillingVerificationError',
-    `${opLabel}: 503 must reference BillingVerificationError`,
+  assert.deepEqual(
+    denial.content?.['application/json']?.schema?.oneOf,
+    [
+      { $ref: '#/components/schemas/BillingVerificationError' },
+      { $ref: '#/components/schemas/GatewayError' },
+    ],
+    `${opLabel}: 503 must accept billing-verification and generic gateway errors`,
   );
-  for (const header of ['Retry-After', 'X-Billing-Verification']) {
+  for (const header of [
+    'Retry-After',
+    'X-Billing-Verification',
+    'X-Validation-Mode',
+    'X-RateLimit-Mode',
+  ]) {
     assert.ok(denial.headers?.[header], `${opLabel}: 503 must document ${header}`);
     assert.equal(denial.headers[header].schema?.type, 'string', `${opLabel}: ${header} header schema`);
   }

@@ -143,7 +143,7 @@ const EXCLUDED_FROM_MCP = new Map([
     'on-demand: RPC cache for military bases — deferred to a future expanded military tool.'],
   ['news:threat:summary:v1',
     'on-demand: relay-classify-only, written only when classify produces country matches (matches api/health.js:468 ON_DEMAND_KEYS rationale). Underlying news inputs already exposed via get_news_intelligence.'],
-  ['resilience:ranking:v26',
+  ['resilience:ranking:v27',
     'on-demand: RPC cache populated after Pro ranking requests (matches api/health.js:469 ON_DEMAND_KEYS rationale). Deferred to a future resilience tool.'],
   ['forecast:simulation-package:latest',
     'on-demand: written by writeSimulationPackage after deep forecast runs (matches api/health.js:466 ON_DEMAND_KEYS rationale). Internal pipeline artifact, not a queryable slice.'],
@@ -223,17 +223,17 @@ const EXCLUDED_FROM_MCP = new Map([
   ['supply_chain:hormuz_tracker:v1',
     'deferred: specialized Strait-of-Hormuz tracker; broader chokepoint coverage via get_chokepoint_status. Hormuz-specific tool deferred.'],
   ['resilience:static:index:v1',
-    'deferred to a future resilience tool (paired with resilience:ranking:v26).'],
+    'deferred to a future resilience tool (paired with resilience:ranking:v27).'],
   ['resilience:static:fao',
     'deferred to a future resilience tool (FAO Phase 3+ aggregate, paired with resilience:static:index:v1).'],
-  ['resilience:intervals:v9:US',
-    'deferred to a future resilience tool (formula-tagged sensitivity bands on top of resilience:ranking:v26).'],
+  ['resilience:intervals:v10:US',
+    'deferred to a future resilience tool (formula-tagged sensitivity bands on top of resilience:ranking:v27).'],
   ['resilience:low-carbon-generation:v1',
     'deferred to a future resilience tool. Companion data to fossil-electricity-share (already exposed via get_energy_intelligence).'],
   ['resilience:power-losses:v1',
     'deferred to a future resilience tool. Companion data to the resilience v2 energy bundle.'],
   ['resilience:education-attainment:v1',
-    'deferred to a future resilience tool. Single-indicator input to the education dimension, which is still flag-gated dark behind RESILIENCE_EDUCATION_ENABLED — exposing it via MCP would publish a series the index itself does not yet score (#6452).'],
+    'deferred to a future resilience tool. Single-indicator input to the active education dimension; canonical resilience scores and dimensions remain available through the Resilience REST and agent-skill surfaces, while a raw-series MCP contract needs separate product design.'],
   ['product-catalog:v3',
     'deferred to a future product-catalog tool. Used by the dashboard to render product metadata, not a queryable data slice.'],
   ['climate:zone-normals:v1',
@@ -395,6 +395,18 @@ const EXCLUDED_FROM_MCP = new Map([
   ['consumer-prices:coverage:us',
     'operational: consumer-price market/retailer completion and validator-rejection coverage published for /api/health; the underlying price observations are exposed through get_consumer_prices, while this health snapshot is not a queryable MCP slice (#5945).'],
 ]);
+
+const EDUCATION_EXCLUSION_REASON = EXCLUDED_FROM_MCP.get('resilience:education-attainment:v1');
+assert.match(
+  EDUCATION_EXCLUSION_REASON ?? '',
+  /active education dimension/,
+  'education MCP exclusion must describe the active construct, not the retired flag-dark state',
+);
+assert.doesNotMatch(
+  EDUCATION_EXCLUSION_REASON ?? '',
+  /flag-gated dark|does not yet score/i,
+  'education MCP exclusion must not retain pre-activation state',
+);
 
 // -----------------------------------------------------------------------------
 // Pure predicate helpers (no module-state coupling) — used by both the

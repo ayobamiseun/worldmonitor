@@ -109,7 +109,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -119,10 +119,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -226,7 +236,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -236,10 +246,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -362,7 +382,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -372,10 +392,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -481,7 +511,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -491,10 +521,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -602,7 +642,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -612,10 +652,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -753,7 +803,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -763,10 +813,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -929,7 +989,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -939,10 +999,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -1040,7 +1110,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -1050,10 +1120,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -1157,7 +1237,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -1167,10 +1247,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -1282,7 +1372,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -1292,10 +1382,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -1411,7 +1511,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -1421,10 +1521,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -1584,7 +1694,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -1594,10 +1704,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -1723,7 +1843,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -1733,10 +1853,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -1867,7 +1997,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -1877,10 +2007,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -1989,7 +2129,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -1999,10 +2139,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -2100,7 +2250,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -2110,10 +2260,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -2205,7 +2365,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -2215,10 +2375,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -2318,7 +2488,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -2328,10 +2498,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -2424,7 +2604,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -2434,10 +2614,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -2541,7 +2731,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -2551,10 +2741,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -2645,7 +2845,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -2655,10 +2855,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -2754,7 +2964,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -2764,10 +2974,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -2894,7 +3114,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -2904,10 +3124,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -3006,7 +3236,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -3016,10 +3246,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -3227,7 +3467,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -3237,10 +3477,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -3359,7 +3609,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -3369,10 +3619,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -3477,7 +3737,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -3487,10 +3747,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -3666,7 +3936,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -3676,10 +3946,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -3827,7 +4107,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -3837,10 +4117,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:
@@ -4013,7 +4303,7 @@ paths:
                                     - $ref: '#/components/schemas/Error'
                                     - $ref: '#/components/schemas/RateLimitError'
                 "503":
-                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.
+                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.
                     headers:
                         Retry-After:
                             description: Seconds to wait before retrying (1-60).
@@ -4023,10 +4313,20 @@ paths:
                             description: Billing-verification state that produced this response (matches the body `code`).
                             schema:
                                 type: string
+                        X-Validation-Mode:
+                            description: Present with value degraded when user API-key validation is temporarily unavailable.
+                            schema:
+                                type: string
+                        X-RateLimit-Mode:
+                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.
+                            schema:
+                                type: string
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/BillingVerificationError'
+                                oneOf:
+                                    - $ref: '#/components/schemas/BillingVerificationError'
+                                    - $ref: '#/components/schemas/GatewayError'
                 default:
                     description: Gateway or handler error response.
                     content:

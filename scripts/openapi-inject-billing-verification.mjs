@@ -55,7 +55,8 @@ const BILLING_VERIFICATION_ERROR_SCHEMA = {
 };
 
 const BILLING_VERIFICATION_RESPONSE = {
-  description: 'Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.',
+  description:
+    'Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.',
   headers: {
     'Retry-After': {
       description: 'Seconds to wait before retrying (1-60).',
@@ -65,10 +66,23 @@ const BILLING_VERIFICATION_RESPONSE = {
       description: 'Billing-verification state that produced this response (matches the body `code`).',
       schema: { type: 'string' },
     },
+    'X-Validation-Mode': {
+      description: 'Present with value degraded when user API-key validation is temporarily unavailable.',
+      schema: { type: 'string' },
+    },
+    'X-RateLimit-Mode': {
+      description: 'Present with value degraded when a fail-closed rate-limit dependency is unavailable.',
+      schema: { type: 'string' },
+    },
   },
   content: {
     'application/json': {
-      schema: { $ref: '#/components/schemas/BillingVerificationError' },
+      schema: {
+        oneOf: [
+          { $ref: '#/components/schemas/BillingVerificationError' },
+          { $ref: '#/components/schemas/GatewayError' },
+        ],
+      },
     },
   },
 };
@@ -132,7 +146,7 @@ const YAML_BILLING_VERIFICATION_SCHEMA = [
 
 const YAML_503_RESPONSE = [
   '                "503":',
-  '                    description: Billing verification in progress or entitlement backend unavailable. Retryable — honor Retry-After.',
+  '                    description: Service unavailable. Billing-verification responses include code and X-Billing-Verification; other gateway infrastructure failures use the generic GatewayError shape.',
   '                    headers:',
   '                        Retry-After:',
   '                            description: Seconds to wait before retrying (1-60).',
@@ -142,10 +156,20 @@ const YAML_503_RESPONSE = [
   '                            description: Billing-verification state that produced this response (matches the body `code`).',
   '                            schema:',
   '                                type: string',
+  '                        X-Validation-Mode:',
+  '                            description: Present with value degraded when user API-key validation is temporarily unavailable.',
+  '                            schema:',
+  '                                type: string',
+  '                        X-RateLimit-Mode:',
+  '                            description: Present with value degraded when a fail-closed rate-limit dependency is unavailable.',
+  '                            schema:',
+  '                                type: string',
   '                    content:',
   '                        application/json:',
   '                            schema:',
-  "                                $ref: '#/components/schemas/BillingVerificationError'",
+  '                                oneOf:',
+  "                                    - $ref: '#/components/schemas/BillingVerificationError'",
+  "                                    - $ref: '#/components/schemas/GatewayError'",
 ];
 
 function findYamlSchemaRange(lines, schemaName) {

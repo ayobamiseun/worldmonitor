@@ -6,6 +6,7 @@ import { getCachedJson } from '../../../_shared/redis';
 import { classifyDimensionFreshness, readFreshnessMap, resolveSeedMetaKey } from './_dimension-freshness';
 import { getLanguageCoverageFactor } from './_language-coverage';
 import { MACRO_FISCAL_INDICATOR_WEIGHTS } from './_macro-fiscal-weights';
+import { isInRankableUniverse } from './_rankable-universe';
 import {
   failedDimensionsFromDatasets,
   readFailedDatasets,
@@ -1607,9 +1608,41 @@ function isFinSysExposureEnabledLocal(): boolean {
 }
 
 const RESILIENCE_EDUCATION_KEY = 'resilience:education-attainment:v1';
+export const EDUCATION_ACTIVATION_MIN_COUNTRIES = 180;
 
-function isEducationEnabledLocal(): boolean {
-  return (process.env.RESILIENCE_EDUCATION_ENABLED ?? 'false').toLowerCase() === 'true';
+function readEducationRankableRecordCount(meta: unknown): number | null {
+  if (meta == null || typeof meta !== 'object' || Array.isArray(meta)) return null;
+  const numeric = Number((meta as { rankableRecordCount?: unknown }).rankableRecordCount);
+  if (Number.isSafeInteger(numeric) && numeric >= 0) return numeric;
+
+  // Transition support for seed-meta written before rankableRecordCount was
+  // added. The prior seeder already persisted the exact rankable country set,
+  // so it can prove the same floor without waiting for the next weekly publish.
+  const rawCountrySet = (meta as { countrySet?: unknown }).countrySet;
+  if (typeof rawCountrySet !== 'string' || rawCountrySet.length === 0) return null;
+  const codes = rawCountrySet.split(',').map((code) => code.trim());
+  if (codes.some((code) => !/^[A-Z]{2}$/.test(code) || !isInRankableUniverse(code))) return null;
+  return new Set(codes).size;
+}
+
+// #6460 activation contract. The default is `true`, so the promotion PR is the
+// flip rather than a config change that has to land separately.
+//
+// Why the default and not a production env var, unlike energy v2 and
+// financialSystemExposure: education is the first dimension whose activation is
+// CI-COUPLED to its own flag. The active release gate removes `education` from
+// its fixture allow-list, while `RESILIENCE_FLAG_DARK_WHEN_ZERO_COVERAGE`
+// retains the dimension for the explicit false rollback. That runtime helper
+// keys on the unique triple-zero shape, so active observations and source
+// failures remain counted. A default of `false` would require the env var in
+// BOTH CI and Vercel, splitting "is education on" across two config surfaces.
+//
+// `RESILIENCE_EDUCATION_ENABLED=false` in the production environment remains
+// the rollback kill switch — identical to the previous rollback story, just
+// inverted in which direction needs the explicit setting. See
+// `docs/methodology/education-flag-flip-runbook.md` § Rollback.
+export function isEducationEnabled(): boolean {
+  return (process.env.RESILIENCE_EDUCATION_ENABLED ?? 'true').toLowerCase() === 'true';
 }
 
 // Certainty ladder for a stale-but-present observation. Attainment of the 25+
@@ -1634,7 +1667,7 @@ export async function scoreEducation(
   countryCode: string,
   reader: ResilienceSeedReader = defaultSeedReader,
 ): Promise<ResilienceDimensionScore> {
-  if (!isEducationEnabledLocal()) {
+  if (!isEducationEnabled()) {
     // Flag off — empty-data shape, contributes zero weight to the domain mean.
     // imputationClass stays null: a dark dimension is a deliberate construct
     // state, not an outage, and tagging it `source-failure` would render a
@@ -1663,8 +1696,60 @@ export async function scoreEducation(
     );
   }
 
+  const rankableRecordCount = readEducationRankableRecordCount(meta);
+  if (rankableRecordCount == null || rankableRecordCount < EDUCATION_ACTIVATION_MIN_COUNTRIES) {
+    throw new ResilienceConfigurationError(
+      `RESILIENCE_EDUCATION_ENABLED=true but ${RESILIENCE_EDUCATION_KEY} rankable coverage is ` +
+        `${rankableRecordCount ?? 'unproven'}/${EDUCATION_ACTIVATION_MIN_COUNTRIES}. ` +
+        'Wait for a healthy education seed above the activation floor, or set RESILIENCE_EDUCATION_ENABLED=false to roll back.',
+      [RESILIENCE_EDUCATION_KEY],
+    );
+  }
+
   const raw = await reader(RESILIENCE_EDUCATION_KEY);
+  const countries = raw != null && typeof raw === 'object' && !Array.isArray(raw)
+    ? (raw as { countries?: unknown }).countries
+    : null;
+  if (
+    countries == null ||
+    typeof countries !== 'object' ||
+    Array.isArray(countries)
+  ) {
+    throw new ResilienceConfigurationError(
+      `RESILIENCE_EDUCATION_ENABLED=true but the ${RESILIENCE_EDUCATION_KEY} data payload is missing, malformed, or empty. ` +
+        'Confirm the education seeder wrote a non-empty countries envelope, or set RESILIENCE_EDUCATION_ENABLED=false to roll back.',
+      [RESILIENCE_EDUCATION_KEY],
+    );
+  }
   const record = readEducationAttainment(raw, countryCode);
+
+  if (Object.prototype.hasOwnProperty.call(countries, countryCode) && record == null) {
+    throw new ResilienceConfigurationError(
+      `RESILIENCE_EDUCATION_ENABLED=true but ${RESILIENCE_EDUCATION_KEY} has a malformed record for ${countryCode}. ` +
+        'Confirm the education seeder wrote finite value/year fields in the expected range, or set RESILIENCE_EDUCATION_ENABLED=false to roll back.',
+      [RESILIENCE_EDUCATION_KEY],
+    );
+  }
+
+  let usableRankableRecordCount = 0;
+  for (const country in countries) {
+    if (
+      Object.prototype.hasOwnProperty.call(countries, country) &&
+      Object.prototype.hasOwnProperty.call(ISO2_TO_ISO3, country) &&
+      isInRankableUniverse(country) &&
+      readEducationAttainment(raw, country) != null
+    ) {
+      usableRankableRecordCount += 1;
+    }
+  }
+  if (usableRankableRecordCount < EDUCATION_ACTIVATION_MIN_COUNTRIES) {
+    throw new ResilienceConfigurationError(
+      `RESILIENCE_EDUCATION_ENABLED=true but the ${RESILIENCE_EDUCATION_KEY} data payload has usable rankable coverage ` +
+        `${usableRankableRecordCount}/${EDUCATION_ACTIVATION_MIN_COUNTRIES}. ` +
+        'Confirm the education seeder wrote enough finite value/year records, or set RESILIENCE_EDUCATION_ENABLED=false to roll back.',
+      [RESILIENCE_EDUCATION_KEY],
+    );
+  }
 
   if (record == null) {
     // Country absent from the envelope. This is `unmonitored`, NOT
@@ -1728,6 +1813,10 @@ function readEducationAttainment(
   // Percentage of population; anything outside 0..100 is upstream corruption,
   // matching the range check the seeder enforces on write.
   if (value < 0 || value > 100) return null;
+  // World Bank observation years are whole Gregorian years. Keep this read
+  // contract aligned with the seeder and the Edge health payload probe so a
+  // record cannot count as healthy while the scorer interprets a corrupt year.
+  if (!Number.isSafeInteger(year) || year < 1900 || year > 2200) return null;
   return { value, year };
 }
 
@@ -3128,10 +3217,24 @@ export const RESILIENCE_NOT_APPLICABLE_WHEN_ZERO_COVERAGE: ReadonlySet<Resilienc
 // `education` counted, the US happy-path build fell below the threshold and
 // dropped out of the headline ranking entirely.
 //
-// `financialSystemExposure` is deliberately NOT in this set even though it is
-// also dark. Adding it would change the coverage number already published for
-// every country, which is outside this change's scope; the two should be
-// reconciled together when either flag flips.
+// RECONCILIATION, decided 2026-08-11 at the education flip (#6460). The prior
+// note here said the two dark dimensions "should be reconciled together when
+// either flag flips". Education has now flipped, and the decision is to leave
+// `financialSystemExposure` OUT rather than fold it in:
+//
+//   - Adding it would change `overallCoverage` for every country, and
+//     `headlineEligible` gates public ranking inclusion on `>= 0.65`. That is a
+//     published-number change for all 196 countries and needs its own
+//     measurement and its own cache-generation reasoning — it cannot ride along
+//     with a different dimension's activation.
+//   - #6459 retuned the construct but deliberately left it dark: "The dimension
+//     stays flag-dark; activation is Phase C and a separate PR." Folding it into
+//     the confidence mean now would half-activate a dimension whose activation
+//     is explicitly still pending.
+//
+// Education remains in this set after activation for its explicit false
+// rollback. The triple-zero discriminator below means active observations and
+// source failures automatically rejoin the confidence and pillar means.
 export const RESILIENCE_FLAG_DARK_WHEN_ZERO_COVERAGE: ReadonlySet<ResilienceDimensionId> = new Set([
   'education',
 ]);
