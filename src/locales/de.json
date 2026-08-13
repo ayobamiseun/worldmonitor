@@ -1386,7 +1386,8 @@
     "breakingNews": {
       "critical": "KRITISCH",
       "high": "HOCH",
-      "dismiss": "Ausblenden"
+      "dismiss": "Ausblenden",
+      "alertsRegion": "Breaking news alerts"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Eilmeldungen",
@@ -3262,7 +3263,8 @@
     "retry": "Erneut versuchen",
     "refresh": "Aktualisieren",
     "all": "Alle",
-    "cancel": "Abbrechen"
+    "cancel": "Abbrechen",
+    "dismiss": "Dismiss"
   },
   "preferences": {
     "display": "Anzeige",

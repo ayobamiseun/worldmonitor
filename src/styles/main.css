@@ -20751,6 +20751,11 @@ body:has(.tauri-titlebar) .breaking-news-container {
   font-size: calc(13px * var(--wm-panel-effective-scale, 1));
 }
 
+.breaking-alert:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -2px;
+}
+
 .breaking-alert.severity-critical {
   background: linear-gradient(90deg, #8B0000, #DC143C);
   border-bottom: 2px solid var(--semantic-critical);

@@ -1826,7 +1826,8 @@
     "breakingNews": {
       "critical": "MUHIMU",
       "high": "JUU",
-      "dismiss": "Ondoa"
+      "dismiss": "Ondoa",
+      "alertsRegion": "Breaking news alerts"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Tahadhari za Kuvunja",
@@ -3341,7 +3342,8 @@
     "currentVariant": "(ya sasa)",
     "retry": "Jaribu tena",
     "refresh": "Onyesha upya",
-    "all": "Wote"
+    "all": "Wote",
+    "dismiss": "Dismiss"
   },
   "connectivity": {
     "offlineCached": "Nje ya mtandao — inaonyesha data iliyohifadhiwa kutoka kwa {{freshness}}.",

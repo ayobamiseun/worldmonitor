@@ -1498,7 +1498,8 @@
     "breakingNews": {
       "critical": "KRITIEK",
       "dismiss": "Sluiten",
-      "high": "HOOG"
+      "high": "HOOG",
+      "alertsRegion": "Breaking news alerts"
     },
     "giving": {
       "activityIndex": "Activiteitsindex",
@@ -2972,7 +2973,8 @@
     "all": "Alle",
     "loadingGiving": "Donatiegegevens laden...",
     "rateLimitedMarket": "Marktgegevens tijdelijk beperkt — automatisch opnieuw proberen",
-    "cancel": "Annuleren"
+    "cancel": "Annuleren",
+    "dismiss": "Dismiss"
   },
   "header": {
     "world": "WERELD",

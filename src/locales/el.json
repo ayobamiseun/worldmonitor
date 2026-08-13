@@ -1672,7 +1672,8 @@
     "breakingNews": {
       "critical": "ΚΡΙΣΙΜΟ",
       "high": "ΥΨΗΛΟ",
-      "dismiss": "Απόρριψη"
+      "dismiss": "Απόρριψη",
+      "alertsRegion": "Breaking news alerts"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Έκτακτες Ειδοποιήσεις",
@@ -3262,7 +3263,8 @@
     "retry": "Επανάληψη",
     "refresh": "Ανανέωση",
     "all": "Όλα",
-    "cancel": "Ακύρωση"
+    "cancel": "Ακύρωση",
+    "dismiss": "Dismiss"
   },
   "preferences": {
     "display": "Οθόνη",

@@ -1672,7 +1672,8 @@
     "breakingNews": {
       "critical": "심각",
       "high": "높음",
-      "dismiss": "닫기"
+      "dismiss": "닫기",
+      "alertsRegion": "Breaking news alerts"
     },
     "intelligenceFindings": {
       "breakingAlerts": "긴급 경보",
@@ -3262,7 +3263,8 @@
     "retry": "재시도",
     "refresh": "새로고침",
     "all": "전체",
-    "cancel": "취소"
+    "cancel": "취소",
+    "dismiss": "Dismiss"
   },
   "preferences": {
     "display": "디스플레이",

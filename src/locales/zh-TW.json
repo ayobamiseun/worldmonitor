@@ -1672,7 +1672,8 @@
     "breakingNews": {
       "critical": "緊急",
       "high": "重要",
-      "dismiss": "忽略"
+      "dismiss": "忽略",
+      "alertsRegion": "Breaking news alerts"
     },
     "intelligenceFindings": {
       "breakingAlerts": "突發警報",
@@ -3262,7 +3263,8 @@
     "retry": "Retry",
     "refresh": "Refresh",
     "all": "全部",
-    "cancel": "取消"
+    "cancel": "取消",
+    "dismiss": "Dismiss"
   },
   "preferences": {
     "display": "顯示",

@@ -1672,7 +1672,8 @@
     "breakingNews": {
       "critical": "KRİTİK",
       "high": "YÜKSEK",
-      "dismiss": "Kapat"
+      "dismiss": "Kapat",
+      "alertsRegion": "Breaking news alerts"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Son Dakika Uyarıları",
@@ -3262,7 +3263,8 @@
     "retry": "Retry",
     "refresh": "Refresh",
     "all": "Tümü",
-    "cancel": "İptal"
+    "cancel": "İptal",
+    "dismiss": "Dismiss"
   },
   "preferences": {
     "display": "Görünüm",

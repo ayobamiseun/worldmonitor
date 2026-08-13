@@ -1388,7 +1388,8 @@
     "breakingNews": {
       "critical": "CRÍTICO",
       "high": "ALTO",
-      "dismiss": "Descartar"
+      "dismiss": "Descartar",
+      "alertsRegion": "Breaking news alerts"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Alertas de última hora",
@@ -3280,7 +3281,8 @@
     "retry": "Retry",
     "refresh": "Refresh",
     "all": "Todos",
-    "cancel": "Cancelar"
+    "cancel": "Cancelar",
+    "dismiss": "Dismiss"
   },
   "preferences": {
     "display": "Pantalla",

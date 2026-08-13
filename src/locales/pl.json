@@ -1794,7 +1794,8 @@
     "breakingNews": {
       "critical": "KRYTYCZNY",
       "dismiss": "Odrzuć",
-      "high": "WYSOKI"
+      "high": "WYSOKI",
+      "alertsRegion": "Breaking news alerts"
     },
     "giving": {
       "activityIndex": "Indeks aktywności",
@@ -3298,7 +3299,8 @@
     "all": "Wszystkie",
     "loadingGiving": "Ładowanie danych o globalnej dobroczynności",
     "rateLimitedMarket": "Dane rynkowe tymczasowo niedostępne (limit zapytań) — ponowna próba wkrótce",
-    "cancel": "Anuluj"
+    "cancel": "Anuluj",
+    "dismiss": "Dismiss"
   },
   "preferences": {
     "display": "Wyświetlanie",

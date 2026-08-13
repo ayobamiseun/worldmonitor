@@ -1813,7 +1813,8 @@
     "breakingNews": {
       "critical": "KRITIKUS",
       "high": "MAGAS",
-      "dismiss": "Elvetés"
+      "dismiss": "Elvetés",
+      "alertsRegion": "Breaking news alerts"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Friss riasztások",
@@ -3331,7 +3332,8 @@
     "currentVariant": "(jelenlegi)",
     "retry": "Újra próbálás",
     "refresh": "Frissítés",
-    "all": "Összes"
+    "all": "Összes",
+    "dismiss": "Dismiss"
   },
   "connectivity": {
     "offlineCached": "Offline — {{freshness}} időpontjából származó gyorsítótárazott adatok megjelenítése.",

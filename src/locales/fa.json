@@ -1816,7 +1816,8 @@
     "breakingNews": {
       "critical": "CRITICAL",
       "high": "HIGH",
-      "dismiss": "Dismiss"
+      "dismiss": "Dismiss",
+      "alertsRegion": "Breaking news alerts"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Breaking Alerts",
@@ -3331,7 +3332,8 @@
     "currentVariant": "(current)",
     "retry": "Retry",
     "refresh": "Refresh",
-    "all": "All"
+    "all": "All",
+    "dismiss": "Dismiss"
   },
   "connectivity": {
     "offlineCached": "Offline — showing cached data from {{freshness}}.",

@@ -1675,7 +1675,8 @@
     "breakingNews": {
       "critical": "CRITIC",
       "high": "RIDICAT",
-      "dismiss": "Respingeți"
+      "dismiss": "Respingeți",
+      "alertsRegion": "Breaking news alerts"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Alerte de ultimă oră",
@@ -3280,7 +3281,8 @@
     "retry": "Reîncercați",
     "refresh": "Actualizează",
     "all": "Toate",
-    "cancel": "Anulare"
+    "cancel": "Anulare",
+    "dismiss": "Dismiss"
   },
   "preferences": {
     "display": "Afișare",
