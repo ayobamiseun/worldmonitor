@@ -533,11 +533,11 @@ export class AirlineIntelPanel extends Panel {
             const dep = this.pricesDep || new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
             const form = `
         <div class="price-controls">
-          <input id="priceFromInput" class="price-input" placeholder="From" maxlength="3" value="${escapeHtml(this.pricesOrigin)}" style="width:54px">
-          <span style="color:#6b7280">\u2192</span>
-          <input id="priceToInput" class="price-input" placeholder="To" maxlength="3" value="${escapeHtml(this.pricesDest)}" style="width:54px">
-          <input id="priceDepInput" class="price-input" type="date" value="${escapeHtml(dep)}" style="width:128px">
-          <select id="priceCabinSelect" class="price-input" style="width:110px">
+          <input id="priceFromInput" class="price-input" placeholder="From" aria-label="Origin airport code" maxlength="3" value="${escapeHtml(this.pricesOrigin)}" style="width:54px">
+          <span style="color:#6b7280" aria-hidden="true">\u2192</span>
+          <input id="priceToInput" class="price-input" placeholder="To" aria-label="Destination airport code" maxlength="3" value="${escapeHtml(this.pricesDest)}" style="width:54px">
+          <input id="priceDepInput" class="price-input" type="date" aria-label="Departure date" value="${escapeHtml(dep)}" style="width:128px">
+          <select id="priceCabinSelect" class="price-input" aria-label="Cabin class" style="width:110px">
             <option value="ECONOMY"${this.pricesCabin === 'ECONOMY' ? ' selected' : ''}>Economy</option>
             <option value="PREMIUM_ECONOMY"${this.pricesCabin === 'PREMIUM_ECONOMY' ? ' selected' : ''}>Premium Economy</option>
             <option value="BUSINESS"${this.pricesCabin === 'BUSINESS' ? ' selected' : ''}>Business</option>
@@ -593,7 +593,7 @@ export class AirlineIntelPanel extends Panel {
             ${escapeHtml(t('components.airlineIntel.tripDays'))}:
             <input id="datesTripDurInput" class="price-input" type="number" min="1" value="${this.datesTripDuration}" style="width:44px">
           </label>
-          <select id="datesCabinSelect" class="price-input" style="width:110px">
+          <select id="datesCabinSelect" class="price-input" aria-label="Cabin class" style="width:110px">
             <option value="ECONOMY"${this.pricesCabin === 'ECONOMY' ? ' selected' : ''}>Economy</option>
             <option value="PREMIUM_ECONOMY"${this.pricesCabin === 'PREMIUM_ECONOMY' ? ' selected' : ''}>Premium Economy</option>
             <option value="BUSINESS"${this.pricesCabin === 'BUSINESS' ? ' selected' : ''}>Business</option>

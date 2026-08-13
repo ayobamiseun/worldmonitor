@@ -5388,7 +5388,7 @@ export class DeckGLMap {
         <button class="map-btn zoom-reset" title="${t('components.deckgl.resetView')}">&#8962;</button>
       </div>
       <div class="view-selector">
-        <select class="view-select">
+        <select class="view-select" aria-label="${t('header.selectRegion')}">
           <option value="global">${t('components.deckgl.views.global')}</option>
           <option value="america">${t('components.deckgl.views.americas')}</option>
           <option value="mena">${t('components.deckgl.views.mena')}</option>
