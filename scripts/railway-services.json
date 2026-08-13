@@ -170,6 +170,7 @@
       "scripts/shared/rss-allowed-domains.cjs",
       "scripts/shared/rss-allowed-domains.json",
       "scripts/shared/source-tiers.json",
+      "scripts/shared/stablecoin-classifier.cjs",
       "scripts/shared/stablecoins.json",
       "scripts/shared/stocks.json",
       "scripts/shared/ucdp-candidate.cjs",
@@ -183,6 +184,7 @@
       "shared/rss-allowed-domains.cjs",
       "shared/rss-allowed-domains.json",
       "shared/source-tiers.json",
+      "shared/stablecoin-classifier.cjs",
       "shared/stablecoins.json",
       "shared/stocks.json"
     ],
@@ -1148,6 +1150,7 @@
       "scripts/shared/etfs.json",
       "scripts/shared/gulf.json",
       "scripts/shared/other-tokens.json",
+      "scripts/shared/stablecoin-classifier.cjs",
       "scripts/shared/stablecoins.json",
       "shared/ai-tokens.json",
       "shared/crypto.json",

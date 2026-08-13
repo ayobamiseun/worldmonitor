@@ -2784,8 +2784,10 @@ async function seedCryptoQuotes() {
 const _stablecoinCfg = requireShared('stablecoins.json');
 const STABLECOIN_IDS = _stablecoinCfg.ids.join(',');
 const STABLECOIN_PAPRIKA_MAP = _stablecoinCfg.coinpaprika;
-const STABLECOIN_ON_PEG_MAX = _stablecoinCfg.pegThresholds.onPegMaxDeviation;
-const STABLECOIN_SLIGHT_DEPEG_MAX = _stablecoinCfg.pegThresholds.slightDepegMaxDeviation;
+// Row shaping and peg classification live in ONE module shared with the
+// primary seeder and the RPC gap path — a private variant here means the
+// stored value depends on which writer ran last. (#6319, extends #6308)
+const { classifyStablecoin } = requireShared('stablecoin-classifier.cjs');
 const STABLECOIN_SEED_TTL = 7200; // 2h — 1h buffer over 5min cron cadence (was 1h = 55min buffer)
 
 async function fetchStablecoinCoinPaprika() {
@@ -2813,12 +2815,7 @@ async function seedStablecoinMarkets() {
     console.warn(`[Stablecoin] CoinGecko failed: ${err.message} — trying CoinPaprika`);
     try { data = await fetchStablecoinCoinPaprika(); } catch (e2) { console.warn(`[Stablecoin] CoinPaprika also failed: ${e2.message} — skipping`); return 0; }
   }
-  const stablecoins = data.map((coin) => {
-    const price = coin.current_price || 0;
-    const deviation = Math.abs(price - 1.0);
-    const pegStatus = deviation <= STABLECOIN_ON_PEG_MAX ? 'ON PEG' : deviation <= STABLECOIN_SLIGHT_DEPEG_MAX ? 'SLIGHT DEPEG' : 'DEPEGGED';
-    return { id: coin.id, symbol: (coin.symbol || '').toUpperCase(), name: coin.name, price, deviation: +(deviation * 100).toFixed(3), pegStatus, marketCap: coin.market_cap || 0, volume24h: coin.total_volume || 0, change24h: coin.price_change_percentage_24h || 0, change7d: coin.price_change_percentage_7d_in_currency || 0, image: coin.image || '' };
-  });
+  const stablecoins = data.map((coin) => classifyStablecoin(coin));
   const totalMarketCap = stablecoins.reduce((s, c) => s + c.marketCap, 0);
   const totalVolume24h = stablecoins.reduce((s, c) => s + c.volume24h, 0);
   const depeggedCount = stablecoins.filter((c) => c.pegStatus === 'DEPEGGED').length;
