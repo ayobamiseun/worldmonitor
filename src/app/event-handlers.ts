@@ -973,9 +973,14 @@ export class EventHandlerManager implements AppModule {
       this.missionPresetPopover.removeEventListener('keydown', this.boundMissionKeydownHandler);
       this.boundMissionKeydownHandler = null;
     }
+    const hadFocus = this.missionPresetPopover?.contains(document.activeElement) ?? false;
     this.missionPresetPopover?.remove();
     this.missionPresetPopover = null;
-    document.getElementById('missionPresetBtn')?.setAttribute('aria-expanded', 'false');
+    const trigger = document.getElementById('missionPresetBtn');
+    trigger?.setAttribute('aria-expanded', 'false');
+    // Removing the popover while focus was inside it drops focus to <body>;
+    // hand it back to the trigger instead.
+    if (hadFocus) trigger?.focus();
   }
 
   private getMissionDefaultLayers(): MapLayers {

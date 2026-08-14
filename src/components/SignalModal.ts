@@ -6,6 +6,7 @@ import { getCSSColor } from '@/utils';
 import { getSignalContext, type SignalType } from '@/utils/analysis-constants';
 import { t } from '@/services/i18n';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
+import { createFocusTrap, type FocusTrap } from '@/utils/focus-trap';
 
 // Render-side display ceiling for a keyword spike's evidence list. Independent
 // of the emitter's own cap (MAX_SPIKE_ARTICLES) and deliberately higher, so it
@@ -27,6 +28,7 @@ export class SignalModal {
   private audio: HTMLAudioElement | null = null;
   private onLocationClick?: (lat: number, lon: number) => void;
   private escHandler = (e: KeyboardEvent) => { if (e.key === 'Escape') this.hide(); };
+  private focusTrap: FocusTrap | null = null;
 
   constructor() {
     this.element = document.createElement('div');
@@ -118,6 +120,10 @@ export class SignalModal {
 
   private activateEsc(): void {
     document.addEventListener('keydown', this.escHandler);
+    this.focusTrap ??= createFocusTrap(this.element, {
+      initialFocus: () => this.element.querySelector<HTMLElement>('.signal-modal-close'),
+    });
+    this.focusTrap.activate();
   }
 
   public show(signals: CorrelationSignal[]): void {
@@ -318,6 +324,7 @@ export class SignalModal {
   public hide(): void {
     this.element.classList.remove('active');
     document.removeEventListener('keydown', this.escHandler);
+    this.focusTrap?.deactivate();
   }
 
   private renderSignals(): void {
