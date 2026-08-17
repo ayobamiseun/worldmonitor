@@ -123,6 +123,7 @@ function makeInstance(initialTab = 'settings') {
     classList: { add() {} },
     querySelector() { return null; },
   };
+  instance.focusTrap = { activate() {} };
   instance.escapeHandler = () => {};
   instance.unsubscribeEntitlement = null;
   instance.unsubscribeEntitlementVerification = null;

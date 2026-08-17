@@ -90,9 +90,20 @@ interface SearchModalHarness {
   recentOrEmptyCalls: number;
   chipRenderCalls: number;
 }
-const Harness = new Function('isMobileDevice', 'overlayHistory', harnessJs)(
+const Harness = new Function('isMobileDevice', 'overlayHistory', 'createFocusTrap', harnessJs)(
   () => true,
   { open() {}, replace() {}, close() {} },
+  (
+    _container: HTMLElement,
+    options: { initialFocus?: HTMLElement | null | (() => HTMLElement | null) } = {},
+  ) => ({
+    activate() {
+      const initialFocus =
+        typeof options.initialFocus === 'function' ? options.initialFocus() : options.initialFocus;
+      initialFocus?.focus();
+    },
+    deactivate() {},
+  }),
 ) as new () => SearchModalHarness;
 
 function withAnimationFrames(run: (frames: FrameRequestCallback[]) => void): void {
