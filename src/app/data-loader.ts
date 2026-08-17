@@ -50,6 +50,10 @@ import {
   fetchPredictions,
   fetchEarthquakes,
   fetchWeatherAlerts,
+  fetchCanadaRoads,
+  CANADA_ROAD_FRESHNESS_IDS,
+  getCanadaRoadSourceStates,
+  fetchCanadaAlerts,
   fetchInternetOutages,
   fetchTrafficAnomalies,
   fetchDdosAttacks,
@@ -863,9 +867,12 @@ export class DataLoaderManager implements AppModule {
       if (hasPremiumAccess() && shouldLoad('stock-backtest')) {
         tasks.push({ name: 'stockBacktest', task: () => runGuarded('stockBacktest', () => this.loadStockBacktest()) });
       }
-      if (hasPremiumAccess() && shouldLoad('daily-market-brief')) {
-        tasks.push({ name: 'dailyMarketBrief', task: () => runGuarded('dailyMarketBrief', () => this.loadDailyMarketBrief()) });
-      }
+      // The daily market brief is loaded by the post-hydration pass below
+      // (search for `loadDailyMarketBrief()`), which calls it directly.
+      // loadDailyMarketBrief already self-guards on the shared inFlight set, so
+      // an earlier hydration task that re-locked the same key here always
+      // returned immediately — a guaranteed no-op. Removed (#6770); the direct
+      // post-pass call is the single source of truth.
       if (shouldLoad('polymarket')) {
         tasks.push({ name: 'predictions', task: () => runGuarded('predictions', () => this.loadPredictions()) });
       }
@@ -977,7 +984,11 @@ export class DataLoaderManager implements AppModule {
     }
 
     if (SITE_VARIANT === 'full' && (shouldLoad('satellite-fires') || this.ctx.mapLayers.natural)) {
-      tasks.push({ name: 'firms', task: () => runGuarded('firms', () => this.loadFirmsData()) });
+      // Lock under the map-layer key ('fires') so a hydration load and a
+      // loadDataForLayer('fires') toggle one-flight each other instead of
+      // double-fetching (loadFirmsData has no internal guard). `name` stays
+      // 'firms' for hydration tiering (#6770).
+      tasks.push({ name: 'firms', task: () => runGuarded('fires', () => this.loadFirmsData()) });
     }
     if (this.ctx.mapLayers.natural) tasks.push({ name: 'natural', task: () => runGuarded('natural', () => this.loadNatural()) });
     if (this.ctx.mapLayers.diseaseOutbreaks || shouldLoad('disease-outbreaks')) tasks.push({ name: 'diseaseOutbreaks', task: () => runGuarded('diseaseOutbreaks', () => this.loadDiseaseOutbreaks()) });
@@ -985,6 +996,8 @@ export class DataLoaderManager implements AppModule {
     if (hasPremiumAccess() && shouldLoad('wsb-ticker-scanner')) tasks.push({ name: 'wsbTickers', task: () => runGuarded('wsbTickers', () => this.loadWsbTickers()) });
     if (shouldLoad('economic')) tasks.push({ name: 'economicStress', task: () => runGuarded('economicStress', () => this.loadEconomicStress()) });
     if (SITE_VARIANT !== 'happy' && this.ctx.mapLayers.weather) tasks.push({ name: 'weather', task: () => runGuarded('weather', () => this.loadWeatherAlerts()) });
+    if (SITE_VARIANT !== 'happy' && this.ctx.mapLayers.canadaRoads) tasks.push({ name: 'canadaRoads', task: () => runGuarded('canadaRoads', () => this.loadCanadaRoads()) });
+    if (SITE_VARIANT !== 'happy' && this.ctx.mapLayers.canadaAlerts) tasks.push({ name: 'canadaAlerts', task: () => runGuarded('canadaAlerts', () => this.loadCanadaAlerts()) });
     if (SITE_VARIANT !== 'happy' && !isDesktopRuntime() && this.ctx.mapLayers.ais) tasks.push({ name: 'ais', task: () => runGuarded('ais', () => this.loadAisSignals()) });
     if (SITE_VARIANT !== 'happy' && this.ctx.mapLayers.cables) tasks.push({ name: 'cables', task: () => runGuarded('cables', () => this.loadCableActivity()) });
     if (SITE_VARIANT !== 'happy' && this.ctx.mapLayers.cables) tasks.push({ name: 'cableHealth', task: () => runGuarded('cableHealth', () => this.loadCableHealth()) });
@@ -1006,7 +1019,11 @@ export class DataLoaderManager implements AppModule {
       }
     }
     if (SITE_VARIANT !== 'happy' && (shouldLoad('radiation-watch') || this.ctx.mapLayers.radiationWatch)) {
-      tasks.push({ name: 'radiation', task: () => runGuarded('radiation', () => this.loadRadiationWatch()) });
+      // Lock under the map-layer key ('radiationWatch') so a hydration load and
+      // a loadDataForLayer('radiationWatch') toggle one-flight each other
+      // (loadRadiationWatch has no internal guard). `name` stays 'radiation' for
+      // hydration tiering (#6770).
+      tasks.push({ name: 'radiation', task: () => runGuarded('radiationWatch', () => this.loadRadiationWatch()) });
     }
 
     // tech-readiness is only seeded on full + tech variants (api/bootstrap.js +
@@ -1063,6 +1080,12 @@ export class DataLoaderManager implements AppModule {
           break;
         case 'weather':
           await this.loadWeatherAlerts();
+          break;
+        case 'canadaRoads':
+          await this.loadCanadaRoads();
+          break;
+        case 'canadaAlerts':
+          await this.loadCanadaAlerts();
           break;
         case 'outages':
           await this.loadOutages();
@@ -2824,6 +2847,45 @@ export class DataLoaderManager implements AppModule {
     }
   }
 
+  async loadCanadaRoads(): Promise<void> {
+    try {
+      const records = await fetchCanadaRoads();
+      const sourceStates = getCanadaRoadSourceStates();
+      const degradedSources = Object.entries(sourceStates)
+        .filter(([, state]) => state === 'unavailable' || state === 'malformed')
+        .map(([key]) => key);
+      this.ctx.map?.setCanadaRoads(records);
+      this.ctx.map?.setLayerReady('canadaRoads', records.length > 0);
+      this.ctx.statusPanel?.updateFeed('Canada Roads', {
+        status: degradedSources.length > 0 ? 'warning' : 'ok',
+        itemCount: records.length,
+        errorMessage: degradedSources.length > 0
+          ? `Partial coverage: ${degradedSources.join(', ')}`
+          : undefined,
+      });
+      // Per source, not one blanket ontario_511. Four feeds union onto this
+      // layer, and attributing all of them to Ontario meant an Alberta, Toronto
+      // or BC outage either read as an Ontario failure or — for the two with no
+      // id at all — never reached the freshness panel. getCanadaRoadSourceStates
+      // already knows which one is degraded; this just stops discarding it.
+      for (const { key, freshnessId } of CANADA_ROAD_FRESHNESS_IDS) {
+        const state = sourceStates[key];
+        if (state === 'unavailable' || state === 'malformed') {
+          dataFreshness.recordError(freshnessId, `${key}: ${state}`);
+        } else {
+          dataFreshness.recordUpdate(freshnessId, records.length);
+        }
+      }
+    } catch (error) {
+      this.ctx.map?.setLayerReady('canadaRoads', false);
+      this.ctx.statusPanel?.updateFeed('Canada Roads', { status: 'error' });
+      // The whole fetch failed, so every source is unknown — not just Ontario.
+      for (const { freshnessId } of CANADA_ROAD_FRESHNESS_IDS) {
+        dataFreshness.recordError(freshnessId, String(error));
+      }
+    }
+  }
+
   async loadWeatherAlerts(): Promise<void> {
     try {
       const alerts = await fetchWeatherAlerts();
@@ -2835,6 +2897,18 @@ export class DataLoaderManager implements AppModule {
       this.ctx.map?.setLayerReady('weather', false);
       this.ctx.statusPanel?.updateFeed('Weather', { status: 'error' });
       dataFreshness.recordError('weather', String(error));
+    }
+  }
+
+  async loadCanadaAlerts(): Promise<void> {
+    try {
+      const alerts = await fetchCanadaAlerts();
+      this.ctx.map?.setCanadaAlerts(alerts);
+      this.ctx.map?.setLayerReady('canadaAlerts', alerts.length > 0);
+      this.ctx.statusPanel?.updateFeed('Canada alerts', { status: 'ok', itemCount: alerts.length });
+    } catch (error) {
+      this.ctx.map?.setLayerReady('canadaAlerts', false);
+      this.ctx.statusPanel?.updateFeed('Canada alerts', { status: 'error' });
     }
   }
 

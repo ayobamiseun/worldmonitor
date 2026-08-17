@@ -687,14 +687,16 @@ describe('CI workflow coverage', () => {
 
     assert.match(
       deployGateWorkflow,
-      /^ {2}group: deploy-gate-\$\{\{ github\.event\.workflow_run\.head_sha \|\| 'sweep' \}\}$/m,
-      'schedule and workflow_dispatch must share one sweep concurrency group while workflow_run stays keyed by SHA',
+      /^ {2}group: deploy-gate-\$\{\{ github\.event\.workflow_run\.head_sha \|\| github\.event\.inputs\.sha \|\| 'sweep' \}\}$/m,
+      'schedule and empty dispatches share one sweep group; workflow_run and sha-input dispatches stay keyed by SHA',
     );
     assert.match(
       deployGateWorkflow,
-      /^run-name: Deploy Gate \$\{\{ github\.event\.workflow_run\.head_sha \|\| github\.event_name \}\}$/m,
+      /^run-name: Deploy Gate \$\{\{ github\.event\.workflow_run\.head_sha \|\| github\.event\.inputs\.sha \|\| github\.event_name \}\}$/m,
     );
     assert.match(deployGateJob, /graphql --paginate --slurp/);
+    assert.match(deployGateJob, /falling back to REST/);
+    assert.match(deployGateJob, /commits\/\$eval_sha\/check-runs\?per_page=100/);
     assert.match(deployGateJob, /pullRequests\(first: 100, states: \[OPEN\], after: \$endCursor\)/);
     assert.match(deployGateJob, /pageInfo \{ hasNextPage endCursor \}/);
     assert.match(deployGateJob, /contexts\(first: 100, after: \$endCursor\)/);
@@ -761,6 +763,75 @@ describe('CI workflow coverage', () => {
     for (const path of ['src-tauri/Cargo.toml', 'src-tauri/src/main.rs', 'README.md', 'docs/desktop-app.mdx']) {
       assert.ok(!codeFilterSays(path), `${path} must not set code=true`);
     }
+  });
+
+  it('routes generated OpenAPI artifacts into the owning unit job (#6558, #6650)', () => {
+    // Executes the real awk rather than matching its source. These artifacts
+    // live under `docs/`, which the blanket `/^docs\// { next }` rule excludes,
+    // so the carve-outs are the only thing keeping an OpenAPI-only PR from
+    // setting code=false and skipping the contract tests in `unit`.
+    const awkBlock = shellAwkAssignmentBlock('CODE');
+    const codeFilterSays = (path: string) => evaluateAwkAssignmentBlock(awkBlock, [path]) > 0;
+
+    assert.ok(
+      codeFilterSays('docs/api/worldmonitor.openapi.yaml'),
+      'a PR that only regenerates the unified OpenAPI bundle must still run the unit job',
+    );
+    for (const path of [
+      'docs/api/MarketService.openapi.json',
+      'docs/api/MarketService.openapi.yaml',
+    ]) {
+      assert.ok(
+        codeFilterSays(path),
+        `${path} must set code=true so the OpenAPI filter-parameter contract test runs`,
+      );
+    }
+    // Prose under docs/ stays excluded — the carve-out is for the machine
+    // artifact, not for the directory.
+    for (const path of ['docs/api-reference.mdx', 'docs/perf/openapi-bundle-capacity-2026-08-13.md']) {
+      assert.ok(!codeFilterSays(path), `${path} must not set code=true`);
+    }
+
+    const unit = testJobBlock('unit');
+    assert.match(
+      unit,
+      /^\s+run: node scripts\/openapi-capacity-report\.mjs --out "\$RUNNER_TEMP\/openapi-capacity\.json"\s*$/m,
+      'unit job must publish the OpenAPI capacity report',
+    );
+    // No `--budget`: the step must measure against the real 950,000 guard. The
+    // flag exists for local what-if analysis and to exercise the over-budget
+    // exit in tests, and passing it here would be the one-line way to make the
+    // reported headroom mean nothing.
+    assert.ok(
+      !/openapi-capacity-report\.mjs[^\n]*--budget/.test(unit),
+      'the CI step must not override the scanner budget',
+    );
+    assert.match(
+      unit,
+      /name: openapi-capacity-\$\{\{ github\.run_attempt \}\}/,
+      'the capacity artifact name must carry run_attempt — upload-artifact v6 rejects a duplicate name within a run, which collides on the re-run started to chase the failure',
+    );
+    assert.match(
+      unit,
+      /path: \$\{\{ runner\.temp \}\}\/openapi-capacity\.json/,
+      'the capacity artifact must be read from the same path the step wrote',
+    );
+    // `if: failure()` would publish nothing on a green run and `if: success()`
+    // nothing on a red one; the breakdown is worth reading in both cases, and
+    // an over-budget run is when it matters most. Narrowing this to either
+    // would stop publishing on exactly the runs someone goes looking for it.
+    const upload = unit.slice(unit.indexOf('- name: Upload OpenAPI capacity report'));
+    assert.match(
+      upload.slice(0, upload.indexOf('- name: ', 1)),
+      /if: \$\{\{ !cancelled\(\) \}\}/,
+      'the capacity artifact must be uploaded whether the step passed or failed',
+    );
+    // The report must run BEFORE the suite: an over-budget artifact fails
+    // test:data anyway, and failing at the front costs 30s instead of 10min.
+    assert.ok(
+      unit.indexOf('openapi-capacity-report.mjs') < unit.indexOf('npm run test:data'),
+      'the capacity report must run before the test suite',
+    );
   });
 
   it('keeps resilience validation bundle inputs in the CI change filter', () => {

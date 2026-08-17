@@ -1,4 +1,5 @@
 import COUNTRY_BBOXES from '../../../shared/country-bboxes.js';
+import { isOpenSkyProvider } from '../../../shared/provider-redistribution';
 import {
   CHINA_DECISION_SIGNAL_GROUP_IDS,
   CHINA_DECISION_SIGNAL_MAX_SERIALIZED_BYTES,
@@ -771,7 +772,7 @@ export const RPC_TOOLS: ToolDef[] = [
         headers: { ...auth, 'User-Agent': 'worldmonitor-mcp-edge/1.0' },
         signal: AbortSignal.timeout(8_000),
       });
-      assertToolFetchOk(response, 'list-global-tenders');
+      await assertToolFetchOk(response, 'list-global-tenders');
       const result = await response.json() as ProcurementRouteResponse;
       return {
         opportunities: (result.tenders || []).map(compactProcurementOpportunity),
@@ -1188,7 +1189,7 @@ export const RPC_TOOLS: ToolDef[] = [
         headers: { ...auth, 'User-Agent': 'worldmonitor-mcp-edge/1.0' },
         signal: AbortSignal.timeout(8_000),
       });
-      assertToolFetchOk(res, 'get-country-risk');
+      await assertToolFetchOk(res, 'get-country-risk');
       return res.json();
     },
     _apiPaths: [
@@ -1271,7 +1272,7 @@ export const RPC_TOOLS: ToolDef[] = [
         headers: { ...auth, 'User-Agent': 'worldmonitor-mcp-edge/1.0' },
         signal: AbortSignal.timeout(8_000),
       });
-      assertToolFetchOk(res, 'get-food-stocks');
+      await assertToolFetchOk(res, 'get-food-stocks');
       return res.json();
     },
     _apiPaths: [
@@ -1419,7 +1420,7 @@ export const RPC_TOOLS: ToolDef[] = [
   {
     name: 'get_airspace',
     _outputBudgetBytes: 262144,
-    description: 'Live ADS-B aircraft over a country. Returns civilian flights (OpenSky) and identified military aircraft with callsigns, positions, altitudes, and headings. Answers questions like "how many planes are over the UAE right now?" or "are there military aircraft over Taiwan?"',
+    description: 'Live ADS-B aircraft over a country. Returns Wingbits-backed civilian flights and identified military aircraft from redistributable providers, with callsigns, positions, altitudes, and headings. Answers questions like "how many planes are over the UAE right now?" or "are there military aircraft over Taiwan?"',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1482,7 +1483,7 @@ export const RPC_TOOLS: ToolDef[] = [
         updated_at?: number;
       };
       type MilResp = {
-        flights?: { callsign: string; hex_code: string; aircraft_type: string; aircraft_model: string; operator: string; operator_country: string; location?: { latitude: number; longitude: number }; altitude: number; heading: number; speed: number; is_interesting: boolean; note: string }[];
+        flights?: { callsign: string; hex_code: string; aircraft_type: string; aircraft_model: string; operator: string; operator_country: string; location?: { latitude: number; longitude: number }; altitude: number; heading: number; speed: number; is_interesting: boolean; note: string; source?: string }[];
       };
 
       const civUrl = `${base}/api/aviation/v1/track-aircraft?${bboxQ}`;
@@ -1517,13 +1518,20 @@ export const RPC_TOOLS: ToolDef[] = [
         }
       }
 
-      const civOk = type === 'military' || civResult.status === 'fulfilled';
+      const civRaw = civResult.status === 'fulfilled' ? civResult.value : null;
+      const civProviderAllowed = !civRaw || !isOpenSkyProvider(civRaw.source);
+      const civOk = type === 'military' || (civResult.status === 'fulfilled' && civProviderAllowed);
       const milOk = type === 'civilian' || milResult.status === 'fulfilled';
 
       // Both sources down — total outage, don't return misleading empty data
-      if (!civOk && !milOk) throw new BothSourcesFailedError(civResult.reason, milResult.reason);
+      if (!civOk && !milOk) {
+        const civilianFailure = civResult.status === 'rejected'
+          ? civResult.reason
+          : new Error('Civilian observations are not redistributable');
+        throw new BothSourcesFailedError(civilianFailure, milResult.reason);
+      }
 
-      const civ = civResult.status === 'fulfilled' ? civResult.value : null;
+      const civ = civProviderAllowed ? civRaw : null;
       const mil = milResult.status === 'fulfilled' ? milResult.value : null;
       const warnings: string[] = [];
       if (!civOk) warnings.push('civilian ADS-B data unavailable');
@@ -1535,7 +1543,12 @@ export const RPC_TOOLS: ToolDef[] = [
         altitude_m: p.altitude_m, speed_kts: p.ground_speed_kts,
         heading_deg: p.track_deg, on_ground: p.on_ground,
       }));
-      const militaryFlights = (mil?.flights ?? []).slice(0, 100).map(f => ({
+      const redistributableMilitaryFlights = (mil?.flights ?? [])
+        .filter((flight) => !isOpenSkyProvider(flight.source));
+      if (redistributableMilitaryFlights.length !== (mil?.flights ?? []).length) {
+        warnings.push('some military flight observations unavailable');
+      }
+      const militaryFlights = redistributableMilitaryFlights.slice(0, 100).map(f => ({
         callsign: f.callsign, hex_code: f.hex_code,
         aircraft_type: f.aircraft_type, aircraft_model: f.aircraft_model,
         operator: f.operator, operator_country: f.operator_country,
@@ -1552,7 +1565,7 @@ export const RPC_TOOLS: ToolDef[] = [
         ...(type !== 'military' && { civilian_flights: civilianFlights }),
         ...(type !== 'civilian' && { military_flights: militaryFlights }),
         ...(warnings.length > 0 && { partial: true, warnings }),
-        source: civ?.source ?? 'opensky',
+        source: civ?.source ?? redistributableMilitaryFlights.find((flight) => flight.source)?.source ?? 'none',
         updated_at: civ?.updated_at ? new Date(civ.updated_at).toISOString() : new Date().toISOString(),
       };
     },
@@ -1725,7 +1738,7 @@ export const RPC_TOOLS: ToolDef[] = [
         body,
         signal: AbortSignal.timeout(25_000),
       });
-      assertToolFetchOk(res, 'deduct-situation');
+      await assertToolFetchOk(res, 'deduct-situation');
       return res.json();
     },
     _apiPaths: [
@@ -1768,7 +1781,7 @@ export const RPC_TOOLS: ToolDef[] = [
         body,
         signal: AbortSignal.timeout(25_000),
       });
-      assertToolFetchOk(res, 'get-forecasts');
+      await assertToolFetchOk(res, 'get-forecasts');
       return res.json();
     },
     _apiPaths: [],
@@ -1831,7 +1844,7 @@ export const RPC_TOOLS: ToolDef[] = [
         headers: { ...auth, 'User-Agent': 'worldmonitor-mcp-edge/1.0' },
         signal: AbortSignal.timeout(25_000),
       });
-      assertToolFetchOk(res, 'search-google-flights');
+      await assertToolFetchOk(res, 'search-google-flights');
       return res.json();
     },
     _apiPaths: [
@@ -1889,7 +1902,7 @@ export const RPC_TOOLS: ToolDef[] = [
         headers: { ...auth, 'User-Agent': 'worldmonitor-mcp-edge/1.0' },
         signal: AbortSignal.timeout(25_000),
       });
-      assertToolFetchOk(res, 'search-google-dates');
+      await assertToolFetchOk(res, 'search-google-dates');
       return res.json();
     },
     _apiPaths: [
@@ -1968,7 +1981,7 @@ export const RPC_TOOLS: ToolDef[] = [
         headers: { ...auth, 'User-Agent': 'worldmonitor-mcp-edge/1.0' },
         signal: AbortSignal.timeout(15_000),
       });
-      assertToolFetchOk(res, 'get-mineral-production');
+      await assertToolFetchOk(res, 'get-mineral-production');
       return res.json();
     },
     _coverageKeys: [

@@ -1175,7 +1175,8 @@ export class LiveNewsPanel extends Panel {
   private showOfflineMessage(channel: LiveChannel): void {
     this.destroyPlayer();
     const safeName = escapeHtml(channel.name);
-    setTrustedHtml(this.content, trustedHtml(`
+    // #6557: a terminal offline state is authoritative content.
+    this.setTrustedContent(trustedHtml(`
       <div class="live-offline live-offline-compact">
         <div class="offline-icon">📺</div>
         <div class="offline-text">${t('components.liveNews.notLive', { name: safeName })}</div>
@@ -1193,7 +1194,8 @@ export class LiveNewsPanel extends Panel {
       : 'https://www.youtube.com';
     const safeName = escapeHtml(channel.name);
 
-    setTrustedHtml(this.content, trustedHtml(`
+    // #6557: a terminal embed-error state is authoritative content.
+    this.setTrustedContent(trustedHtml(`
       <div class="live-offline live-offline-compact">
         <div class="offline-icon">!</div>
         <div class="offline-text">${t('components.liveNews.cannotEmbed', { name: safeName, code: String(errorCode) })}</div>

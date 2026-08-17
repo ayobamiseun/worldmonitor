@@ -219,6 +219,11 @@ const BOOTSTRAP_KEYS = {
   ucdpEvents:        'conflict:ucdp-events:v1',
   ucdpEventsBootstrap: 'conflict:ucdp-events-bootstrap:v1',
   weatherAlerts:     'weather:alerts:v1',
+  canadaRoads:       'infra:ontario-511:v1',
+  albertaRoads:      'infra:alberta-511:v1',
+  torontoRoads:      'infra:toronto-roads:v1',
+  bcOpen511:         'infra:bc-open511:v1',
+  canadaAlerts:      'alerts:alberta-aea:v1',
   spending:          'economic:spending:v1',
   techEvents:        'research:tech-events-bootstrap:v1',
   gdeltIntel:        'intelligence:gdelt-intel:v1',
@@ -325,6 +330,8 @@ const STANDALONE_KEYS = {
   // registering it in a tier would add ~6KB to a payload every client
   // downloads and only the opt-in panel consumes.
   cbrRates:              'economic:cbr-rates:v1',
+  bocValet:              'economic:boc-valet:v1',
+  statcanWds:            'economic:statcan-wds:v1',
   bisPropertyResidential: 'economic:bis:property-residential:v1',
   bisPropertyCommercial:  'economic:bis:property-commercial:v1',
   imfMacro:             'economic:imf:macro:v2',
@@ -487,6 +494,12 @@ const STANDALONE_KEYS = {
   // and alarms earlier than the underlying seed-meta staleness window.
   chokepointFlowsRelayHeartbeat: 'relay:heartbeat:chokepoint-flows',
   climateNewsRelayHeartbeat:     'relay:heartbeat:climate-news',
+  // Bundle tick heartbeat written by `_bundle-runner.mjs` on every container
+  // start, including skip-all ticks. Detects Railway cron-scheduler freeze
+  // (#6691) that member seed-meta budgets (17.5d+) cannot see.
+  staticRefBundleTick:           'bundle:heartbeat:static-ref',
+  armsSuppliersBundleTick:       'bundle:heartbeat:arms-suppliers',
+  militaryBasesBundleTick:       'bundle:heartbeat:military-bases',
   telegramFeed:                  'intelligence:telegram-feed:v1',
   digestNotifications:           'digest:last-run',
   webcams:                       'webcam:cameras:active',
@@ -505,6 +518,10 @@ const STANDALONE_KEYS = {
   intelHistoryIngestConflictAcled:    'intel-history:ingest-health:conflict:acled-intel:v1',
   intelHistoryIngestMilitaryCrossStrait: 'intel-history:ingest-health:military:cross-strait-activity:v1',
   intelHistoryIngestEnergyIntelligence:  'intel-history:ingest-health:energy:intelligence:v1',
+  // VIA Rail Tracker unofficial live JSON (#6615). No dashboard consumer.
+  viarailLive:           'transit:viarail:live',
+  // Seeded and health-monitored; no transit panel yet (#6623).
+  ttcAlerts: 'transit:ttc:alerts:v1',
 };
 
 const SEED_META = {
@@ -676,6 +693,61 @@ const SEED_META = {
   satellites:       { key: 'seed-meta:intelligence:satellites',    maxStaleMin: 240 }, // CelesTrak every 120min; 240min = absorbs one missed cycle
   temporalAnomalies:{ key: 'seed-meta:temporal:anomalies',          maxStaleMin: 45 }, // request-driven producer kept warm by seed-infra; data TTL is 60min so health reaches STALE_SEED before EMPTY
   weatherAlerts:    { key: 'seed-meta:weather:alerts',             maxStaleMin: 45 }, // relay loop every 15min; 45 = 3× interval (was 30 = 2×, too tight on relay hiccup)
+  canadaRoads:      {
+    key: 'seed-meta:infra:ontario-511',
+    maxStaleMin: 45, // seed-provincial-511 cron */15; 45 = 3× interval
+    cutover: {
+      mode: 'expiring-ack',
+      fromKey: null,
+      issue: 6608,
+      status: 'EMPTY',
+    },
+  },
+  albertaRoads:     {
+    key: 'seed-meta:infra:alberta-511',
+    maxStaleMin: 45, // same seed-provincial-511 cron */15; 45 = 3× interval
+    cutover: {
+      mode: 'expiring-ack',
+      fromKey: null,
+      issue: 6612,
+      status: 'EMPTY',
+    },
+  },
+  torontoRoads:     {
+    key: 'seed-meta:infra:toronto-roads',
+    maxStaleMin: 360, // seed-bundle-canada member interval 2h; 360 = 3× interval. At the old 45 (sized for a */15 cron) a healthy 2h publisher read STALE_SEED permanently, because normal data age reaches 120min.
+    cutover: {
+      mode: 'expiring-ack',
+      fromKey: null,
+      issue: 6609,
+      status: 'EMPTY',
+    },
+  },
+  bcOpen511:        {
+    key: 'seed-meta:infra:bc-open511',
+    maxStaleMin: 90, // seed-bundle-canada member interval 30min; 90 = 3× interval, and matches this seeder's own 5400s TTL. At the old 45 a single missed tick tripped STALE_SEED.
+    cutover: {
+      mode: 'expiring-ack',
+      fromKey: null,
+      issue: 6611,
+      status: 'EMPTY',
+    },
+  },
+  canadaAlerts:     {
+    key: 'seed-meta:alerts:alberta-aea',
+    maxStaleMin: 45, // seed-alberta-emergency-alert cron */15; 45 = 3× interval
+    cutover: {
+      mode: 'expiring-ack',
+      fromKey: null,
+      issue: 6610,
+      status: 'EMPTY',
+    },
+  },
+  // seed-meta is `seed-meta:${domain}:${resource}` from runSeed('transit', 'ttc-alerts'),
+  // so the key takes a HYPHEN — it is NOT the canonical transit:ttc:alerts:v1 with
+  // :v1 stripped. The colon form probed a key the seeder never writes, which reads
+  // absent forever no matter how healthy the seeder is.
+  ttcAlerts:        { key: 'seed-meta:transit:ttc-alerts',         maxStaleMin: 30, cutover: { mode: 'expiring-ack', fromKey: null, issue: 6623, status: 'EMPTY' } }, // 5min bundle member; 30 = 6× interval. Empty until first Railway tick is an expiring acknowledgement, not a crit.
   spending:         { key: 'seed-meta:economic:spending',          maxStaleMin: 120 },
   globalTenders:    { key: 'seed-meta:economic:global-tenders',   maxStaleMin: 180 },
   globalTendersSam:             { key: 'seed-meta:economic:global-tenders:sam',              maxStaleMin: 240 }, // 150min request pacing + hourly member gate yields ~180min publishes; 240min leaves one gate of scheduling jitter without raising the 10/day SAM budget.
@@ -826,6 +898,28 @@ const SEED_META = {
   // a truncated cbr.ru body still parses into a handful of well-formed rows, so
   // a shrunken table must surface as COVERAGE_PARTIAL rather than OK.
   cbrRates:          { key: 'seed-meta:economic:cbr-rates',           maxStaleMin: 4320, minRecordCount: 31 },
+  bocValet:          {
+    key: 'seed-meta:economic:boc-valet',
+    maxStaleMin: 4320,
+    minRecordCount: 19,
+    cutover: {
+      mode: 'expiring-ack',
+      fromKey: null,
+      issue: 6616,
+      status: 'EMPTY',
+    },
+  }, // daily seed-bundle-macro 08:00 UTC; 4320min = 3x interval. minRecordCount = 15 FX pairs + policy rate + 2y/5y/10y yields.
+  statcanWds:        {
+    key: 'seed-meta:economic:statcan-wds',
+    maxStaleMin: 4320,
+    minRecordCount: 2,
+    cutover: {
+      mode: 'expiring-ack',
+      fromKey: null,
+      issue: 6676,
+      status: 'EMPTY',
+    },
+  }, // daily seed-bundle-macro 08:00 UTC. Toronto-today 409 "not released yet" is quiet like 404; CPI/LFS still POST. EMPTY ack #6676 expires 2026-08-16T08:00Z (real cron tick, not 13:00Z). Floor is the two resilience cubes (CPI YoY + LFS).
   eurostatCountryData: { key: 'seed-meta:economic:eurostat-country-data', maxStaleMin: 4320 }, // daily seed; 4320min = 3 days = 3x interval
   eurostatHousePrices: { key: 'seed-meta:economic:eurostat-house-prices', maxStaleMin: 60 * 24 * 50 }, // weekly cron, annual data; 50d threshold = 35d TTL + 15d buffer
   eurostatGovDebtQ:    { key: 'seed-meta:economic:eurostat-gov-debt-q',   maxStaleMin: 60 * 24 * 14 }, // 2d cron, quarterly data; 14d threshold matches TTL + quarterly release drift
@@ -913,6 +1007,36 @@ const SEED_META = {
   // than the 720min seed-meta threshold above. TTL is 18h on the writer.
   chokepointFlowsRelayHeartbeat: { key: 'relay:heartbeat:chokepoint-flows', maxStaleMin: 480 }, // 6h loop; 8h alarm
   climateNewsRelayHeartbeat:     { key: 'relay:heartbeat:climate-news',     maxStaleMin: 60 },  // 30m loop; 60m alarm
+  staticRefBundleTick: {
+    key: 'bundle:heartbeat:static-ref',
+    maxStaleMin: 2880, // daily cron `0 3 * * *`; 48h = 2× cadence
+    cutover: {
+      mode: 'expiring-ack',
+      fromKey: null,
+      issue: 6691,
+      status: 'EMPTY',
+    },
+  },
+  armsSuppliersBundleTick: {
+    key: 'bundle:heartbeat:arms-suppliers',
+    maxStaleMin: 2880, // daily cron `0 4 * * *`; 48h = 2× cadence
+    cutover: {
+      mode: 'expiring-ack',
+      fromKey: null,
+      issue: 6806,
+      status: 'EMPTY',
+    },
+  },
+  militaryBasesBundleTick: {
+    key: 'bundle:heartbeat:military-bases',
+    maxStaleMin: 2880, // daily cron `0 5 * * *`; 48h = 2× cadence
+    cutover: {
+      mode: 'expiring-ack',
+      fromKey: null,
+      issue: 6806,
+      status: 'EMPTY',
+    },
+  },
   emberElectricity:     { key: 'seed-meta:energy:ember',                maxStaleMin: 2880 }, // daily cron (08:00 UTC); 2880min = 48h = 2x interval
   cryptoSectors:        { key: 'seed-meta:market:crypto-sectors',             maxStaleMin: 120 }, // relay loop every ~30min; 120min = 2h = 4x interval
   ddosAttacks:          { key: 'seed-meta:cf:radar:ddos',                    maxStaleMin: 60 }, // written by seed-internet-outages afterPublish; outages cron ~15min; 60 = 4x interval
@@ -994,6 +1118,20 @@ const SEED_META = {
   intelHistoryIngestConflictAcled:       { key: 'seed-meta:intel-history:conflict:acled-intel',            maxStaleMin: 38 },  // mirrors acledIntel
   intelHistoryIngestMilitaryCrossStrait: { key: 'seed-meta:intel-history:military:cross-strait-activity',  maxStaleMin: 720 }, // mirrors crossStraitActivity
   intelHistoryIngestEnergyIntelligence:  { key: 'seed-meta:intel-history:energy:intelligence',             maxStaleMin: 720 }, // mirrors energyIntelligence
+  // Unofficial tsimobile.viarail.ca JSON. Optional: 404/shape-break writes
+  // sourceState unavailable (NOT_CONFIGURED) rather than SEED_ERROR. 15min
+  // cron; 45 = 3x cadence. EMPTY_DATA_OK so an unconfigured deploy is STALE_SEED
+  // (warn), not EMPTY (crit), until the first producer tick.
+  viarailLive: {
+    key: 'seed-meta:transit:viarail-live',
+    maxStaleMin: 45,
+    cutover: {
+      mode: 'expiring-ack',
+      fromKey: null,
+      issue: 6615,
+      status: 'STALE_SEED',
+    },
+  },
 };
 
 // consumer-prices-core publishes coverage for every currently enabled market.
@@ -1057,6 +1195,11 @@ const ON_DEMAND_KEYS = new Set([
   // unactionable EMPTY/CRIT for up to a day. seed-cbr-rates.mjs SETs the durable
   // marker after its first successful publish; from then on it is strict forever.
   'cbrRates',
+  // Same deploy-before-first-tick bridge as cbrRates for the two Canada
+  // national-statistics seeders (#6616). Softening lifts once the durable
+  // activation marker exists.
+  'bocValet',
+  'statcanWds',
   'riskScoresLive',
   'usniFleetStale', 'positiveEventsLive',
   'bisPolicy', 'bisExchange', 'bisCredit',
@@ -1124,6 +1267,8 @@ const ACTIVATION_MARKERS = {
   // Written by scripts/seed-cbr-rates.mjs (CBR_ACTIVATION_KEY) in runSeed's
   // afterPublish hook, so it exists only once a real table has been published.
   cbrRates: 'seed-activated:economic:cbr-rates',
+  bocValet: 'seed-activated:economic:boc-valet',
+  statcanWds: 'seed-activated:economic:statcan-wds',
   newsFeedHealth: 'seed-activated:news:feed-health',
   newsRecallBenchmark: 'seed-activated:news:recall-benchmark',
   // Written by scripts/_seed-history.mjs on every ingest-health report,
@@ -1143,35 +1288,6 @@ const ACTIVATION_MARKERS = {
   // first publication one-way: a later disappearance is strict forever.
   fredRatesSeeder: 'seed-activated:economic:fred-rates:v1',
 };
-
-// #6059 — consumer-price coverage rollout handshake.
-//
-// The coverage schema ships to Vercel the moment the PR merges, but the keys it
-// reads can only exist after consumer-prices-core's next daily
-// scrape(02:00)→aggregate(02:15)→publish(02:30 UTC) window. #6022 merged at
-// 2026-08-02 10:55 UTC — after that day's window — so all eight markets read
-// EMPTY (crit) and global health went UNHEALTHY for ~15h while the underlying
-// consumer-price data was fine. This is the deployment-order bridge for that.
-//
-// Two independent gates, both required, so the softened state can never become
-// permanent and can never come back once a market has published:
-//
-//   1. ACTIVATION (one-way, durable). consumer-prices-core/src/jobs/publish.ts
-//      SETs the marker below — no TTL — only after it writes a coverage
-//      snapshot that actually attempted pages for that market. Once the marker
-//      exists the market is strict forever: absent/empty/stale/below-threshold
-//      coverage classifies exactly as it would without this block.
-//   2. DEADLINE (bounded). Softening also stops at a wall-clock timestamp
-//      compiled into this file, whether or not the producer ever ran. A missed
-//      or failed first tick therefore escalates to EMPTY (crit) on its own.
-//
-// The marker key carries the schema version, so a future coverage-schema change
-// bumps `v1` and gets its own separately-reviewed rollout window instead of
-// inheriting activation earned by the old shape.
-const CONSUMER_PRICE_COVERAGE_SCHEMA_VERSION = 1;
-const consumerPriceCoverageActivationKey = (market) => (
-  `seed-activated:consumer-prices:coverage:v${CONSUMER_PRICE_COVERAGE_SCHEMA_VERSION}:${market}`
-);
 
 // #6182 — the terminal failure class behind a partial market's counts.
 //
@@ -1206,44 +1322,6 @@ function sanitizeCoverageFailureReasons(raw) {
   return clean;
 }
 
-// Per-market and deliberately not a shared constant: adding a ninth market
-// later must open a fresh, separately-reviewed window for THAT market only.
-// A single shared deadline would silently re-soften the eight that already
-// shipped if one of their activation markers had failed to write.
-//
-// 06:00Z is 3.5h after the publish job starts — one complete scrape/aggregate/
-// publish window plus slack, and still ~20h before the following tick, so a
-// missed first run cannot hide behind the window for a second day.
-// `from` is the deploy that introduced the market's coverage schema; `until` is
-// when its softening stops. Both are recorded so the "one complete daily window"
-// bound is checkable per market forever — anchoring the check to a single
-// historical deploy constant instead would make a ninth market added months from
-// now unable to declare a valid window at all.
-const CONSUMER_PRICE_COVERAGE_ROLLOUT = Object.freeze({
-  ae: { from: '2026-08-02T10:54:58Z', until: '2026-08-03T06:00:00Z' },
-  au: { from: '2026-08-02T10:54:58Z', until: '2026-08-03T06:00:00Z' },
-  br: { from: '2026-08-02T10:54:58Z', until: '2026-08-03T06:00:00Z' },
-  gb: { from: '2026-08-02T10:54:58Z', until: '2026-08-03T06:00:00Z' },
-  in: { from: '2026-08-02T10:54:58Z', until: '2026-08-03T06:00:00Z' },
-  sa: { from: '2026-08-02T10:54:58Z', until: '2026-08-03T06:00:00Z' },
-  sg: { from: '2026-08-02T10:54:58Z', until: '2026-08-03T06:00:00Z' },
-  us: { from: '2026-08-02T10:54:58Z', until: '2026-08-03T06:00:00Z' },
-});
-
-// name -> epoch ms after which ROLLOUT_PENDING softening is no longer offered.
-// Absent name = no rollout window; the key is strict from the first sweep.
-const ROLLOUT_PENDING_UNTIL_MS = {};
-const ROLLOUT_PENDING_FROM_MS = {};
-for (const market of CONSUMER_PRICE_HEALTH_MARKETS) {
-  const name = consumerPriceCoverageHealthName(market);
-  ACTIVATION_MARKERS[name] = consumerPriceCoverageActivationKey(market);
-  const window = CONSUMER_PRICE_COVERAGE_ROLLOUT[market];
-  const until = Date.parse(window?.until ?? '');
-  const from = Date.parse(window?.from ?? '');
-  if (Number.isFinite(until)) ROLLOUT_PENDING_UNTIL_MS[name] = until;
-  if (Number.isFinite(from)) ROLLOUT_PENDING_FROM_MS[name] = from;
-}
-
 function fredRatesRolloutCommands(now, vercelEnv = process.env.VERCEL_ENV) {
   // Preview deployments can run for days before merge and can share the same
   // Redis credentials. Letting one claim the deadline would recreate the fixed
@@ -1264,7 +1342,7 @@ function parseFredRatesRolloutUntil(results) {
 }
 
 const EMPTY_DATA_OK_KEYS = new Set([
-  'notamClosures', 'faaDelays', 'intlDelays', 'gpsjam', 'positiveGeoEvents', 'weatherAlerts',
+  'notamClosures', 'faaDelays', 'intlDelays', 'gpsjam', 'positiveGeoEvents', 'weatherAlerts', 'canadaRoads', 'albertaRoads', 'torontoRoads', 'bcOpen511', 'canadaAlerts',
   'earningsCalendar', 'econCalendar', 'cotPositioning',
   'usniFleet', // usniFleetStale covers the fallback; relay outages → WARN not CRIT
   'newsThreatSummary', // only written when classify produces country matches; quiet news periods = 0 countries, no write
@@ -1274,6 +1352,7 @@ const EMPTY_DATA_OK_KEYS = new Set([
   'cableHealth', // `cables: {}` = no active subsea cable disruptions per NGA NAVAREA warnings — all cables implicitly healthy. Also covers NGA-upstream-down windows where get-cable-health writes back the fallback response (empty cables); without this, those would alarm EMPTY_DATA.
   'forecastBets', // #5233 shadow bet-engine stream; absent before the cron ships it and empty on weeks the energy feed yields no bet — tolerate as STALE_SEED (warn), not EMPTY (crit).
   'forecastFunnel', // #5233 funnel guardrail is a new afterPublish side-write; before the first seed-forecasts run ships it the key is absent — tolerate as STALE_SEED (warn), not EMPTY (crit). A COLLAPSED funnel still surfaces via seed-meta status:'error' → SEED_ERROR, which classifyKey checks before this branch.
+  'viarailLive', // unofficial optional VIA Rail live JSON (#6615); unconfigured / 404 is STALE_SEED then NOT_CONFIGURED, never EMPTY/crit
   // Compact projections stay STALE_SEED before their first producer tick or
   // after metadata turns stale. Fresh metadata plus a missing payload is
   // deliberately strict: MISSING_DATA_IS_FAILURE_KEYS reports EMPTY (crit).
@@ -1302,6 +1381,21 @@ const MISSING_DATA_IS_FAILURE_KEYS = new Set([
   'forecastsBootstrap',
   'positiveGeoEvents',
   'crossStraitActivityBootstrap',
+  // The Canada road seeders publish an explicit {records: []} envelope on every
+  // successful tick (zeroIsValid -> contractState OK_ZERO -> canonical written),
+  // so they never refresh metadata alone. Without this, an expired or evicted
+  // canonical key alongside a still-refreshing seed-meta classified OK: the map
+  // layer goes blank and nothing pages. Same reasoning as `outages`.
+  // albertaRoads is written by the same seeder on the same publish path;
+  // torontoRoads is a different seeder under the same publish contract.
+  'canadaRoads',
+  'albertaRoads',
+  'torontoRoads',
+  'bcOpen511',
+  // Same contract, and the highest-stakes member of it: seed-alberta-emergency-alert
+  // runs with zeroIsValid, so a quiet province still writes {alerts: []}. Reading
+  // OK while an EMERGENCY ALERT payload has vanished is the worst failure in this set.
+  'canadaAlerts',
 ]);
 
 // Keys where a present payload with meta recordCount=0 is valid, but the data
@@ -1343,6 +1437,10 @@ const ZERO_RECORD_DATA_OK_KEYS = new Set([
   // A completed surge calculation can legitimately contain no surge events;
   // the canonical snapshot must still exist and remain fresh.
   'militarySurges',
+  // TTC GTFS-RT service alerts: a quiet window can validly contain zero
+  // disruptions. The seeder always publishes {alerts:[]}, so a missing
+  // canonical key is still EMPTY (crit).
+  'ttcAlerts',
 ]);
 
 // Cascade groups: if any key in the group has data, all empty siblings are OK.
@@ -1803,17 +1901,13 @@ function classifyKey(name, redisKey, opts, ctx) {
   // takes the opposite policy on the same unknown state.
   const isOnDemand = !!opts.allowOnDemand && ON_DEMAND_KEYS.has(name)
     && ctx.activationStates?.get(name) !== true;
-  // #6059 rollout bridge — see ROLLOUT_PENDING_UNTIL_MS. Unlike ON_DEMAND this
-  // needs no per-registry opt-in (`allowOnDemand`): the window is bounded by a
-  // deadline and revoked by a durable marker, so it cannot rot into a silent
-  // permanent exemption the way a registry-wide soften could. Most deadlines
-  // are compiled historical values; a new producer can instead supply a
-  // deployment-relative deadline through ctx.rolloutPendingUntilMs.
+  // Unlike ON_DEMAND, runtime rollout windows need no per-registry opt-in
+  // (`allowOnDemand`): each window is bounded by a deployment-relative deadline
+  // supplied through ctx.rolloutPendingUntilMs and revoked by a durable marker.
   // Soft on an unreadable marker for the same reasons as ON_DEMAND above, plus
   // the deadline: an unknown state can delay strictness only until
   // `rolloutPendingUntil`, so it can never grant a grace that never expires.
-  const rolloutPendingUntil = ctx.rolloutPendingUntilMs?.get(name)
-    ?? ROLLOUT_PENDING_UNTIL_MS[name];
+  const rolloutPendingUntil = ctx.rolloutPendingUntilMs?.get(name);
   const isRolloutPending = rolloutPendingUntil != null
     && now < rolloutPendingUntil
     && ctx.activationStates?.get(name) !== true;
@@ -2401,13 +2495,6 @@ function hasExpiredActivationGrace(snapshot, now, { includeRollout = true, inclu
     }
   }
   return false;
-}
-
-// Retained as a named test seam: tests/consumer-prices-coverage-rollout.test.mjs
-// asserts the rollout-only half of the shared predicate. Production reads the
-// general function directly, so both graces are checked on every cache hit.
-function hasExpiredRolloutPending(snapshot, now) {
-  return hasExpiredActivationGrace(snapshot, now, { includeContent: false });
 }
 
 /**
@@ -3028,19 +3115,15 @@ export const __testing__ = {
   collectFailureLogProblems,
   ACTIVATION_MARKERS,
   CONTENT_FRESHNESS_ROLLOUT_UNTIL_MS,
-  ROLLOUT_PENDING_UNTIL_MS,
-  ROLLOUT_PENDING_FROM_MS,
   RUNTIME_ROLLOUT_PENDING_POLICIES,
   FRED_RATES_ROLLOUT_DEADLINE_KEY,
   FRED_RATES_ROLLOUT_DURATION_MS,
   fredRatesRolloutCommands,
   parseFredRatesRolloutUntil,
   computeOverallStatus,
-  hasExpiredRolloutPending,
   hasExpiredActivationGrace,
   snapshotTtlSeconds,
   CONSUMER_PRICE_HEALTH_MARKETS,
-  consumerPriceCoverageActivationKey,
   consumerPriceCoverageHealthName,
   STATUS_COUNTS,
   // List-typed data keys + the command builder that measures them with LLEN
