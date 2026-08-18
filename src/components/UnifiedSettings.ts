@@ -711,6 +711,9 @@ export class UnifiedSettings {
     this.unsubscribeAuth = null;
     this.stopMcpQuotaPolling();
     document.removeEventListener('keydown', this.escapeHandler);
+    // Teardown, not a user-initiated close: release the trap's document
+    // listener without handing focus back to a trigger that is also going away.
+    this.focusTrap.deactivate({ restoreFocus: false });
     this.overlay.remove();
   }
 

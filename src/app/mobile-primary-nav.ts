@@ -105,6 +105,12 @@ export class MobilePrimaryNav {
     this.menuOpenFrame = null;
     this.regionOpenFrame = null;
     this.alertScrollFrame = null;
+    // Teardown, not a user-initiated close: release each trap's document
+    // listener without handing focus back to a control that is also going away.
+    this.menuTrap?.deactivate({ restoreFocus: false });
+    this.menuTrap = null;
+    this.regionTrap?.deactivate({ restoreFocus: false });
+    this.regionTrap = null;
   }
 
   private setupTabBar(): void {
