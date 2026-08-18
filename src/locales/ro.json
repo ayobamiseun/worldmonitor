@@ -1676,7 +1676,8 @@
       "critical": "CRITIC",
       "high": "RIDICAT",
       "dismiss": "Respingeți",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Alerte de ultimă oră",

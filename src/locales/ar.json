@@ -1801,7 +1801,8 @@
       "critical": "حرج",
       "dismiss": "تجاهل",
       "high": "مرتفع",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "giving": {
       "activityIndex": "مؤشر النشاط",

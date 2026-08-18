@@ -1814,7 +1814,8 @@
       "critical": "गंभीर",
       "high": "उच्च",
       "dismiss": "खारिज करें",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "intelligenceFindings": {
       "breakingAlerts": "ब्रेकिंग अलर्ट",

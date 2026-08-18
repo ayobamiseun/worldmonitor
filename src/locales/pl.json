@@ -1795,7 +1795,8 @@
       "critical": "KRYTYCZNY",
       "dismiss": "Odrzuć",
       "high": "WYSOKI",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "giving": {
       "activityIndex": "Indeks aktywności",

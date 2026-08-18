@@ -1679,7 +1679,8 @@
       "critical": "СРОЧНО",
       "high": "ВАЖНО",
       "dismiss": "Скрыть",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Срочные оповещения",

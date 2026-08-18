@@ -1673,7 +1673,8 @@
       "critical": "ΚΡΙΣΙΜΟ",
       "high": "ΥΨΗΛΟ",
       "dismiss": "Απόρριψη",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Έκτακτες Ειδοποιήσεις",

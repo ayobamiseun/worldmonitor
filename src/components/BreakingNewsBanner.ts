@@ -279,8 +279,16 @@ export class BreakingNewsBanner {
     dismissBtn.title = t('components.breakingNews.dismiss');
     dismissBtn.setAttribute('aria-label', t('components.breakingNews.dismiss'));
 
+    const viewPanelBtn = document.createElement('button');
+    viewPanelBtn.className = 'breaking-alert-view-panel';
+    viewPanelBtn.type = 'button';
+    viewPanelBtn.textContent = '→';
+    viewPanelBtn.title = t('components.breakingNews.viewPanel');
+    viewPanelBtn.setAttribute('aria-label', t('components.breakingNews.viewPanel'));
+
     el.appendChild(iconSpan);
     el.appendChild(content);
+    el.appendChild(viewPanelBtn);
     el.appendChild(dismissBtn);
 
     return el;

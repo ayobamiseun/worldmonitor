@@ -1673,7 +1673,8 @@
       "critical": "緊急",
       "high": "重要",
       "dismiss": "忽略",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "intelligenceFindings": {
       "breakingAlerts": "突發警報",

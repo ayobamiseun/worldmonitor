@@ -1387,7 +1387,8 @@
       "critical": "KRITISCH",
       "high": "HOCH",
       "dismiss": "Ausblenden",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Eilmeldungen",

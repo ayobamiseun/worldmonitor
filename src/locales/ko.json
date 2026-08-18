@@ -1673,7 +1673,8 @@
       "critical": "심각",
       "high": "높음",
       "dismiss": "닫기",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "intelligenceFindings": {
       "breakingAlerts": "긴급 경보",

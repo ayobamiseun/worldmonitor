@@ -1814,7 +1814,8 @@
       "critical": "KRITIKUS",
       "high": "MAGAS",
       "dismiss": "Elvetés",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Friss riasztások",

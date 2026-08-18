@@ -1658,7 +1658,8 @@
       "critical": "KRITICKÉ",
       "high": "VYSOKÉ",
       "dismiss": "Zavřít",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Blesková upozornění",

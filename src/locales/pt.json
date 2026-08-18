@@ -1500,7 +1500,8 @@
       "critical": "CRÍTICO",
       "dismiss": "Dispensar",
       "high": "ALTO",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "giving": {
       "activityIndex": "Índice de Atividade",

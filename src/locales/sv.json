@@ -1499,7 +1499,8 @@
       "critical": "KRITISK",
       "dismiss": "Avfärda",
       "high": "HÖG",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "giving": {
       "activityIndex": "Aktivitetsindex",

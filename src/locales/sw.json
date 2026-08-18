@@ -1827,7 +1827,8 @@
       "critical": "MUHIMU",
       "high": "JUU",
       "dismiss": "Ondoa",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Tahadhari za Kuvunja",

@@ -1673,7 +1673,8 @@
       "critical": "NGHIÊM TRỌNG",
       "high": "CAO",
       "dismiss": "Bỏ qua",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Cảnh báo Khẩn cấp",

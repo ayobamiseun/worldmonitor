@@ -1389,7 +1389,8 @@
       "critical": "CRÍTICO",
       "high": "ALTO",
       "dismiss": "Descartar",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Alertas de última hora",

@@ -1673,7 +1673,8 @@
       "critical": "KRİTİK",
       "high": "YÜKSEK",
       "dismiss": "Kapat",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Son Dakika Uyarıları",

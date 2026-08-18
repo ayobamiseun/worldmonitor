@@ -1801,7 +1801,8 @@
       "critical": "CRITIQUE",
       "dismiss": "Fermer",
       "high": "URGENT",
-      "alertsRegion": "Breaking news alerts"
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "giving": {
       "activityIndex": "Indice d'activité",
