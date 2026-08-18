@@ -1022,7 +1022,7 @@ export class LiveNewsPanel extends Panel {
     overlay.className = 'live-channels-modal-overlay';
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
-    overlay.setAttribute('aria-label', 'Manage channels');
+    overlay.setAttribute('aria-label', t('components.liveNews.manage') ?? 'Manage channels');
 
     const modal = document.createElement('div');
     modal.className = 'live-channels-modal';
