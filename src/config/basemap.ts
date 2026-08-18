@@ -6,7 +6,7 @@
 // (desktop-runtime is dependency-free by design — see its header — so this
 // module stays entry-bundle-lean.)
 
-import { isDesktopRuntime } from '@/services/desktop-runtime';
+import { isDesktopRuntime } from '@/config/desktop-runtime';
 
 const R2_PROXY = import.meta.env.VITE_PMTILES_URL ?? '';
 const R2_PUBLIC = import.meta.env.VITE_PMTILES_URL_PUBLIC ?? '';

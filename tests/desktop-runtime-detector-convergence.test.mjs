@@ -1,7 +1,7 @@
 // #5912 — one desktop-runtime detector, no raw __TAURI__ sniffs.
 //
 // Two detectors used to coexist and disagree: isDesktopRuntime()
-// (src/services/desktop-runtime.ts) answers "is this the desktop product?"
+// (src/config/desktop-runtime.ts) answers "is this the desktop product?"
 // from env flag + globals + UA + tauri-like origins, while six call sites
 // sniffed the raw bridge globals — which are ABSENT during desktop:dev early
 // boot and in VITE_DESKTOP_RUNTIME=1 browser builds. Concrete split-brain:
@@ -9,7 +9,7 @@
 // the stored variant on isDesktopRuntime().
 //
 // This locks the convergence: the token __TAURI may appear ONLY in
-//   - src/services/desktop-runtime.ts  (the detector itself)
+//   - src/config/desktop-runtime.ts    (the detector itself)
 //   - src/services/tauri-bridge.ts     (the IPC accessor: it does not ask
 //     "is this the desktop?", it reads window.__TAURI__.core.invoke — the
 //     one legitimate "is the bridge attached RIGHT NOW?" consumer)
@@ -27,7 +27,7 @@ const repoRoot = resolve(__dirname, '..');
 const srcRoot = join(repoRoot, 'src');
 
 const ALLOWED = new Set([
-  'src/services/desktop-runtime.ts',
+  'src/config/desktop-runtime.ts',
   'src/services/tauri-bridge.ts',
 ]);
 
@@ -60,9 +60,20 @@ describe('desktop-runtime detector convergence (#5912)', () => {
       offending,
       [],
       'raw __TAURI__ checks found outside the allow-list — use isDesktopRuntime() ' +
-        '(src/services/desktop-runtime.ts) instead; it stays true during desktop:dev ' +
+        '(src/config/desktop-runtime.ts) instead; it stays true during desktop:dev ' +
         `early boot and in VITE_DESKTOP_RUNTIME=1 browser builds:\n${offending.join('\n')}`,
     );
+  });
+
+  it('keeps the canonical detector in a layer config modules may import', () => {
+    const variant = readFileSync(join(repoRoot, 'src/config/variant.ts'), 'utf-8');
+    const basemap = readFileSync(join(repoRoot, 'src/config/basemap.ts'), 'utf-8');
+    const serviceCompatibility = readFileSync(join(repoRoot, 'src/services/desktop-runtime.ts'), 'utf-8');
+
+    assert.match(variant, /from ['"]@\/config\/desktop-runtime['"]/);
+    assert.match(basemap, /from ['"]@\/config\/desktop-runtime['"]/);
+    assert.match(serviceCompatibility, /from ['"]@\/config\/desktop-runtime['"]/);
+    assert.doesNotMatch(serviceCompatibility, /function (?:detect|is)DesktopRuntime/);
   });
 
   it('the previously split-brained call sites resolve through isDesktopRuntime', () => {

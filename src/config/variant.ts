@@ -1,4 +1,4 @@
-import { isDesktopRuntime } from '@/services/desktop-runtime';
+import { isDesktopRuntime } from '@/config/desktop-runtime';
 
 /**
  * Every variant a user can switch to. One desktop binary ships and switches
@@ -38,8 +38,7 @@ export const SITE_VARIANT: string = (() => {
   // VITE_DESKTOP_RUNTIME=1 browser builds they never are — a raw check made
   // SITE_VARIANT resolve by hostname here while the variant switcher
   // (event-handlers.ts) wrote the stored variant on isDesktopRuntime(),
-  // splitting the two halves of one feature. desktop-runtime is imported
-  // directly (not services/runtime, which imports this module back).
+  // splitting the two halves of one feature.
   if (isDesktopRuntime()) {
     const stored = loadStoredVariant();
     if (isSiteVariant(stored)) return stored;
