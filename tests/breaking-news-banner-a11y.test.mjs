@@ -29,3 +29,27 @@ describe('BreakingNewsBanner interaction semantics', () => {
     assert.match(source, /if \(target\.closest\('\.breaking-alert-dismiss'\)\)/);
   });
 });
+
+describe('icon-only controls named in this a11y pass', () => {
+  const read = (rel) => readFileSync(resolve(root, rel), 'utf8');
+
+  it('gives previously unnamed icon-only buttons an aria-label', () => {
+    assert.match(read('src/app/panel-layout.ts'), /banner-dismiss" aria-label="\$\{t\('common\.dismiss'\)\}"/);
+    assert.match(read('src/settings-window.ts'), /settingsWindowClose" aria-label="\$\{escapeHtml\(t\('common\.close'\)\)\}"/);
+    assert.match(read('src/components/AviationCommandBar.ts'), /aviation-cmd-close" aria-label="Close"/);
+    assert.match(read('src/components/payment-failure-banner.ts'), /pf-dismiss-btn" aria-label="\$\{t\('common\.dismiss'\)\}"/);
+    assert.match(read('src/components/ConsumerPricesPanel.ts'), /data-clear-filter aria-label="Clear category filter"/);
+    assert.match(read('src/components/AirlineIntelPanel.ts'), /trackClearBtn" class="icon-btn"[^>]*aria-label="Back to live feed"/);
+  });
+
+  it('promotes title-only map zoom controls to aria-label', () => {
+    const deck = read('src/components/DeckGLMap.ts');
+    assert.match(deck, /class="map-btn zoom-in"[^>]*aria-label="\$\{t\('components\.deckgl\.zoomIn'\)\}"/);
+    assert.match(deck, /class="map-btn zoom-out"[^>]*aria-label="\$\{t\('components\.deckgl\.zoomOut'\)\}"/);
+    assert.match(deck, /class="map-btn zoom-reset"[^>]*aria-label="\$\{t\('components\.deckgl\.resetView'\)\}"/);
+    const globe = read('src/components/GlobeMap.ts');
+    assert.match(globe, /class="map-btn zoom-in"[^>]*aria-label="Zoom in"/);
+    assert.match(globe, /class="map-btn zoom-out"[^>]*aria-label="Zoom out"/);
+    assert.match(globe, /class="map-btn zoom-reset"[^>]*aria-label="Reset view"/);
+  });
+});
