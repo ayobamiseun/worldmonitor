@@ -90,6 +90,11 @@ interface SearchModalHarness {
   recentOrEmptyCalls: number;
   chipRenderCalls: number;
 }
+// This suite covers #5158 scheduling, and its harness overlay is a plain object
+// with no querySelectorAll, so the real trap cannot run against it. The stub
+// below reproduces only the one behavior open() depends on: activate() resolves
+// initialFocus and focuses it. tests/focus-trap.test.mts pins that behavior on
+// the real utility, so the stub cannot drift from it unnoticed.
 const Harness = new Function('isMobileDevice', 'overlayHistory', 'createFocusTrap', harnessJs)(
   () => true,
   { open() {}, replace() {}, close() {} },
