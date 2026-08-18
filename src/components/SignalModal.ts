@@ -118,8 +118,14 @@ export class SignalModal {
     this.onLocationClick = handler;
   }
 
-  private activateEsc(): void {
+  /**
+   * Wires the dialog's keyboard behavior. `trapFocus` is false for surfaces the
+   * user did not ask for: an unsolicited popup must not pull the caret out of
+   * whatever they were typing in, so those get Escape without focus containment.
+   */
+  private activateEsc(trapFocus = true): void {
     document.addEventListener('keydown', this.escHandler);
+    if (!trapFocus) return;
     this.focusTrap ??= createFocusTrap(this.element, {
       initialFocus: () => this.element.querySelector<HTMLElement>('.signal-modal-close'),
     });
@@ -133,7 +139,9 @@ export class SignalModal {
     this.currentSignals = [...signals, ...this.currentSignals].slice(0, 50);
     this.renderSignals();
     this.element.classList.add('active');
-    this.activateEsc();
+    // Reached from background correlation and military-surge analysis, not from
+    // a user gesture, so this path does not take focus.
+    this.activateEsc(false);
     this.playSound();
   }
 
