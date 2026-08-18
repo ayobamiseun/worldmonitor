@@ -10,23 +10,13 @@
  * should use this instead of hand-rolling another copy.
  */
 
-const FOCUSABLE_SELECTOR = [
-  'button:not([disabled])',
-  '[href]',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(', ');
+import { getFocusableElements } from './dom-utils';
 
-function focusableElements(container: HTMLElement): HTMLElement[] {
-  return [...container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)].filter(
-    (element) =>
-      !element.hasAttribute('hidden') &&
-      element.getAttribute('aria-hidden') !== 'true' &&
-      element.offsetParent !== null,
-  );
-}
+/**
+ * Every trap listens on `document`, so several can hear the same keypress once
+ * overlays stack. Only the most recently activated one may act on it.
+ */
+const activeTraps: FocusTrap[] = [];
 
 export interface FocusTrapOptions {
   /**
@@ -48,24 +38,30 @@ export function createFocusTrap(container: HTMLElement, options: FocusTrapOption
   let returnFocus: HTMLElement | null = null;
 
   const onKeydown = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape' && options.onEscape) {
+    if (event.key !== 'Escape' && event.key !== 'Tab') return;
+    // Another trap opened on top of this one and owns the keyboard until it
+    // deactivates. Without this, the oldest trap wins every keypress that
+    // reaches document while focus sits on <body>.
+    if (activeTraps[activeTraps.length - 1] !== trap) return;
+
+    const current = document.activeElement;
+    // An overlay this module does not manage (confirm-dialog.ts,
+    // market-chart-interactions.ts, CountryDeepDivePanel.ts) can still stack on
+    // top with its own handlers — while focus is inside it, leave both keys to it.
+    if (current && current !== document.body && !container.contains(current)) return;
+
+    if (event.key === 'Escape') {
+      if (!options.onEscape) return;
       event.preventDefault();
       event.stopPropagation();
       options.onEscape();
       return;
     }
-    if (event.key !== 'Tab') return;
 
-    const current = document.activeElement;
-    // A stacked dialog (e.g. confirm-dialog over the settings modal) owns the
-    // focus while it is up — leave its Tab handling alone.
-    if (current && current !== document.body && !container.contains(current)) return;
-
-    const focusable = focusableElements(container);
-    if (focusable.length === 0) {
-      event.preventDefault();
-      return;
-    }
+    const focusable = getFocusableElements(container);
+    // A hidden or detached container has nothing to hold. Let Tab through
+    // rather than stranding the whole page with no reachable focus target.
+    if (focusable.length === 0) return;
 
     const first = focusable[0]!;
     const last = focusable[focusable.length - 1]!;
@@ -78,18 +74,21 @@ export function createFocusTrap(container: HTMLElement, options: FocusTrapOption
     (event.shiftKey ? last : first).focus();
   };
 
-  return {
+  const trap: FocusTrap = {
     activate(): void {
       if (active) return;
       active = true;
+      activeTraps.push(trap);
       returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       document.addEventListener('keydown', onKeydown, true);
       const requested = typeof options.initialFocus === 'function' ? options.initialFocus() : options.initialFocus;
-      (requested ?? focusableElements(container)[0] ?? container).focus();
+      (requested ?? getFocusableElements(container)[0] ?? container).focus();
     },
     deactivate({ restoreFocus = true } = {}): void {
       if (!active) return;
       active = false;
+      const index = activeTraps.lastIndexOf(trap);
+      if (index !== -1) activeTraps.splice(index, 1);
       document.removeEventListener('keydown', onKeydown, true);
       if (restoreFocus && returnFocus?.isConnected) {
         returnFocus.focus();
@@ -97,4 +96,6 @@ export function createFocusTrap(container: HTMLElement, options: FocusTrapOption
       returnFocus = null;
     },
   };
+
+  return trap;
 }
