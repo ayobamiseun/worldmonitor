@@ -155,6 +155,7 @@
     "test:convex:watch": "vitest --config vitest.config.mts"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@biomejs/biome": "^2.4.7",
     "@bufbuild/buf": "^1.66.0",
     "@edge-runtime/vm": "^5.0.0",
