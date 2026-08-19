@@ -1464,20 +1464,31 @@ export class EventHandlerManager implements AppModule {
 
     renderDropdown();
 
+    // Keep the trigger's aria-expanded in sync however the dropdown closes
+    // (toggle click, outside click, Escape).
+    btn.setAttribute('aria-haspopup', 'true');
+    btn.setAttribute('aria-expanded', 'false');
+    const syncExpanded = () => btn.setAttribute('aria-expanded', String(dropdown.classList.contains('open')));
+
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       dropdown.classList.toggle('open');
+      syncExpanded();
     });
 
     this.boundDropdownClickHandler = (e: MouseEvent) => {
       if (!dropdown.contains(e.target as Node) && !btn.contains(e.target as Node)) {
         dropdown.classList.remove('open');
+        syncExpanded();
       }
     };
     document.addEventListener('click', this.boundDropdownClickHandler);
 
     this.boundDropdownKeydownHandler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') dropdown.classList.remove('open');
+      if (e.key === 'Escape') {
+        dropdown.classList.remove('open');
+        syncExpanded();
+      }
     };
     document.addEventListener('keydown', this.boundDropdownKeydownHandler);
   }
@@ -2202,6 +2213,24 @@ export class EventHandlerManager implements AppModule {
       setTimeout(onEnd, 500);
     });
 
+    // Keyboard path (WAI-ARIA window-splitter): the drag strip is a focusable
+    // separator; arrow keys step the height and persist like a finished drag.
+    resizeHandle.tabIndex = 0;
+    resizeHandle.setAttribute('role', 'separator');
+    resizeHandle.setAttribute('aria-orientation', 'horizontal');
+    resizeHandle.setAttribute('aria-label', t('components.panel.dragToResize'));
+    resizeHandle.addEventListener('keydown', (e: KeyboardEvent) => {
+      const step = e.key === 'ArrowUp' ? -40 : e.key === 'ArrowDown' ? 40 : 0;
+      if (step === 0) return;
+      e.preventDefault();
+      const target = getTarget();
+      const newHeight = Math.max(getMinHeight(), Math.min(target.offsetHeight + step, getMaxHeight()));
+      if (window.innerWidth >= 1600) target.style.flex = 'none';
+      target.style.height = `${newHeight}px`;
+      this.ctx.map?.resize();
+      writeStorageValue('map-height', `${newHeight}px`);
+    });
+
     this.boundMapResizeMoveHandler = (e: MouseEvent) => {
       if (!isResizing) return;
       const isWide = window.innerWidth >= 1600;
@@ -2259,6 +2288,23 @@ export class EventHandlerManager implements AppModule {
       document.body.classList.add('map-width-resizing');
       widthHandle.classList.add('resizing');
       e.preventDefault();
+    });
+
+    // Keyboard path, mirroring the height handle above.
+    widthHandle.tabIndex = 0;
+    widthHandle.setAttribute('role', 'separator');
+    widthHandle.setAttribute('aria-orientation', 'vertical');
+    widthHandle.setAttribute('aria-label', t('components.panel.dragToResize'));
+    widthHandle.addEventListener('keydown', (e: KeyboardEvent) => {
+      const step = e.key === 'ArrowLeft' ? -5 : e.key === 'ArrowRight' ? 5 : 0;
+      if (step === 0) return;
+      e.preventDefault();
+      const raw = mainContent.style.getPropertyValue('--map-col-width') || '60%';
+      const newPct = Math.max(25, Math.min(75, parseFloat(raw) + step));
+      const value = `${newPct.toFixed(1)}%`;
+      mainContent.style.setProperty('--map-col-width', value);
+      this.ctx.map?.resize();
+      writeStorageValue('map-col-width', value);
     });
 
     this.boundMapWidthResizeMoveHandler = (e: MouseEvent) => {

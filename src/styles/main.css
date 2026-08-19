@@ -1979,6 +1979,44 @@ body.panel-resize-active iframe {
   transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
+/* Keyboard reorder affordance (see makeDraggable): invisible until keyboard
+   focus reaches it, so pointer users see no change in the header. */
+.panel-move-btn {
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.panel-move-btn:focus-visible {
+  width: auto;
+  height: auto;
+  padding: 2px 6px;
+  overflow: visible;
+  clip-path: none;
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+  z-index: 3;
+}
+
+/* The resize strips are keyboard-focusable separators (arrow keys resize);
+   show where focus is when it lands on one. */
+.panel-resize-handle:focus-visible,
+.panel-col-resize-handle:focus-visible,
+.map-resize-handle:focus-visible,
+.map-width-resize-handle:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+}
+
 .panel-header-error {
   background: rgba(255, 50, 50, 0.15);
   border-bottom-color: rgba(255, 80, 80, 0.5);

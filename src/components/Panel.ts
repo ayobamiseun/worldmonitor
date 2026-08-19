@@ -304,6 +304,7 @@ export class Panel {
     this.resizeHandle.title = t('components.panel.dragToResize');
     this.element.appendChild(this.resizeHandle);
     this.setupResizeHandlers();
+    this.setupKeyboardRowResize();
 
     // Right-edge handle for width resizing
     this.colResizeHandle = document.createElement('div');
@@ -311,6 +312,7 @@ export class Panel {
     this.colResizeHandle.title = t('components.panel.dragToResize');
     this.element.appendChild(this.colResizeHandle);
     this.setupColResizeHandlers();
+    this.setupKeyboardColResize();
 
     // Apply default row span (before restore, so saved preferences win)
     if (options.defaultRowSpan && options.defaultRowSpan > 1) {
@@ -394,6 +396,70 @@ export class Panel {
     if (this.onTouchCancel) {
       document.removeEventListener('touchcancel', this.onTouchCancel);
     }
+  }
+
+  /**
+   * Keyboard path for the mouse/touch drag handles (WAI-ARIA window-splitter):
+   * the handle is a focusable role="separator"; arrow keys step the span one
+   * unit and persist through the same code path as a completed drag.
+   */
+  private setupKeyboardRowResize(): void {
+    const handle = this.resizeHandle;
+    if (!handle) return;
+    handle.tabIndex = 0;
+    handle.setAttribute('role', 'separator');
+    handle.setAttribute('aria-orientation', 'horizontal');
+    handle.setAttribute('aria-label', t('components.panel.dragToResize'));
+    handle.setAttribute('aria-valuemin', '1');
+    handle.setAttribute('aria-valuemax', '4');
+    const sync = () => handle.setAttribute('aria-valuenow', String(getRowSpan(this.element)));
+    sync();
+    handle.addEventListener('keydown', (e: KeyboardEvent) => {
+      const current = getRowSpan(this.element);
+      let next: number | null = null;
+      if (e.key === 'ArrowUp') next = Math.max(1, current - 1);
+      else if (e.key === 'ArrowDown') next = Math.min(4, current + 1);
+      else if (e.key === 'Home') next = 1;
+      else if (e.key === 'End') next = 4;
+      if (next === null) return;
+      e.preventDefault();
+      if (next === current) return;
+      setSpanClass(this.element, next);
+      savePanelSpan(this.panelId, next);
+      trackPanelResized(this.panelId, next);
+      sync();
+    });
+  }
+
+  private setupKeyboardColResize(): void {
+    const handle = this.colResizeHandle;
+    if (!handle) return;
+    handle.tabIndex = 0;
+    handle.setAttribute('role', 'separator');
+    handle.setAttribute('aria-orientation', 'vertical');
+    handle.setAttribute('aria-label', t('components.panel.dragToResize'));
+    handle.setAttribute('aria-valuemin', '1');
+    const sync = () => {
+      const maxSpan = getMaxColSpan(this.element);
+      handle.setAttribute('aria-valuemax', String(maxSpan));
+      handle.setAttribute('aria-valuenow', String(clampColSpan(getColSpan(this.element), maxSpan)));
+    };
+    sync();
+    handle.addEventListener('keydown', (e: KeyboardEvent) => {
+      const maxSpan = getMaxColSpan(this.element);
+      const current = clampColSpan(getColSpan(this.element), maxSpan);
+      let next: number | null = null;
+      if (e.key === 'ArrowLeft') next = Math.max(1, current - 1);
+      else if (e.key === 'ArrowRight') next = Math.min(maxSpan, current + 1);
+      else if (e.key === 'Home') next = 1;
+      else if (e.key === 'End') next = maxSpan;
+      if (next === null) return;
+      e.preventDefault();
+      if (next === current) return;
+      setColSpanClass(this.element, next);
+      persistPanelColSpan(this.panelId, this.element);
+      sync();
+    });
   }
 
   private setupResizeHandlers(): void {

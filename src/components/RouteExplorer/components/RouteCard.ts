@@ -31,7 +31,9 @@ export function renderRouteCard(opts: RouteCardOptions): HTMLDivElement {
   card.className = `re-route-card ${statusCls} ${isActive ? 're-route-card--active' : ''}`;
   card.setAttribute('role', 'option');
   card.setAttribute('aria-selected', isActive ? 'true' : 'false');
-  card.setAttribute('tabindex', '0');
+  // Roving tabindex: one tab stop for the whole listbox; ArrowUp/ArrowDown
+  // (handled by AlternativesTab) move between options.
+  card.setAttribute('tabindex', isActive ? '0' : '-1');
   card.dataset.idx = String(index);
   card.dataset.corridorId = o.id;
 

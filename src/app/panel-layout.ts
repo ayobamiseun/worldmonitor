@@ -3798,6 +3798,40 @@ export class PanelLayoutManager implements AppModule {
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
 
+    // Keyboard path for reordering: the mouse drag above has no keyboard
+    // equivalent, so layout customization was impossible without a pointer.
+    // A visually-hidden-until-focused button in the header moves the panel
+    // one slot per arrow press and persists through the same savePanelOrder()
+    // path as a completed drag. Within-grid only; grid-to-grid moves still
+    // need a pointer.
+    const header = el.querySelector<HTMLElement>('.panel-header');
+    if (header && !header.querySelector('.panel-move-btn')) {
+      const moveBtn = document.createElement('button');
+      moveBtn.type = 'button';
+      moveBtn.className = 'panel-move-btn';
+      const panelTitle = el.querySelector('.panel-title')?.textContent?.trim() || key;
+      moveBtn.setAttribute('aria-label', `Move ${panelTitle} panel (arrow keys)`);
+      moveBtn.textContent = '⇅';
+      moveBtn.addEventListener('keydown', (e: KeyboardEvent) => {
+        const back = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
+        const fwd = e.key === 'ArrowRight' || e.key === 'ArrowDown';
+        if (!back && !fwd) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const parent = el.parentElement;
+        if (!parent) return;
+        const sibling = back ? el.previousElementSibling : el.nextElementSibling;
+        if (!(sibling instanceof HTMLElement) || !sibling.classList.contains('panel')) return;
+        if (back) parent.insertBefore(el, sibling);
+        else parent.insertBefore(el, sibling.nextElementSibling);
+        this.savePanelOrder();
+        // The button travels with the panel; keep focus on it so repeated
+        // presses keep moving the same panel.
+        moveBtn.focus();
+      });
+      header.prepend(moveBtn);
+    }
+
     this.panelDragCleanupHandlers.push(() => {
       el.removeEventListener('mousedown', onMouseDown);
       document.removeEventListener('mousemove', onMouseMove);
