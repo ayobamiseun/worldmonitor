@@ -19932,7 +19932,8 @@ a.prediction-link:hover {
 }
 
 .unified-settings-preset-chip:focus-visible {
-  outline: none;
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
 }
 
 /* Unified settings selects */
@@ -27551,4 +27552,48 @@ body.map-width-resizing {
 .markers-settled .dark-vessel-indicator,
 .markers-settled .tech-event-marker.upcoming-soon::after {
   animation: none;
+}
+
+/* ── Accessibility: motion & focus visibility (#6573) ─────────────────── */
+
+/* Honor the OS-level reduced-motion preference globally. Individual guards
+   exist for a handful of selectors above, but ~80 infinite animations and
+   ~325 transitions ran unconditionally. Durations collapse to near-zero
+   (rather than `animation: none`) so animationend/transitionend listeners
+   still fire and will-change cleanups keep working. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Focus rings for controls whose base rules declare `outline: none` (or
+   swap only border-color on :focus, below the 3:1 non-text contrast bar)
+   without a :focus-visible replacement. Keyboard-only — :focus-visible
+   leaves mouse focus styling as designed. */
+.region-select:focus-visible,
+.focus-select:focus-visible,
+.playback-slider:focus-visible,
+.search-input:focus-visible,
+.embed-snippet-textarea:focus-visible,
+.sources-search input:focus-visible,
+.panels-search input:focus-visible,
+.mcp-input:focus-visible,
+.cp-world-filter:focus-visible,
+.chat-analyst-input:focus-visible,
+.us-notif-slack-input:focus-visible,
+.live-news-manage-search-input:focus-visible,
+.deckgl-layer-toggles .layer-search:focus-visible,
+.fw-import-input:focus-visible,
+.fw-import-textarea:focus-visible,
+.auth-profile-input:focus-visible,
+.debt-search:focus-visible,
+.api-keys-name-input:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
 }

@@ -688,8 +688,17 @@
   animation: happy-ticker-scroll 120s linear infinite;
 }
 
-[data-variant="happy"] .breakthroughs-ticker-wrapper:hover .breakthroughs-ticker-track {
+/* Pause on keyboard focus as well as hover — hover-only pause is unreachable
+   for keyboard and touch users (WCAG 2.2.2). */
+[data-variant="happy"] .breakthroughs-ticker-wrapper:hover .breakthroughs-ticker-track,
+[data-variant="happy"] .breakthroughs-ticker-wrapper:focus-within .breakthroughs-ticker-track {
   animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-variant="happy"] .breakthroughs-ticker-track {
+    animation: none;
+  }
 }
 
 [data-variant="happy"] .ticker-item {
