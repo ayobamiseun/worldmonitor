@@ -122,11 +122,11 @@ export class RadiationWatchPanel extends Panel {
         <table class="radiation-table">
           <thead>
             <tr>
-              <th>${escapeHtml(t('components.radiationWatch.headers.station'))}</th>
-              <th>${escapeHtml(t('components.radiationWatch.headers.reading'))}</th>
-              <th>${escapeHtml(t('components.radiationWatch.headers.delta'))}</th>
-              <th>${escapeHtml(t('components.radiationWatch.headers.status'))}</th>
-              <th>${escapeHtml(t('components.radiationWatch.headers.observed'))}</th>
+              <th scope="col">${escapeHtml(t('components.radiationWatch.headers.station'))}</th>
+              <th scope="col">${escapeHtml(t('components.radiationWatch.headers.reading'))}</th>
+              <th scope="col">${escapeHtml(t('components.radiationWatch.headers.delta'))}</th>
+              <th scope="col">${escapeHtml(t('components.radiationWatch.headers.status'))}</th>
+              <th scope="col">${escapeHtml(t('components.radiationWatch.headers.observed'))}</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>

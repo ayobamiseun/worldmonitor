@@ -222,9 +222,9 @@ export class EconomicCalendarPanel extends Panel {
         </colgroup>
         <thead>
           <tr style="font-size:calc(9px * var(--wm-panel-effective-scale, 1));font-weight:600;color:rgba(255,255,255,0.25);text-transform:uppercase;letter-spacing:0.06em">
-            <th style="text-align:left;padding:0 8px 8px 0;font-weight:600">EVENT</th>
-            <th style="padding:0 0 8px;font-weight:600"></th>
-            <th style="text-align:right;padding:0 0 8px;font-weight:600"></th>
+            <th scope="col" style="text-align:left;padding:0 8px 8px 0;font-weight:600">EVENT</th>
+            <th scope="col" style="padding:0 0 8px;font-weight:600"></th>
+            <th scope="col" style="text-align:right;padding:0 0 8px;font-weight:600"></th>
           </tr>
         </thead>
         <tbody>${emptyMsg}${bodyRows}</tbody>

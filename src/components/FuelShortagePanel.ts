@@ -267,10 +267,10 @@ export class FuelShortagePanel extends Panel {
         <table class="fs-table">
           <thead>
             <tr>
-              <th>Country · Product</th>
-              <th>Since</th>
-              <th>Evidence</th>
-              <th>Severity</th>
+              <th scope="col">Country · Product</th>
+              <th scope="col">Since</th>
+              <th scope="col">Evidence</th>
+              <th scope="col">Severity</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>

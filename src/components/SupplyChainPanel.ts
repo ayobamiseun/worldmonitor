@@ -296,7 +296,7 @@ export class SupplyChainPanel extends Panel {
         return `<tr><td>${escapeHtml(opt.name)}</td><td>${days}</td><td>${cost}</td><td>${escapeHtml(risk)}</td></tr>`;
       }).join('');
       return `<table class="sc-bypass-table">
-        <thead><tr><th>Corridor</th><th>+Days</th><th>+Cost</th><th>Risk</th></tr></thead>
+        <thead><tr><th scope="col">Corridor</th><th scope="col">+Days</th><th scope="col">+Cost</th><th scope="col">Risk</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
     };
@@ -559,11 +559,11 @@ export class SupplyChainPanel extends Panel {
       <div class="trade-sector" style="font-weight:600;margin-bottom:4px">${t('components.supplyChain.corridorDisruption')}</div>
       <table class="sc-disruption-table">
         <thead><tr>
-          <th>${t('components.supplyChain.corridor')}</th>
-          <th>${t('components.supplyChain.vessels')}</th>
-          <th>${t('components.supplyChain.wowChange')}</th>
-          <th>${t('components.supplyChain.disruption')}</th>
-          <th>${t('components.supplyChain.risk')}</th>
+          <th scope="col">${t('components.supplyChain.corridor')}</th>
+          <th scope="col">${t('components.supplyChain.vessels')}</th>
+          <th scope="col">${t('components.supplyChain.wowChange')}</th>
+          <th scope="col">${t('components.supplyChain.disruption')}</th>
+          <th scope="col">${t('components.supplyChain.risk')}</th>
         </tr></thead>
         <tbody>${tableRows}</tbody>
       </table>
@@ -763,9 +763,9 @@ export class SupplyChainPanel extends Panel {
         <table>
           <thead>
             <tr>
-              <th>${t('components.supplyChain.mineral')}</th>
-              <th>${t('components.supplyChain.topProducers')}</th>
-              <th>HHI</th>
+              <th scope="col">${t('components.supplyChain.mineral')}</th>
+              <th scope="col">${t('components.supplyChain.topProducers')}</th>
+              <th scope="col">HHI</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -797,10 +797,10 @@ export class SupplyChainPanel extends Panel {
       <table>
         <thead>
           <tr>
-            <th>${t('components.supplyChain.mineral')}</th>
-            <th>${t('components.supplyChain.topProducers')}</th>
-            <th>HHI</th>
-            <th>${t('components.supplyChain.risk')}</th>
+            <th scope="col">${t('components.supplyChain.mineral')}</th>
+            <th scope="col">${t('components.supplyChain.topProducers')}</th>
+            <th scope="col">HHI</th>
+            <th scope="col">${t('components.supplyChain.risk')}</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>

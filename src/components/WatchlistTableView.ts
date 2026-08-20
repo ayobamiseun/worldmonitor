@@ -173,7 +173,7 @@ export class WatchlistTableView<T> {
       const classAttr = classes.length ? ` class="${classes.join(' ')}"` : '';
       const sortAttr = sortKey ? ` data-sortkey="${escapeHtml(sortKey)}"` : '';
       const activeSortIndicator = sortKey && sortKey === this.state.sort ? ' ↓' : '';
-      return `<th${classAttr}${sortAttr}>${escapeHtml(col.label)}${activeSortIndicator}</th>`;
+      return `<th scope="col"${classAttr}${sortAttr}>${escapeHtml(col.label)}${activeSortIndicator}</th>`;
     }).join('');
     return `
       <div class="watchlist-table-view" data-watchlist-totalrows="${list.length}" data-watchlist-renderedrows="${this.getRenderedRowCount(list, start)}">

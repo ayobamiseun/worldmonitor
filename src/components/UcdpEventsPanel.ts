@@ -136,10 +136,10 @@ export class UcdpEventsPanel extends Panel {
         <table class="ucdp-table">
           <thead>
             <tr>
-              <th>${t('components.ucdpEvents.country')}</th>
-              <th>${t('components.ucdpEvents.deaths')}</th>
-              <th>${t('components.ucdpEvents.date')}</th>
-              <th>${t('components.ucdpEvents.actors')}</th>
+              <th scope="col">${t('components.ucdpEvents.country')}</th>
+              <th scope="col">${t('components.ucdpEvents.deaths')}</th>
+              <th scope="col">${t('components.ucdpEvents.date')}</th>
+              <th scope="col">${t('components.ucdpEvents.actors')}</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>

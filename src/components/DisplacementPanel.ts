@@ -177,9 +177,9 @@ export class DisplacementPanel extends Panel {
         <table class="disp-table">
           <thead>
             <tr>
-              <th>${t('components.displacement.country')}</th>
-              <th>${t('components.displacement.status')}</th>
-              <th>${t('components.displacement.count')}</th>
+              <th scope="col">${t('components.displacement.country')}</th>
+              <th scope="col">${t('components.displacement.status')}</th>
+              <th scope="col">${t('components.displacement.count')}</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
