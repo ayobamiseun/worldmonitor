@@ -101,6 +101,7 @@
                   "china-logistics-corridors",
                   "methodology/china-activity-nowcast",
                   "methodology/news-digest-and-briefing",
+                  "methodology/news-credibility",
                   "country-instability-index",
                   "methodology/country-resilience-index",
                   "methodology/chokepoints",
@@ -251,10 +252,11 @@
               {
                 "group": "Legal",
                 "pages": [
+                  "eula",
+                  "terms",
                   "license",
                   "trademark-policy",
-                  "privacy",
-                  "terms"
+                  "privacy"
                 ]
               }
             ]
@@ -567,6 +569,7 @@
                   "zh/china-logistics-corridors",
                   "zh/methodology/china-activity-nowcast",
                   "zh/methodology/news-digest-and-briefing",
+                  "zh/methodology/news-credibility",
                   "zh/country-instability-index",
                   "zh/methodology/country-resilience-index",
                   "zh/methodology/chokepoints",
@@ -717,10 +720,11 @@
               {
                 "group": "法律",
                 "pages": [
+                  "zh/eula",
+                  "zh/terms",
                   "zh/license",
                   "zh/trademark-policy",
-                  "zh/privacy",
-                  "zh/terms"
+                  "zh/privacy"
                 ]
               }
             ]

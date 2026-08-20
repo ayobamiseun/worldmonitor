@@ -72,6 +72,7 @@ import {
 } from './_shared/api-key-rate-limit';
 import {
   DIRECT_LLM_DAILY_QUOTA_LIMIT,
+  DIRECT_LLM_UNVERIFIED_DAILY_QUOTA_LIMIT,
   DIRECT_LLM_GATEWAY_QUOTA_PATHS,
   resolveActiveDirectLlmLimit,
   reserveDirectLlmQuota,
@@ -101,6 +102,10 @@ import {
 import { timingSafeEqual } from './_shared/internal-auth';
 import type { ServerOptions } from '../src/generated/server/worldmonitor/seismology/v1/service_server';
 import { validateGeneratedRequest } from './request-validator';
+import {
+  buildMarkdownTwinResponse,
+  isMarkdownTwinPath,
+} from '../api/_md-url-twin';
 
 export const serverOptions: ServerOptions = {
   onError: mapErrorToResponse,
@@ -201,6 +206,7 @@ const RPC_CACHE_TIER: Record<string, CacheTier> = {
   '/api/market/v1/list-ai-tokens': 'slow',
   '/api/market/v1/list-other-tokens': 'slow',
   '/api/market/v1/list-commodity-quotes': 'medium',
+  '/api/market/v1/get-physical-premiums': 'daily',
   '/api/market/v1/list-stablecoin-markets': 'medium',
   '/api/market/v1/get-sector-summary': 'medium',
   '/api/market/v1/get-fear-greed-index': 'slow',
@@ -411,6 +417,7 @@ const RPC_CACHE_TIER: Record<string, CacheTier> = {
   '/api/resilience/v1/get-resilience-score': 'slow',
   '/api/resilience/v1/get-resilience-ranking': 'slow',
   '/api/resilience/v1/get-food-stocks': 'slow',
+  '/api/resilience/v1/get-demographics-capability': 'slow',
   '/api/resilience/v1/get-runtime-manifest': 'no-store',
 
   // Partner-facing shipping/v2. route-intelligence is premium-gated; gateway
@@ -624,6 +631,8 @@ const GATEWAY_DIRECT_LLM_QUOTA_METHODS: Record<string, string> = {
   '/api/news/v1/summarize-article': 'POST',
 };
 
+const COUNTRY_INTEL_BRIEF_PATH = '/api/intelligence/v1/get-country-intel-brief';
+
 async function shouldReserveGatewayDirectLlmQuota(request: Request, pathname: string): Promise<boolean> {
   if (!DIRECT_LLM_GATEWAY_QUOTA_PATHS.has(pathname)) return false;
   if (GATEWAY_DIRECT_LLM_QUOTA_METHODS[pathname] !== request.method) return false;
@@ -736,6 +745,22 @@ export function createDomainGateway(
   const router = createRouter(routes);
 
   return async function handler(originalRequest: Request, ctx?: GatewayCtx): Promise<Response> {
+    const originalPathname = new URL(originalRequest.url).pathname;
+
+    // Vercel resolves versioned API paths such as
+    // `/api/forecast/v1/get-forecast-scorecard.md` to the more-specific
+    // `api/<domain>/v1/[rpc].ts` function before the root API catch-all. Handle
+    // markdown probes here, before auth and RPC dispatch, so every dynamic
+    // domain gateway follows the same site-wide `.md` twin contract without a
+    // broad rewrite that would shadow the real endpoints (#4724).
+    if (
+      originalPathname.startsWith('/api/') &&
+      isMarkdownTwinPath(originalPathname) &&
+      (originalRequest.method === 'GET' || originalRequest.method === 'HEAD')
+    ) {
+      return buildMarkdownTwinResponse(originalRequest, originalPathname);
+    }
+
     let request = stripClientUserIdHeader(originalRequest);
     const rawPathname = new URL(request.url).pathname;
     const pathname = rawPathname.length > 1 ? rawPathname.replace(/\/+$/, '') : rawPathname;
@@ -1164,6 +1189,15 @@ export function createDomainGateway(
     const relayWarmPingVerified = await isRelayWarmPingRequest(request, pathname);
     const requiresDirectLlmQuota = !internalMcpVerified && await shouldReserveGatewayDirectLlmQuota(request, pathname);
     const isTierGated = !internalMcpVerified && !isPublicNoAuthRpc && !seedRefreshVerified && !relayWarmPingVerified && getRequiredTier(pathname) !== null;
+    // Docker self-hosting has no Clerk/Convex entitlement backend. Its browser
+    // still obtains and presents a server-signed anonymous session, so that
+    // proof remains the gateway authentication boundary on this one route.
+    // Cloud deployments do not set LOCAL_API_MODE=docker, and every other
+    // premium route retains forceKey + entitlement enforcement below.
+    const isDockerSelfHostCountryBrief =
+      request.method === 'GET' &&
+      pathname === COUNTRY_INTEL_BRIEF_PATH &&
+      process.env.LOCAL_API_MODE === 'docker';
     const needsLegacyProBearerGate = !internalMcpVerified && !isPublicNoAuthRpc && PREMIUM_RPC_PATHS.has(pathname) && !isTierGated;
     const isProFreshCacheRpc = PRO_FRESH_CACHE_RPC_PATHS.has(pathname);
     const needsProFreshnessResolution =
@@ -1200,11 +1234,12 @@ export function createDomainGateway(
     // request). Telemetry stays attributed via the verified userId set
     // above; entitlement re-check (`features.tier ≥ 1 && mcpAccess`) was
     // already performed before flipping `internalMcpVerified = true`.
-    let keyCheck: { valid: boolean; required: boolean; error?: string; kind?: 'enterprise' | 'session' | 'user' } = internalMcpVerified || isPublicNoAuthRpc || seedRefreshVerified || relayWarmPingVerified
+    let keyCheck: { valid: boolean; required: boolean; error?: string; kind?: 'enterprise' | 'session' | 'user'; credential?: string } = internalMcpVerified || isPublicNoAuthRpc || seedRefreshVerified || relayWarmPingVerified
       ? { valid: true, required: false }
       : ((await validateApiKey(request, {
-          forceKey: (isTierGated && !sessionUserId) || needsLegacyProBearerGate,
-        })) as { valid: boolean; required: boolean; error?: string; kind?: 'enterprise' | 'session' | 'user' });
+          forceKey: ((isTierGated && !sessionUserId) || needsLegacyProBearerGate)
+            && !isDockerSelfHostCountryBrief,
+        })) as { valid: boolean; required: boolean; error?: string; kind?: 'enterprise' | 'session' | 'user'; credential?: string });
 
     // User-owned API keys (wm_ prefix): when the static WORLDMONITOR_VALID_KEYS
     // check fails, try async Convex-backed validation for user-issued keys.
@@ -1218,6 +1253,11 @@ export function createDomainGateway(
       request.headers.get('X-WorldMonitor-Key') ??
       request.headers.get('X-Api-Key') ??
       '';
+    const dockerSelfHostSessionAuthorized =
+      isDockerSelfHostCountryBrief &&
+      keyCheck.valid &&
+      !keyCheck.required &&
+      keyCheck.kind === 'session';
     if (keyCheck.required && !keyCheck.valid && wmKey.startsWith('wm_')) {
       // Unknown wm_ credentials require a Convex-backed hash lookup before we
       // know the account principal. Bound that unattributed work by IP first:
@@ -1312,8 +1352,14 @@ export function createDomainGateway(
     // them valid, wmKey is set, !isUserApiKey, and 'wms_' doesn't startsWith
     // 'wm_'), so telemetry mislabelled them as enterprise_api_key with
     // customer_id='enterprise-unmapped'. PR #3557 round-3 review.
-    if (keyCheck.valid && wmKey && !isUserApiKey && keyCheck.kind === 'enterprise') {
-      usage.enterpriseApiKey = wmKey;
+    // A browser request can carry both an automatic wms_ header and an HttpOnly
+    // enterprise cookie. Use the credential validateApiKey actually selected;
+    // the raw header belongs to a different anonymous principal.
+    const enterpriseCredential = keyCheck.valid && keyCheck.kind === 'enterprise'
+      ? (keyCheck.credential ?? wmKey)
+      : '';
+    if (enterpriseCredential && !isUserApiKey) {
+      usage.enterpriseApiKey = enterpriseCredential;
     }
 
     // ── Active-subscription gate for user API keys (#4611) ──────────────────
@@ -1501,8 +1547,17 @@ export function createDomainGateway(
     // tier ≥ 1 + mcpAccess === true above. Some ENDPOINT_ENTITLEMENTS
     // routes require tier 2, but Pro MCP callers only reach the gateway
     // through the MCP edge's whitelisted tool set.
-    const isEnterpriseAuth = keyCheck.valid && wmKey && !isUserApiKey && keyCheck.kind === 'enterprise';
-    if (!isEnterpriseAuth && !internalMcpVerified && !seedRefreshVerified && !relayWarmPingVerified) {
+    const isEnterpriseAuth = keyCheck.valid
+      && Boolean(enterpriseCredential)
+      && !isUserApiKey
+      && keyCheck.kind === 'enterprise';
+    if (
+      !dockerSelfHostSessionAuthorized &&
+      !isEnterpriseAuth &&
+      !internalMcpVerified &&
+      !seedRefreshVerified &&
+      !relayWarmPingVerified
+    ) {
       const entitlementCheck = await checkEntitlementDetailed(sessionUserId, pathname, corsHeaders, {
         clerkRole: sessionRole,
       });
@@ -1738,7 +1793,7 @@ export function createDomainGateway(
           // minting keys, and each operator key gets its own 1,000/min budget
           // rather than contending for one shared bucket. (User keys below key
           // on userId so a customer can't multiply their allowance.)
-          identity = wmKey ? hashKeySync(wmKey) : '';
+          identity = hashKeySync(enterpriseCredential);
         } else if (sessionUserId) {
           // Reuse the entitlement the #4611 gate above already resolved for this
           // same user key (undefined ⇒ the gate didn't run, e.g. a Clerk-session
@@ -1861,7 +1916,15 @@ export function createDomainGateway(
     }
 
     if (requiresDirectLlmQuota && !isEnterpriseAuth) {
-      if (!sessionUserId) {
+      // The Docker principal is deliberately derived from nginx's trusted
+      // X-Real-IP value (docker/nginx.conf stamps $remote_addr), not from the
+      // freely mintable token: rotating sessions must not reset spend.
+      // Hashing keeps the raw address out of Redis keys.
+      const dockerQuotaUserId = dockerSelfHostSessionAuthorized
+        ? `docker:${hashKeySync(deriveIp(request) ?? 'unknown')}`
+        : null;
+      const quotaUserId = sessionUserId ?? dockerQuotaUserId;
+      if (!quotaUserId) {
         emitRequest(401, 'auth_401', null);
         return createGatewayAuthErrorResponse(401, 'Pro authentication required', corsHeaders);
       }
@@ -1871,9 +1934,11 @@ export function createDomainGateway(
       // Business/API plans still receive their catalog-specific dashboard-AI
       // allowance.
       const ent = quotaEntitlements ?? (
-        userKeyEntitlement !== undefined
-          ? userKeyEntitlement
-          : await getEntitlements(sessionUserId)
+        sessionUserId
+          ? userKeyEntitlement !== undefined
+            ? userKeyEntitlement
+            : await getEntitlements(sessionUserId)
+          : null
       );
       if (ent) recordUsageEntitlement(ent);
       // resolveActiveDirectLlmLimit — NOT the raw catalog read — decides this.
@@ -1881,14 +1946,16 @@ export function createDomainGateway(
       // row, or a verification outage) must land on the unverified floor, never
       // on the paid default: this endpoint spends real provider budget, and
       // two of the DIRECT_LLM_GATEWAY_QUOTA_PATHS carry no tier gate at all.
-      directLlmDailyLimit = resolveActiveDirectLlmLimit(ent);
+      directLlmDailyLimit = sessionUserId
+        ? resolveActiveDirectLlmLimit(ent)
+        : DIRECT_LLM_UNVERIFIED_DAILY_QUOTA_LIMIT;
 
       // Enterprise subscription rows carry an explicit null allowance. Do not
       // hit Redis for those unlimited callers; static enterprise keys already
       // bypass this block above.
       if (directLlmDailyLimit !== null) {
         const reservation = await reserveDirectLlmQuota({
-          userId: sessionUserId,
+          userId: quotaUserId,
           limit: directLlmDailyLimit,
           pipeline: (cmds) => runRedisPipeline(cmds, true),
         });
@@ -1993,22 +2060,43 @@ export function createDomainGateway(
       const bodyStr = new TextDecoder().decode(bodyBytes);
       const noStoreReason = getRpcNoStoreReasonFromJson(bodyStr, { pathname });
 
-      if (mergedHeaders.get('X-No-Cache') || noStoreReason) {
+      const rpcName = pathname.split('/').pop() ?? '';
+      const envOverride = process.env[`CACHE_TIER_OVERRIDE_${rpcName.replace(/-/g, '_').toUpperCase()}`] as CacheTier | undefined;
+      const mapTier = RPC_CACHE_TIER[pathname];
+      // The route's own declared tier (an env override wins over the map for
+      // normal tiers). A route declared no-store is a hard freshness/privacy
+      // floor: the audience overwrite below must never upgrade it to a
+      // browser-cacheable tier for a credentialed caller — and a map-declared
+      // no-store (account-private company-monitoring reads, live feeds) is not
+      // even an env override may downgrade (#6771).
+      const declaredTier = (envOverride && envOverride in TIER_HEADERS ? envOverride : null) ?? mapTier;
+
+      if (mergedHeaders.get('X-No-Cache') || noStoreReason || declaredTier === 'no-store' || mapTier === 'no-store') {
         mergedHeaders.set('Cache-Control', 'no-store');
         mergedHeaders.delete('CDN-Cache-Control');
         mergedHeaders.delete('Vercel-CDN-Cache-Control');
         mergedHeaders.set('X-Cache-Tier', 'no-store');
         resolvedCacheTier = 'no-store';
       } else {
-        const rpcName = pathname.split('/').pop() ?? '';
-        const envOverride = process.env[`CACHE_TIER_OVERRIDE_${rpcName.replace(/-/g, '_').toUpperCase()}`] as CacheTier | undefined;
         const isPremium = PREMIUM_RPC_PATHS.has(pathname) || getRequiredTier(pathname) !== null;
         const hasCredentialedNonPublicGet = !isPublicNoAuthRpc && hasCredentialBearingHeader(request);
         const tier = hasProFreshCacheAccess ? 'live-browser' as CacheTier
           : isPremium || hasCredentialedNonPublicGet ? 'slow-browser' as CacheTier
-          : (envOverride && envOverride in TIER_HEADERS ? envOverride : null) ?? RPC_CACHE_TIER[pathname] ?? 'medium';
+          : declaredTier ?? 'medium';
         resolvedCacheTier = tier;
-        mergedHeaders.set('Cache-Control', TIER_HEADERS[tier]);
+        // A credentialed non-public response must never be stored by a shared
+        // cache, even at a browser tier — mark it private so only the caller's
+        // own browser retains it. Vary is Origin-only, so without this a shared
+        // proxy could serve one principal's body to another (#6771). Covers the
+        // standard credential headers and premium/internal-MCP callers (whose
+        // HMAC auth headers are not in hasCredentialBearingHeader but still
+        // carry per-principal bodies). (live-browser is already private;
+        // no-store handled above; anonymous public routes keep their CDN tier.)
+        const isPrivateResponse = hasCredentialedNonPublicGet || (isPremium && !isPublicNoAuthRpc);
+        const cacheControl = isPrivateResponse && !TIER_HEADERS[tier].includes('private')
+          ? `private, ${TIER_HEADERS[tier]}`
+          : TIER_HEADERS[tier];
+        mergedHeaders.set('Cache-Control', cacheControl);
         // Only allow Vercel CDN caching for trusted origins (worldmonitor.app, Vercel previews,
         // Tauri). No-origin server-side requests (external scrapers) must always reach the edge
         // function so the auth check in validateApiKey() can run. Without this guard, a cached

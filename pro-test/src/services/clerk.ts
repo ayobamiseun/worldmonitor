@@ -1,4 +1,5 @@
 import type { Clerk } from '@clerk/clerk-js';
+import { EULA_PATH, PRIVACY_PATH } from '../../../shared/legal';
 
 export type LoadedClerk = InstanceType<typeof Clerk>;
 
@@ -80,6 +81,16 @@ async function loadClerk(): Promise<LoadedClerk> {
   const instance = new C(key);
   await instance.load({
     appearance: {
+      // Sign-up carries the same assent line as checkout (#6976): Clerk renders
+      // Terms/Privacy links in the auth card footer when these are set, so the
+      // documents are presented at account creation, not only at purchase.
+      layout: {
+        // The EULA, not the Terms: sign-up should show the document that
+        // states what the account is licensed to do (#6983). Clerk exposes one
+        // "terms" slot; the EULA links the Terms from its section 2.
+        termsPageUrl: EULA_PATH,
+        privacyPageUrl: PRIVACY_PATH,
+      },
       variables: {
         colorBackground: '#0f0f0f',
         colorInputBackground: '#141414',

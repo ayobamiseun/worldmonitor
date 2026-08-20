@@ -9,6 +9,8 @@ import { getSecretState } from '@/services/runtime-config';
 import { PanelGateReason } from '@/services/panel-gating';
 import { openExternalUrl } from '@/services/external-navigation';
 import { lockSvg, upgradeSvg } from '@/components/gate-icons';
+import { createCheckoutConsentElement } from '@/utils/legal-links';
+import { WEB_APP_ORIGIN } from '@/config/web-origin';
 import { dataFreshness, type PanelFreshnessSummary } from '@/services/data-freshness';
 import { formatPanelFreshnessDisplay } from '@/services/panel-freshness-display';
 import {
@@ -162,6 +164,14 @@ export class Panel {
   private retryAttempt = 0;
   private _fetching = false;
   private _locked = false;
+  // Lock-awareness for subclasses that write positionally (insertBefore /
+  // appendChild into this.content) instead of through the setContent* helpers.
+  // #6678's GdeltIntelPanel previously proxied this via
+  // element.classList.contains('panel-is-locked') — a string-keyed mirror of
+  // private state that belongs once on the base class (#6714).
+  protected get isLocked(): boolean {
+    return this._locked;
+  }
   // Last reason rendered by showGatedCta, so repeat gating passes with an
   // unchanged verdict skip the DOM teardown/rebuild (#4771 re-runs gating on
   // every subscription-row change, including fields irrelevant to gating).
@@ -974,6 +984,12 @@ export class Panel {
       lockedChildren.push(featureList);
     }
 
+    // Assent immediately above the CTA (#6976). This button jumps straight to
+    // Dodo's hosted checkout, where Dodo (merchant of record) shows its terms
+    // and never ours — so ours are presented here, before the jump. The desktop
+    // branch below opens the /pro pricing page in the OS browser instead, and
+    // that page carries its own assent line above every tier CTA.
+    if (!isDesktopRuntime()) lockedChildren.push(createCheckoutConsentElement(WEB_APP_ORIGIN));
     const ctaBtn = h('button', { type: 'button', className: 'panel-locked-cta' }, 'Upgrade to Pro');
     if (isDesktopRuntime()) {
       ctaBtn.addEventListener('click', () => {
@@ -1285,8 +1301,13 @@ export class Panel {
    * resetting the backoff on every loading paint would flatten it to its floor.
    */
   protected setContentNodes(...children: DomChild[]): void {
-    if (this._locked) return;
+    // #6714: the error-state clear runs BEFORE the lock bail. Clearing the
+    // chip and the backoff rung paints nothing, so it cannot reopen the
+    // paywall hole the bail exists to close — but bailing first meant a
+    // locked panel's success render cleared neither, leaving a red header
+    // over the lock CTA and a stale retryAttempt rung after unlock.
     this.clearErrorState();
+    if (this._locked) return;
     this.cancelPendingContentWrite();
     this.replaceContent(...children);
   }
@@ -1296,8 +1317,9 @@ export class Panel {
    * markup string and cannot go through the debounced `setSafeContent` path.
    */
   protected setTrustedContent(html: TrustedHtml): void {
-    if (this._locked) return;
+    // #6714: clear error state before the lock bail — see setContentNodes.
     this.clearErrorState();
+    if (this._locked) return;
     this.cancelPendingContentWrite();
     setTrustedHtml(this.content, html);
     this.invalidateCommittedHtml();
@@ -1308,8 +1330,9 @@ export class Panel {
   }
 
   private setContentHtml(html: string, afterUpdate?: () => void): void {
-    if (this._locked) return;
+    // #6714: clear error state before the lock bail — see setContentNodes.
     this.clearErrorState();
+    if (this._locked) return;
     if (this.pendingContentHtml === html) {
       if (afterUpdate) this.pendingContentCallback = afterUpdate;
       return;

@@ -1,3 +1,6 @@
+import { agentNotFoundResponse, isKnownPublicPagePath } from './src/config/agent-not-found';
+import { getRootlessDocsDestination } from './src/config/docs-root-redirects';
+
 const BOT_UA =
   /bot|crawl|spider|slurp|archiver|wget|curl\/|python-requests|scrapy|httpclient|go-http|java\/|libwww|perl|ruby|php\/|ahrefsbot|semrushbot|mj12bot|dotbot|baiduspider|yandexbot|sogou|bytespider|petalbot|gptbot|claudebot|ccbot/i;
 
@@ -36,6 +39,11 @@ const LEGACY_DASHBOARD_ROOT_QUERY_KEYS = ['lat', 'lon', 'zoom', 'view', 'timeRan
 //   keyless, advertised as service-meta in /.well-known/api-catalog). Agents
 //   evaluating the product are a primary audience; an agent-journey run (#4854)
 //   got 403 here and concluded the endpoint didn't exist.
+// - /api/download.md: curated static markdown twin of GET /api/download.
+//   Kept on the exact allowlist so a future glob refactor cannot drop the
+//   sampled URL. All other GET/HEAD /api/**/*.md twins bypass via
+//   isPublicApiMarkdownTwin() below — the protocol is site-wide .md twins,
+//   not one sampled path.
 const PUBLIC_API_PATHS = new Set([
   '/api/version',
   '/api/health',
@@ -43,7 +51,15 @@ const PUBLIC_API_PATHS = new Set([
   '/api/internal/brief-why-matters',
   '/api/llms.txt',
   '/api/product-catalog',
+  '/api/download.md',
 ]);
+
+function isPublicApiMarkdownTwin(pathname: string, method: string): boolean {
+  if (method !== 'GET' && method !== 'HEAD') return false;
+  if (!pathname.startsWith('/api/') || !pathname.endsWith('.md')) return false;
+  if (pathname.includes('..') || pathname.includes('//')) return false;
+  return pathname.length > '/api/.md'.length;
+}
 
 const SOCIAL_IMAGE_UA =
   /Slack-ImgProxy|Slackbot|twitterbot|facebookexternalhit|linkedinbot|telegrambot|whatsapp|discordbot|redditbot/i;
@@ -173,6 +189,22 @@ export default function middleware(request: Request) {
     return Response.redirect(dashboardUrl.toString(), 308);
   }
 
+  if (request.method === 'GET' || request.method === 'HEAD') {
+    const docsDestination = getRootlessDocsDestination(path);
+    if (docsDestination) {
+      const canonicalUrl = new URL(docsDestination);
+      canonicalUrl.search = url.search;
+      return Response.redirect(canonicalUrl.toString(), 308);
+    }
+
+    // Real HTTP 404 + markdown body for unknown pages. A rewrite to a static
+    // markdown file would 200 (orank `agent-friendly-404` soft-404). Files with
+    // extensions skip this matcher and fall through to public/404.html.
+    if (!isKnownPublicPagePath(path)) {
+      return agentNotFoundResponse(path, request.method);
+    }
+  }
+
   // Variant-aware crawlable stub for social preview bots AND AI crawlers
   // (GPTBot, ClaudeBot, PerplexityBot, etc.) when hitting variant subdomain
   // roots. Social bots get OG-only; AI crawlers additionally get JSON-LD
@@ -225,7 +257,7 @@ ${AI_CRAWLER_VARIANT_LINKS}
 <li><a href="https://github.com/koala73/worldmonitor">Open source on GitHub</a></li>
 </ul>
 <h2>Sources</h2>
-<p>Data ingested live from 536+ observed upstream hosts, including <a href="https://acleddata.com/">ACLED</a>, <a href="https://ucdp.uu.se/">UCDP</a>, <a href="https://firms.modaps.eosdis.nasa.gov/">NASA FIRMS</a>, <a href="https://earthquake.usgs.gov/">USGS</a>, <a href="https://opensky-network.org/">OpenSky</a>, <a href="https://aisstream.io/">AISStream</a>, <a href="https://fred.stlouisfed.org/">FRED</a>, <a href="https://www.imf.org/en/Data">IMF</a>, and <a href="https://www.bis.org/">BIS</a>. See the <a href="https://www.worldmonitor.app/docs/data-sources">source catalog</a> for coverage by domain and the <a href="https://www.worldmonitor.app/docs/source-attribution">audited attribution ledger</a> for the complete inventory and license posture.</p>` : '';
+<p>Data ingested live from 578+ observed upstream hosts, including <a href="https://acleddata.com/">ACLED</a>, <a href="https://ucdp.uu.se/">UCDP</a>, <a href="https://firms.modaps.eosdis.nasa.gov/">NASA FIRMS</a>, <a href="https://earthquake.usgs.gov/">USGS</a>, <a href="https://opensky-network.org/">OpenSky</a>, <a href="https://aisstream.io/">AISStream</a>, <a href="https://fred.stlouisfed.org/">FRED</a>, <a href="https://www.imf.org/en/Data">IMF</a>, and <a href="https://www.bis.org/">BIS</a>. See the <a href="https://www.worldmonitor.app/docs/data-sources">source catalog</a> for coverage by domain and the <a href="https://www.worldmonitor.app/docs/source-attribution">audited attribution ledger</a> for the complete inventory and license posture.</p>` : '';
           const html = `<!DOCTYPE html><html lang="en"><head>
 <meta property="og:type" content="website"/>
 <meta property="og:title" content="${eTitle}"/>
@@ -328,7 +360,7 @@ ${AI_CRAWLER_VARIANT_LINKS}
   }
 
   // Public endpoints bypass all bot filtering
-  if (PUBLIC_API_PATHS.has(path)) {
+  if (PUBLIC_API_PATHS.has(path) || isPublicApiMarkdownTwin(path, request.method)) {
     return;
   }
 
@@ -366,5 +398,9 @@ ${AI_CRAWLER_VARIANT_LINKS}
 }
 
 export const config = {
-  matcher: ['/', '/mcp', '/api/:path*'],
+  matcher: [
+    '/mcp',
+    '/api/:path*',
+    '/((?!api(?:/|$)|mcp(?:/|$)|.*\\.[^/]+$).*)',
+  ],
 };

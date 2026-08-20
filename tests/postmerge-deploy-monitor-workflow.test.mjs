@@ -11,6 +11,8 @@ import { fileURLToPath } from 'node:url';
 
 import YAML from 'yaml';
 
+import { MONITORED_WORKFLOWS } from '../scripts/check-postmerge-deploys.mjs';
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = resolve(repoRoot, '.github/workflows/postmerge-deploy-monitor.yml');
 const workflow = YAML.parse(readFileSync(workflowPath, 'utf8'));
@@ -37,7 +39,8 @@ describe('post-merge deploy monitor workflow', () => {
   it('invokes the checker without a green-main gate or workflow_run trigger', () => {
     const runStep = workflow.jobs.monitor.steps.find((step) => step.name === 'Check post-merge deploys reached production');
     assert.ok(runStep, 'workflow must define the checker step');
-    assert.match(runStep.run, /git fetch --quiet origin main/);
+    const fetchLine = runStep.run.split(/\r?\n/).find((line) => line.includes('git fetch'));
+    assert.equal(fetchLine?.trim(), 'git fetch --quiet origin main', 'proof-ref refresh must fail the job when it cannot run');
     assert.match(runStep.run, /node scripts\/check-postmerge-deploys\.mjs/);
     assert.doesNotMatch(runStep.run, /gate/);
     // The seed-freshness green-main gate must NOT appear here: gating on main
@@ -49,5 +52,19 @@ describe('post-merge deploy monitor workflow', () => {
 
   it('needs no write permissions — it only reads GitHub and the git tree', () => {
     assert.deepEqual(workflow.permissions, { contents: 'read' });
+  });
+
+  it('keeps dormant deploy proof paths identical to the workflow triggers', () => {
+    for (const monitored of MONITORED_WORKFLOWS.filter((entry) => entry.triggerPaths)) {
+      const deployWorkflow = YAML.parse(readFileSync(
+        resolve(repoRoot, `.github/workflows/${monitored.file}`),
+        'utf8',
+      ));
+      assert.deepEqual(
+        monitored.triggerPaths,
+        deployWorkflow.on.push.paths,
+        `${monitored.file} trigger paths and monitor proof paths must move together`,
+      );
+    }
   });
 });

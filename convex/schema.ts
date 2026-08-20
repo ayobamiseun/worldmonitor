@@ -125,7 +125,13 @@ export default defineSchema({
     windowStart: v.number(),
     count: v.number(),
     updatedAt: v.number(),
-  }).index("by_user_window", ["userId", "windowStart"]),
+  })
+    .index("by_user_window", ["userId", "windowStart"])
+    // Retention scan for `pruneStaleWriteRateLimits` (#6706). Expired-window
+    // rows are garbage-collected off the write path, so the sweep needs a
+    // cross-user range on age alone; without it the prune would be a full
+    // table scan whose read set collides with every live counter.
+    .index("by_windowStart", ["windowStart"]),
 
   notificationChannels: defineTable(
     v.union(
@@ -623,6 +629,9 @@ export default defineSchema({
     // may still rely on tiers 2-3 until
     // `backfillSubscriptionDodoCustomerId` lands their values here.
     dodoCustomerId: v.optional(v.string()),
+    // MCP paid-funnel upgrade attribution (#6716). Stamped from checkout
+    // metadata.wm_attribution on first subscription.active only.
+    attributionSource: v.optional(v.string()),
     // Epoch ms of the event that opened the CURRENT on_hold episode.
     // Set by handleSubscriptionOnHold only on the active→on_hold
     // transition (webhook replays while already on_hold keep the
@@ -886,7 +895,10 @@ export default defineSchema({
     .index("by_normalized_email", ["normalizedEmail"]),
 
   // Canonical per-Clerk-user record. Populated on first authenticated session
-  // by client → `users:ensureRecord` (see convex/users.ts). Distinct from
+  // by client → `users:ensureRecord` (see convex/users.ts), and server-side at
+  // checkout start by `users:recordTermsAcceptance` — which INSERTS when no row
+  // exists, because a /pro buyer may never have run ensureRecord (pro-test has
+  // no Convex client). Distinct from
   // `customers` (which is paid-only, populated by Dodo subscription webhook):
   // `users` covers EVERY Clerk-authenticated user, free or paid. Holds
   // operational properties used for product personalization and broadcast
@@ -909,6 +921,24 @@ export default defineSchema({
     country: v.optional(v.string()), // ISO 3166-1 alpha-2; CLIENT-REPORTED — see warning above
     firstSeenAt: v.number(),
     lastSeenAt: v.number(),
+    // Terms-of-service assent (#6976). Written at the two moments the user is
+    // actually shown the documents: account creation, and checkout start (the
+    // assent line sits immediately above every CTA). Both write the version
+    // read from `shared/legal.ts` server-side, so no client can record a
+    // version that was never in effect, and every recorded version resolves to
+    // an archived snapshot under docs/legal/.
+    //
+    // OPTIONAL, and deliberately not backfilled: users who predate #6976 were
+    // never shown an assent surface, and claiming otherwise would be worse than
+    // an empty column. They fill in on their next checkout.
+    termsAcceptedAt: v.optional(v.number()),
+    termsVersion: v.optional(v.string()), // ISO date, e.g. "2026-08-20"
+    // Set once, never overwritten (#6983). `termsAcceptedAt` moves to the
+    // newest acceptance, so without this the date of the acceptance that
+    // actually formed the agreement is destroyed by the first version bump —
+    // and it cannot be reconstructed afterwards. The bump in #6983
+    // (2026-07-27 → 2026-08-20) is the first one that would have done it.
+    termsFirstAcceptedAt: v.optional(v.number()),
   })
     .index("by_userId", ["userId"])
     .index("by_normalizedEmail", ["normalizedEmail"])
@@ -1059,6 +1089,29 @@ export default defineSchema({
   })
     .index("by_dodoPaymentId", ["dodoPaymentId"])
     .index("by_reconciledAt", ["reconciledAt"]),
+
+  // One row per checkout that exhausted the #6027 provider-429 retry ladder
+  // and returned a terminal CHECKOUT_RATE_LIMITED to the buyer (#6698). This
+  // is the rate signal the alarm in `payments/checkoutRateLimitAlarm.ts`
+  // measures; the browser-side Sentry event is corroboration, not the source,
+  // because it is ad-blockable and fires at level `info`.
+  //
+  // Deliberately payload-free and self-pruning: each insert deletes a bounded
+  // batch of rows older than CHECKOUT_RATE_LIMIT_EVENT_RETENTION_MS, so a
+  // storm drains over the inserts that follow it rather than accumulating for
+  // the lifetime of the deployment. Rows left behind when 429s stop entirely
+  // are inert — every count is window-relative, so a stale row can never
+  // inflate a verdict.
+  checkoutRateLimitEvents: defineTable({
+    userId: v.string(),
+    productId: v.string(),
+    occurredAt: v.number(),
+    // Stamped on the row whose insert crossed a threshold and emitted the ops
+    // signal. This doubles as the alert cooldown clock, which is why the alarm
+    // needs no pre-seeded singleton document — there is no state row whose
+    // absence could silently disarm it.
+    alertedAt: v.optional(v.number()),
+  }).index("by_occurredAt", ["occurredAt"]),
 
   productPlans: defineTable({
     dodoProductId: v.string(),
@@ -1559,7 +1612,9 @@ export default defineSchema({
     createdAt: v.number(),
     lastUsedAt: v.optional(v.number()),
     revokedAt: v.optional(v.number()),
-  }).index("by_userId", ["userId"]),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_userId_revokedAt_createdAt", ["userId", "revokedAt", "createdAt"]),
 
   // API Business domain-gated Pro-seat invites (#4634/#4635). One row per seat
   // invite issued by an active `api_business` owner to a same-corporate-domain

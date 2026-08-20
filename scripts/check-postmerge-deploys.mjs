@@ -24,15 +24,19 @@
 // Why scan run history instead of listening for workflow_run events: the
 // event fires only on completion, so a workflow that never runs (deleted,
 // broken trigger) produces no event at all. A time-bounded scan of the runs
-// API sees that as "no completed run on main in the window" — an alarm.
+// API sees that as "no run on main in the window" — an alarm.
 //
 // DIRECTION OF FAILURE
 //
-// Every case where the record is missing, unreadable, ambiguous or truncated
-// resolves away from "healthy". A scanner whose unmatched case means HEALTHY
-// is the same defect in a new place.
+// A verified failed deploy is ALARM and fails the job. GitHub transport
+// unreadability after the retry budget (TLS, DNS, timeout, 5xx) is UNKNOWN:
+// visible as an Actions warning, never a claim that a deploy failed, and it
+// does not fail the job. Local proof failures (git, missing `gh`) and GitHub
+// 4xx answers are ALARM and still fail the job. An unmatched case that means
+// HEALTHY is the same defect in a new place.
 
 import { spawnSync } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
 
 import { isMainModule } from './lib/main-module.mjs';
 import { REPOSITORY, readArgument } from './railway-cli.mjs';
@@ -51,7 +55,7 @@ export const MONITORED_WORKFLOWS = Object.freeze([
     // run must not have changed anything under convex/.
     skipProofPath: 'convex/',
     // Convex Deploy fires on EVERY push to main (no path filter; the changes
-    // job decides whether to deploy). So "no completed run in the window"
+    // job decides whether to deploy). So "no run in the window"
     // means "no merge to main in the window". The observed max gap across the
     // last 100 completed runs is ~5 days (quiet weekend), so 7 days is the
     // backstop for a workflow that stopped firing at all.
@@ -67,9 +71,15 @@ export const MONITORED_WORKFLOWS = Object.freeze([
     // plus its own file and test. A push touching ONLY those paths must
     // deploy; a deploy job skipped there is an unexpected skip, which alarms.
     skipProofPath: null,
+    triggerPaths: Object.freeze([
+      'workers/railway-reconcile-control/**',
+      '.github/workflows/deploy-railway-reconcile-control.yml',
+      'tests/deploy-railway-reconcile-control-workflow.test.mjs',
+    ]),
     // Path-filtered and rare: the Worker is dormant control-plane infra and a
-    // healthy stretch with no matching push is ordinary. 14 days is the
-    // backstop for a trigger that stopped firing.
+    // healthy stretch with no matching push is ordinary. Every tick proves
+    // whether a deploy was due from the trigger-path tree diff; this window
+    // only marks an active run as stuck and labels an old baseline.
     noRunWindowMs: 14 * 24 * 60 * 60 * 1000,
   }),
   Object.freeze({
@@ -80,8 +90,14 @@ export const MONITORED_WORKFLOWS = Object.freeze([
     // CLOUDFLARE_API_TOKEN fails it silently like the reconcile Worker's
     // missing secrets did.
     skipProofPath: null,
-    // Same dormant reasoning as the reconcile Worker: last run 2026-08-02,
-    // and a healthy run can be weeks apart.
+    triggerPaths: Object.freeze([
+      'workers/api-cors-preflight/**',
+      'api/_bootstrap-public-tier.js',
+      '.github/workflows/deploy-worker.yml',
+    ]),
+    // Same dormant reasoning as the reconcile Worker: a healthy run can be
+    // weeks apart, so the trigger-path tree — not age — decides whether a
+    // deploy is due.
     noRunWindowMs: 14 * 24 * 60 * 60 * 1000,
   }),
 ]);
@@ -90,8 +106,8 @@ export const MONITORED_WORKFLOWS = Object.freeze([
 export const DEFAULT_NO_RUN_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 // A run that is still executing is not a verdict: the next tick decides. The
-// API's `status=completed` filter should exclude these, but a mis-read must
-// not alarm (a fresh run is the deploy in progress, which is healthy).
+// A fresh active run is the deploy in progress, which is healthy until the
+// next tick. An active run older than its workflow window is stuck and alarms.
 const ACTIVE_RUN_STATUSES = new Set(['queued', 'in_progress', 'waiting', 'pending', 'requested']);
 
 // Conclusions that mean "no verdict, do not judge this run".
@@ -135,6 +151,52 @@ export function isRetryableGhFailure(error) {
   return true;
 }
 
+const GITHUB_READ_SOURCE = 'github-api';
+
+function markGithubReadFailure(error) {
+  const marked = error instanceof Error ? error : new Error(String(error));
+  marked.githubReadSource = GITHUB_READ_SOURCE;
+  return marked;
+}
+
+function isGithubReadFailure(error) {
+  return error instanceof Error && error.githubReadSource === GITHUB_READ_SOURCE;
+}
+
+function isProvenGithubTransportFailure(message) {
+  return /\b(?:tls|x509|eof)\b|certificate|dial tcp|lookup .*no such host|no such host|connection (?:reset|refused|closed|aborted)|network is unreachable|no route to host|context deadline exceeded|i\/o timeout|operation timed out|temporary failure in name resolution/i.test(message);
+}
+
+function readGithub(gh, args) {
+  try {
+    return gh(args);
+  } catch (error) {
+    throw markGithubReadFailure(error);
+  }
+}
+
+/**
+ * After the retry budget, is this throw GitHub-record unreadability rather
+ * than a local proof failure or a GitHub answer?
+ *
+ * Only unreadability becomes UNKNOWN (a non-failing Actions warning). git
+ * throws, a missing `gh` binary, and HTTP 4xx answers are ALARM so the
+ * monitor still fails closed for those. Timeouts are not retried (they would
+ * burn the job) but they are still unreadability.
+ */
+export function isGithubRecordUnreadability(error) {
+  if (!isGithubReadFailure(error)) return false;
+  if (error.code === 'ENOENT') return false;
+  const message = error.message;
+  if (error.timedOut === true) return true;
+  const status = message.match(/\(HTTP (\d{3})\)/);
+  if (status) {
+    const code = Number(status[1]);
+    return code >= 500;
+  }
+  return isProvenGithubTransportFailure(message);
+}
+
 function sleepSync(ms) {
   // spawnSync makes the whole read path synchronous, so the backoff must be
   // too. Atomics.wait on a private buffer blocks without a busy loop.
@@ -168,11 +230,11 @@ function runGh(args) {
   if (result.signal) {
     const error = new Error(`gh ${args.join(' ')} timed out`);
     error.timedOut = true;
-    throw error;
+    throw markGithubReadFailure(error);
   }
-  if (result.error) throw result.error;
+  if (result.error) throw markGithubReadFailure(result.error);
   if (result.status !== 0) {
-    throw new Error(`gh ${args.join(' ')} failed (${result.status}): ${String(result.stderr).trim()}`);
+    throw markGithubReadFailure(new Error(`gh ${args.join(' ')} failed (${result.status}): ${String(result.stderr).trim()}`));
   }
   return result.stdout;
 }
@@ -184,18 +246,17 @@ function parseTimestamp(value) {
 }
 
 /**
- * Resolve the newest completed run of one workflow on main, or a structured
- * verdict when there is none.
+ * Resolve the newest run of one workflow on main, including queued or active
+ * work, or a structured verdict when there is none.
  *
  * `gh` is injected rather than imported so the I/O path is testable.
  */
 export function readNewestRun({ gh, repository, workflowFile, now, noRunWindowMs = DEFAULT_NO_RUN_WINDOW_MS }) {
   const query = [
     'branch=main',
-    'status=completed',
     'per_page=100',
   ].join('&');
-  const payload = JSON.parse(gh([
+  const payload = JSON.parse(readGithub(gh, [
     'api',
     `repos/${repository}/actions/workflows/${workflowFile}/runs?${query}`,
   ]));
@@ -203,11 +264,15 @@ export function readNewestRun({ gh, repository, workflowFile, now, noRunWindowMs
   if (!Array.isArray(runs)) {
     throw new Error(`the run listing for ${workflowFile} was not an object with a workflow_runs array`);
   }
+  for (const candidate of runs) {
+    if (parseTimestamp(candidate?.created_at) === null) {
+      throw new Error(`run ${candidate?.id ?? '?'} of ${workflowFile} has an unreadable created_at timestamp`);
+    }
+  }
 
   // The API returns newest-first, but nothing forces that: sort defensively so
-  // the newest run cannot depend on an undocumented ordering. A run with an
-  // unreadable created_at sorts last — an unreadable record must not decide
-  // the verdict.
+  // the newest run cannot depend on an undocumented ordering. The validation
+  // above makes any unreadable timestamp a read failure instead of hiding it.
   const ordered = [...runs].sort((left, right) => {
     const leftMs = parseTimestamp(left?.created_at);
     const rightMs = parseTimestamp(right?.created_at);
@@ -222,18 +287,25 @@ export function readNewestRun({ gh, repository, workflowFile, now, noRunWindowMs
     return {
       found: false,
       verdict: 'NO_RUN',
-      detail: `no completed run of ${workflowFile} on main is recorded at all`,
+      detail: `no run of ${workflowFile} on main is recorded at all`,
     };
   }
   const createdMs = parseTimestamp(newest.created_at);
-  if (createdMs === null || now - createdMs > noRunWindowMs) {
+  const conclusion = ACTIVE_RUN_STATUSES.has(newest.status)
+    ? newest.status
+    : (newest.conclusion ?? null);
+  if (now - createdMs > noRunWindowMs) {
     return {
       found: true,
       verdict: 'NO_RUN_IN_WINDOW',
       runId: newest.id ?? null,
       createdAt: newest.created_at ?? null,
-      conclusion: newest.conclusion ?? null,
-      detail: `the newest completed run of ${workflowFile} on main (${newest.id}) predates the ${noRunWindowMs / (60 * 60 * 1000)}h window — the workflow may have stopped running`,
+      conclusion,
+      runAttempt: newest.run_attempt ?? 1,
+      headSha: newest.head_sha ?? null,
+      event: newest.event ?? null,
+      displayTitle: newest.display_title ?? null,
+      detail: `the newest run of ${workflowFile} on main (${newest.id}) predates the ${noRunWindowMs / (60 * 60 * 1000)}h window — the workflow may have stopped running`,
     };
   }
   return {
@@ -241,7 +313,7 @@ export function readNewestRun({ gh, repository, workflowFile, now, noRunWindowMs
     verdict: 'RUN_FOUND',
     runId: newest.id ?? null,
     createdAt: newest.created_at ?? null,
-    conclusion: newest.conclusion ?? null,
+    conclusion,
     runAttempt: newest.run_attempt ?? 1,
     headSha: newest.head_sha ?? null,
     event: newest.event ?? null,
@@ -260,7 +332,7 @@ export function readNewestRun({ gh, repository, workflowFile, now, noRunWindowMs
  * (runs 31323075509 / 31323823825).
  */
 export function readRunJobs({ gh, repository, runId, runAttempt }) {
-  const payload = JSON.parse(gh([
+  const payload = JSON.parse(readGithub(gh, [
     'api',
     `repos/${repository}/actions/runs/${runId}/attempts/${runAttempt}/jobs`,
   ]));
@@ -289,7 +361,24 @@ export function readRunJobs({ gh, repository, runId, runAttempt }) {
  * healthy. `git` is injected for testability.
  */
 export function diffTouchesPath({ git, parentSha, headSha, pathPrefix }) {
-  const result = git(['diff', '--name-only', `${parentSha}`, `${headSha}`, '--', pathPrefix]);
+  return diffTouchesPaths({ git, baseSha: parentSha, headSha, paths: [pathPrefix] });
+}
+
+/**
+ * Did any of `paths` change between a deployed baseline and the current tree?
+ *
+ * Path-filtered workflows can be dormant indefinitely. Their age alone says
+ * nothing about health; the trigger-path tree diff says whether a newer deploy
+ * was required. A read failure throws so the caller reports ALARM, never OK.
+ */
+export function diffTouchesPaths({ git, baseSha, headSha, paths }) {
+  if (typeof baseSha !== 'string' || baseSha.length === 0) {
+    throw new Error('the deployed baseline SHA is missing');
+  }
+  if (!Array.isArray(paths) || paths.length === 0) {
+    throw new Error('the deploy trigger path list is missing');
+  }
+  const result = git(['diff', '--name-only', `${baseSha}`, `${headSha}`, '--', ...paths]);
   return result.trim().length > 0;
 }
 
@@ -304,8 +393,8 @@ export function diffTouchesPath({ git, parentSha, headSha, pathPrefix }) {
  *
  * Returns { state: 'OK' | 'ALARM', verdict, detail, runId }.
  */
-export function judgeWorkflow({ workflow, run, jobs, skipProof }) {
-  if (run.verdict === 'NO_RUN' || run.verdict === 'NO_RUN_IN_WINDOW') {
+export function judgeWorkflow({ workflow, run, jobs, skipProof, deploymentRequired }) {
+  if (run.verdict === 'NO_RUN') {
     return {
       state: 'ALARM',
       verdict: run.verdict,
@@ -313,11 +402,61 @@ export function judgeWorkflow({ workflow, run, jobs, skipProof }) {
       detail: run.detail,
     };
   }
+  if (run.verdict === 'NO_RUN_IN_WINDOW') {
+    if (!Array.isArray(workflow.triggerPaths) || workflow.triggerPaths.length === 0) {
+      return {
+        state: 'ALARM',
+        verdict: run.verdict,
+        runId: run.runId ?? null,
+        detail: run.detail,
+      };
+    }
+    if (ACTIVE_RUN_STATUSES.has(run.conclusion)) {
+      return {
+        state: 'ALARM',
+        verdict: 'RUN_STUCK',
+        runId: run.runId ?? null,
+        detail: `run ${run.runId} has remained ${run.conclusion} beyond the workflow age window`,
+      };
+    }
+    if (deploymentRequired === true) {
+      return {
+        state: 'ALARM',
+        verdict: 'DEPLOY_MISSING_AFTER_CHANGE',
+        runId: run.runId ?? null,
+        detail: `run ${run.runId} is outside the age window and at least one deploy trigger path changed after ${run.headSha ?? 'an unreadable baseline'}`,
+      };
+    }
+    if (deploymentRequired !== false) {
+      return {
+        state: 'ALARM',
+        verdict: 'DEPLOY_STATE_UNPROVEN',
+        runId: run.runId ?? null,
+        detail: `run ${run.runId} is outside the age window and the deploy trigger path state could not be proven`,
+      };
+    }
+
+    // The current trigger-path tree matches this old run's head. It is a valid
+    // production baseline only if the run and its deploy job both succeeded.
+    const baseline = judgeWorkflow({
+      workflow,
+      run: { ...run, verdict: 'RUN_FOUND' },
+      jobs,
+      skipProof,
+      deploymentRequired: false,
+    });
+    if (baseline.state !== 'OK' || baseline.verdict !== 'DEPLOYED') return baseline;
+    return {
+      state: 'OK',
+      verdict: 'DEPLOY_NOT_DUE',
+      runId: run.runId ?? null,
+      detail: `run ${run.runId} is outside the age window, but no deploy trigger path changed after ${run.headSha}`,
+    };
+  }
 
   const conclusion = run.conclusion;
   if (ACTIVE_RUN_STATUSES.has(conclusion)) {
-    // A completed listing should not contain these, but an in-flight run is a
-    // deploy under way — the next tick decides.
+    // An in-flight run is a deploy under way — the next tick decides.
     return { state: 'OK', verdict: 'IN_PROGRESS', runId: run.runId, detail: `run ${run.runId} is still ${conclusion}` };
   }
   if (INDETERMINATE_RUN_CONCLUSIONS.has(conclusion)) {
@@ -330,6 +469,24 @@ export function judgeWorkflow({ workflow, run, jobs, skipProof }) {
       runId: run.runId,
       detail: `run ${run.runId} (${run.displayTitle ?? run.event ?? '?'}) concluded ${conclusion}`,
     };
+  }
+  if (Array.isArray(workflow.triggerPaths) && workflow.triggerPaths.length > 0) {
+    if (deploymentRequired === true) {
+      return {
+        state: 'ALARM',
+        verdict: 'DEPLOY_MISSING_AFTER_CHANGE',
+        runId: run.runId ?? null,
+        detail: `run ${run.runId} succeeded, but at least one deploy trigger path changed after ${run.headSha ?? 'an unreadable baseline'} without a newer run`,
+      };
+    }
+    if (deploymentRequired !== false) {
+      return {
+        state: 'ALARM',
+        verdict: 'DEPLOY_STATE_UNPROVEN',
+        runId: run.runId ?? null,
+        detail: `run ${run.runId} succeeded, but the deploy trigger path state could not be proven`,
+      };
+    }
   }
 
   // The run succeeded. The deploy job is the one that matters: a success with
@@ -403,9 +560,9 @@ export function judgeWorkflow({ workflow, run, jobs, skipProof }) {
 /**
  * Run the whole monitor for every monitored workflow and return the report.
  *
- * `io` bundles the injected side effects: `gh`, `git`, `now`. Every unreadable
- * record throws — the caller exits non-zero — because an unreadable record
- * must never resolve to healthy.
+ * `io` bundles the injected side effects: `gh`, `git`, `now`. GitHub
+ * transport unreadability becomes UNKNOWN. git/4xx/ENOENT throws become
+ * ALARM so they still fail the job.
  */
 export function checkPostmergeDeploys({ repository, gh, git, now = Date.now() }) {
   const results = [];
@@ -413,7 +570,19 @@ export function checkPostmergeDeploys({ repository, gh, git, now = Date.now() })
     try {
       const run = readNewestRun({ gh, repository, workflowFile: workflow.file, now, noRunWindowMs: workflow.noRunWindowMs });
       let jobs = null;
-      if (run.found && run.verdict === 'RUN_FOUND') {
+      let deploymentRequired = null;
+      if (run.found && Array.isArray(workflow.triggerPaths)) {
+        deploymentRequired = diffTouchesPaths({
+          git,
+          baseSha: run.headSha,
+          headSha: 'origin/main',
+          paths: workflow.triggerPaths,
+        });
+      }
+      if (run.found && run.conclusion === 'success' && deploymentRequired !== true && (
+        run.verdict === 'RUN_FOUND'
+        || (run.verdict === 'NO_RUN_IN_WINDOW' && deploymentRequired === false)
+      )) {
         jobs = readRunJobs({
           gh,
           repository,
@@ -434,21 +603,23 @@ export function checkPostmergeDeploys({ repository, gh, git, now = Date.now() })
       results.push({
         workflow: workflow.file,
         displayName: workflow.displayName,
-        ...judgeWorkflow({ workflow, run, jobs, skipProof }),
+        ...judgeWorkflow({ workflow, run, jobs, skipProof, deploymentRequired }),
       });
     } catch (error) {
       // #6479: one unreadable record used to abort the whole walk, so a
       // transient failure on the FIRST workflow hid a genuinely red deploy on
-      // the second. Every workflow gets its own verdict; an unread one is
-      // UNKNOWN, which is not healthy (it still exits non-zero) but is also not
-      // a claim that a deploy failed — the monitor never saw the record.
+      // the second. Every workflow gets its own verdict. GitHub transport
+      // unreadability is UNKNOWN (not a failed deploy). git, missing gh, and
+      // HTTP 4xx answers are ALARM so they still fail the job.
+      const detail = `the record could not be read: ${error instanceof Error ? error.message : String(error)}`;
+      const unread = isGithubRecordUnreadability(error);
       results.push({
         workflow: workflow.file,
         displayName: workflow.displayName,
-        state: 'UNKNOWN',
-        verdict: 'READ_FAILED',
+        state: unread ? 'UNKNOWN' : 'ALARM',
+        verdict: unread ? 'READ_FAILED' : 'READ_UNPROVEN',
         runId: null,
-        detail: `the record could not be read: ${error instanceof Error ? error.message : String(error)}`,
+        detail,
       });
     }
   }
@@ -459,17 +630,24 @@ export function checkPostmergeDeploys({ repository, gh, git, now = Date.now() })
  * Split the results into the two things a notification must not conflate: a
  * deploy that failed, and a record that could not be read. (#6479)
  *
- * Both exit non-zero — an unreadable record must never pass as healthy — but
- * they are reported apart, because "Convex Deploy did not deploy" and "we could
- * not reach the GitHub API" call for opposite responses.
+ * Only ALARM results exit non-zero. GitHub transport unreadability remains a
+ * visible warning, because "Convex Deploy did not deploy" and "we could not
+ * reach the GitHub API" call for opposite responses. git/4xx/ENOENT are
+ * ALARM with verdict READ_UNPROVEN so they are not filed as a failed deploy.
  */
 export function summarizeResults(results) {
   const alarms = results.filter((result) => result.state === 'ALARM');
   const unknowns = results.filter((result) => result.state === 'UNKNOWN');
+  const deployAlarms = alarms.filter((result) => result.verdict !== 'READ_UNPROVEN');
+  const proofAlarms = alarms.filter((result) => result.verdict === 'READ_UNPROVEN');
   const lines = [];
-  if (alarms.length > 0) {
-    lines.push(`Post-merge deploy monitor found ${alarms.length} workflow(s) that did not deploy:`);
-    for (const alarm of alarms) lines.push(`- ${alarm.displayName} [${alarm.verdict}] ${alarm.detail}`);
+  if (deployAlarms.length > 0) {
+    lines.push(`Post-merge deploy monitor found ${deployAlarms.length} workflow(s) that did not deploy:`);
+    for (const alarm of deployAlarms) lines.push(`- ${alarm.displayName} [${alarm.verdict}] ${alarm.detail}`);
+  }
+  if (proofAlarms.length > 0) {
+    lines.push(`Post-merge deploy monitor could not prove ${proofAlarms.length} workflow(s) — git, gh, or a GitHub 4xx answer failed, not a transport outage:`);
+    for (const alarm of proofAlarms) lines.push(`- ${alarm.displayName} [${alarm.verdict}] ${alarm.detail}`);
   }
   if (unknowns.length > 0) {
     lines.push(`Post-merge deploy monitor could not be read for ${unknowns.length} workflow(s) — this is a read failure, not a failed deploy:`);
@@ -479,8 +657,46 @@ export function summarizeResults(results) {
     alarms,
     unknowns,
     lines,
-    exitCode: alarms.length + unknowns.length > 0 ? 1 : 0,
+    exitCode: alarms.length > 0 ? 1 : 0,
   };
+}
+
+export function formatResultMark(state) {
+  if (state === 'OK') return 'ok';
+  if (state === 'UNKNOWN') return 'warn';
+  return 'ERROR';
+}
+
+export function githubWarningAnnotations(results) {
+  return results
+    .filter((result) => result.state === 'UNKNOWN')
+    .map((result) => (
+      `::warning title=Post-merge deploy record unread::${result.displayName} [${result.verdict}] ${result.detail}`
+    ));
+}
+
+/**
+ * Make UNKNOWN visible on a green Actions job: a `::warning::` annotation
+ * plus the existing summary lines on `$GITHUB_STEP_SUMMARY`. Plain stdout
+ * `warn:` on an exit-0 job is easy to miss.
+ */
+export function writeUnknownVisibility({
+  results,
+  summary,
+  stderr = (...args) => console.error(...args),
+  env = process.env,
+  appendFile = appendFileSync,
+}) {
+  for (const line of githubWarningAnnotations(results)) stderr(line);
+  const summaryPath = env.GITHUB_STEP_SUMMARY;
+  if (typeof summaryPath !== 'string' || summaryPath.length === 0 || summary.lines.length === 0) {
+    return;
+  }
+  try {
+    appendFile(summaryPath, `${summary.lines.join('\n')}\n`);
+  } catch {
+    stderr('::warning::Could not write GitHub step summary');
+  }
 }
 
 async function main() {
@@ -509,12 +725,13 @@ async function main() {
     console.log(JSON.stringify({ repository, results }, null, 2));
   } else {
     for (const result of results) {
-      const mark = result.state === 'OK' ? 'ok' : 'ERROR';
+      const mark = formatResultMark(result.state);
       console.log(`postmerge-deploy ${mark}: ${result.displayName} [${result.verdict}] ${result.detail}`);
     }
   }
 
   const summary = summarizeResults(results);
+  writeUnknownVisibility({ results, summary });
   for (const line of summary.lines) console.error(line);
   process.exitCode = summary.exitCode;
 }

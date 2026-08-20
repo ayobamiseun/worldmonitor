@@ -34,7 +34,11 @@
 import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { GRACEFUL_FETCH_FAILURE_EXIT_CODE, loadEnvFile } from './_seed-utils.mjs';
+import {
+  BUNDLE_COMPLETION_META_KEY_ENV,
+  GRACEFUL_FETCH_FAILURE_EXIT_CODE,
+  loadEnvFile,
+} from './_seed-utils.mjs';
 import { unwrapEnvelope } from './_seed-envelope-source.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -43,6 +47,13 @@ export const MIN = 60_000;
 export const HOUR = 3_600_000;
 export const DAY = 86_400_000;
 export const WEEK = 604_800_000;
+// 7d TTL outlives the 48h (2× daily) static-ref health gate so a late tick
+// reports STALE_SEED while the heartbeat is still readable, not EMPTY.
+export const BUNDLE_HEARTBEAT_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+export function bundleHeartbeatKey(label) {
+  return `bundle:heartbeat:${label}`;
+}
 
 loadEnvFile(import.meta.url);
 
@@ -70,6 +81,52 @@ async function readRedisKey(key) {
 }
 
 /**
+ * Record that the scheduler actually started this container.
+ *
+ * Member seed-meta only advances when a section runs. Daily crons with
+ * weekly/monthly members therefore look healthy across many missed ticks
+ * (#6691). This heartbeat is written on every tick, including skip-all.
+ * Missing Redis must not crash the bundle — writeSeedMeta exits(1).
+ */
+async function writeBundleHeartbeat(label) {
+  if (!REDIS_URL || !REDIS_TOKEN) return false;
+  const fetchedAt = Date.now();
+  const meta = { fetchedAt, recordCount: 1, lastBundleRunAt: fetchedAt };
+  try {
+    const resp = await fetch(REDIS_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${REDIS_TOKEN}`,
+        'Content-Type': 'application/json',
+        'User-Agent': 'worldmonitor-bundle-runner/1.0',
+      },
+      body: JSON.stringify([
+        'SET',
+        bundleHeartbeatKey(label),
+        JSON.stringify(meta),
+        'EX',
+        BUNDLE_HEARTBEAT_TTL_SECONDS,
+      ]),
+      signal: AbortSignal.timeout(REDIS_READ_TIMEOUT_MS),
+    });
+    if (!resp.ok) {
+      console.warn(`[Bundle:${label}] tick heartbeat write failed: HTTP ${resp.status}`);
+      return false;
+    }
+    const body = await resp.json().catch(() => null);
+    if (!body || typeof body !== 'object' || body.result !== 'OK') {
+      const detail = body && typeof body === 'object' && body.error ? body.error : 'missing OK result';
+      console.warn(`[Bundle:${label}] tick heartbeat write failed: ${detail}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn(`[Bundle:${label}] tick heartbeat write failed: ${err instanceof Error ? err.message : err}`);
+    return false;
+  }
+}
+
+/**
  * Read section freshness for the interval gate.
  *
  * Returns `{ fetchedAt }` or null. A declared `freshnessMetaKey` is authoritative
@@ -79,6 +136,16 @@ async function readRedisKey(key) {
  * prior run and cannot attest a newer pre-publication heartbeat. Otherwise
  * prefer envelope-form data when `canonicalKey` is declared, then fall back to
  * the legacy `seed-meta:<key>` read.
+ *
+ * `completionMetaKey` applies the same rule to the canonical clock (#6960).
+ * The bundle passes a dedicated marker key to runSeed, which writes it only
+ * after the canonical envelope, every extra key, post-publish hooks, and
+ * freshness bookkeeping finish. Its fetchedAt must equal the canonical
+ * envelope timestamp, binding the proof to one exact run.
+ *
+ * Only sections that declare it are affected. Most canonical-clock members
+ * publish no seed-meta at all, and requiring an attestation from them would
+ * mark them due on every tick — the #6806 failure this must not reintroduce.
  */
 export async function readSectionFreshness(section, readKey = readRedisKey) {
   if (section.freshnessMetaKey) {
@@ -103,7 +170,17 @@ export async function readSectionFreshness(section, readKey = readRedisKey) {
   if (section.canonicalKey) {
     const raw = await readKey(section.canonicalKey);
     const { _seed } = unwrapEnvelope(raw);
-    if (_seed?.fetchedAt) return { fetchedAt: _seed.fetchedAt };
+    if (_seed?.fetchedAt) {
+      if (!section.completionMetaKey) return { fetchedAt: _seed.fetchedAt };
+      const completionRaw = await readKey(section.completionMetaKey);
+      const completion = unwrapEnvelope(completionRaw).data;
+      // Absent is due, not fresh: runSeed writes this marker with
+      // max(7d, ttlSeconds), so it cannot expire before the canonical key after
+      // a completed run. Missing means the run never reached the final write.
+      if (!Number.isFinite(completion?.fetchedAt)) return null;
+      if (completion.fetchedAt !== _seed.fetchedAt) return null;
+      return { fetchedAt: _seed.fetchedAt };
+    }
     // Version migrations can opt out of the legacy seed-meta fallback. A
     // fresh meta entry for the old version must never suppress the first
     // publish of a newly required canonical envelope.
@@ -152,6 +229,26 @@ export function sectionWorstCaseMs(section) {
  * timeout keeps the two numbers linked instead of drifting apart.
  */
 export const ADMISSION_HEADROOM_MS = 3 * REDIS_READ_TIMEOUT_MS;
+// The heartbeat uses one bounded Redis request. With `prefetchFreshness`,
+// section freshness can use up to three reads but the slowest section, not the
+// section count, controls this preflight budget.
+export const BUNDLE_PREFLIGHT_HEADROOM_MS = REDIS_READ_TIMEOUT_MS + ADMISSION_HEADROOM_MS;
+
+/**
+ * Age multiple at which a deferral stops reading as ordinary budget pressure
+ * and starts reading as a stall (#6562 item 4). starvedTick only fires when a
+ * tick publishes nothing; a section can instead be squeezed out on every tick
+ * while healthy siblings keep the bundle green — `ran > 0`, exit 0, and the
+ * deferral is indistinguishable from pressure. At deferral time the runner
+ * already holds the section's seed-meta age, so a deferral whose data is older
+ * than this multiple of the section's own interval is reported loudly
+ * regardless of what else ran. The multiple must clear the 0.8x freshness
+ * floor that makes an ordinary due section deferrable; 2x means at least one
+ * full interval was missed while the section kept losing the budget race. A
+ * single transient blip cannot reach it, so this does not reintroduce the
+ * alert fatigue the GRACEFUL_FAIL exemption exists to prevent.
+ */
+export const STALL_AGE_INTERVAL_MULTIPLE = 2;
 
 /**
  * Sections that can never be admitted, whatever else the tick does. A section
@@ -184,7 +281,7 @@ function streamLines(stream, onLine) {
   stream.on('error', (err) => onLine(`<stdio error: ${err.message}>`));
 }
 
-function spawnSeed(scriptPath, { timeoutMs, label, bundleStartedAtMs }) {
+function spawnSeed(scriptPath, { timeoutMs, label, bundleStartedAtMs, completionMetaKey }) {
   return new Promise((resolve) => {
     const t0 = Date.now();
     // Capture the child's structured `seed_complete` event if emitted, so
@@ -203,6 +300,7 @@ function spawnSeed(scriptPath, { timeoutMs, label, bundleStartedAtMs }) {
       env: {
         ...process.env,
         BUNDLE_RUN_STARTED_AT_MS: String(bundleStartedAtMs ?? Date.now()),
+        [BUNDLE_COMPLETION_META_KEY_ENV]: completionMetaKey || '',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -278,17 +376,47 @@ function spawnSeed(scriptPath, { timeoutMs, label, bundleStartedAtMs }) {
  *   script: string,
  *   seedMetaKey?: string,    // legacy (pre-contract); reads `seed-meta:<key>`
  *   freshnessMetaKey?: string, // authoritative explicit seed-meta key
- *   completionMetaKey?: string, // optional completed-run key paired with freshnessMetaKey
  *   canonicalKey?: string,   // PR 2+: reads envelope from the canonical data key
+ *   completionMetaKey?: string, // full key written LAST by the run; must not
+ *                               // predate the clock it attests (#6960)
  *   requireCanonical?: boolean, // do not fall back to legacy meta when canonical is absent
  *   intervalMs: number,
  *   timeoutMs?: number,
  *   dependsOn?: string[],    // labels that MUST run earlier in the array
  *   requiredEnv?: string[],  // deployment config required before any section runs
  * }>} sections
- * @param {{ maxBundleMs?: number }} [opts]
+ * @param {{ maxBundleMs?: number, prefetchFreshness?: boolean }} [opts]
  */
+/**
+ * Env var carrying the per-member kill switch for a bundle, e.g.
+ * WM_BUNDLE_CANADA_DISABLED_MEMBERS. Per bundle, so disabling a member of one
+ * cannot silently disable a same-named member of another.
+ */
+export function bundleDisableEnvVar(label) {
+  return `WM_BUNDLE_${String(label).toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_DISABLED_MEMBERS`;
+}
+
+/** Section labels disabled for `label`, parsed from the env. */
+export function disabledMembersFromEnv(label, env = process.env) {
+  const raw = env[bundleDisableEnvVar(label)];
+  if (typeof raw !== 'string' || raw.trim() === '') return new Set();
+  return new Set(raw.split(',').map((name) => name.trim()).filter(Boolean));
+}
+
 export async function runBundle(label, sections, opts = {}) {
+  for (const section of sections) {
+    if (
+      section.canonicalKey
+      && !section.freshnessMetaKey
+      && section.completionMetaKey
+      && !section.completionMetaKey.startsWith('seed-completion:')
+    ) {
+      throw new Error(
+        `[Bundle:${label}] section '${section.label}' canonical completionMetaKey must use `
+        + `the dedicated seed-completion: namespace, got '${section.completionMetaKey}'`,
+      );
+    }
+  }
   const missingEnvBySection = new Map();
   for (const section of sections) {
     if (section.requiredEnv == null) continue;
@@ -392,13 +520,65 @@ export async function runBundle(label, sections, opts = {}) {
     );
   }
 
+  // PER-MEMBER KILL SWITCH. A bundle collapses N services into one, which also
+  // collapses N deploy controls into one: before this, taking a single
+  // misbehaving member out of rotation meant editing the section list and
+  // redeploying the whole bundle, stopping its siblings too.
+  //
+  // Fail-closed on the control itself: an unrecognised label is a CONFIGURATION
+  // ERROR, not an ignored string. A typo'd kill switch that silently disables
+  // nothing is the worst outcome here — an operator believes a source is off
+  // while it keeps running.
+  const disabledMembers = disabledMembersFromEnv(label);
+  const knownLabels = new Set(sections.map((section) => section.label));
+  const unknownDisabled = [...disabledMembers].filter((name) => !knownLabels.has(name));
+  if (unknownDisabled.length > 0) {
+    throw new Error(
+      `[Bundle:${label}] ${bundleDisableEnvVar(label)} names unknown section(s): ${unknownDisabled.join(', ')}. `
+      + `Known sections: ${[...knownLabels].join(', ')}. `
+      + 'Refusing to start: a kill switch that matches nothing would report success while the source it names keeps running.',
+    );
+  }
+
   const t0 = Date.now();
   const budgetLabel = Number.isFinite(maxBundleMs) ? `, budget ${Math.round(maxBundleMs / 1000)}s` : '';
   console.log(`[Bundle:${label}] Starting (${sections.length} sections${budgetLabel})`);
+  if (disabledMembers.size > 0) {
+    console.warn(
+      `[Bundle:${label}] ${disabledMembers.size} member(s) disabled by ${bundleDisableEnvVar(label)}: `
+      + `${[...disabledMembers].join(', ')} — their seed-meta will age out and health will report them stale, which is intended.`,
+    );
+  }
+  // Write before any section so a skip-all tick still proves the scheduler fired.
+  const wroteHeartbeat = await writeBundleHeartbeat(label);
+  if (wroteHeartbeat) {
+    console.log(`[Bundle:${label}] tick heartbeat ${bundleHeartbeatKey(label)}`);
+  }
 
-  let ran = 0, skipped = 0, deferred = 0, failed = 0, gracefulFailed = 0;
+  // Bundles with a simultaneous-fit invariant can opt into a bounded preflight:
+  // all interval clocks start together so member count cannot consume the wall
+  // budget before the first child. Keep the default sequential behavior for
+  // large bundles, where an unbounded fan-out would create a Redis burst.
+  const freshnessByLabel = opts.prefetchFreshness
+    ? new Map(await Promise.all(sections.map(async (section) => (
+      [section.label, await readSectionFreshness(section)]
+    ))))
+    : null;
 
+  let ran = 0, skipped = 0, deferred = 0, failed = 0, gracefulFailed = 0, stalled = 0;
+
+  let disabled = 0;
   for (const section of sections) {
+    if (disabledMembers.has(section.label)) {
+      // Counted and logged, never silent. A disabled member stops writing
+      // seed-meta, so /api/health ages it into STALE_SEED on its own — the
+      // source disappearing from the product stays visible rather than being
+      // suppressed along with the fetch.
+      console.warn(`  [${section.label}] DISABLED by ${bundleDisableEnvVar(label)} — not run this tick`);
+      console.warn(`[Bundle:${label}] section=${section.label} status=DISABLED reason=kill-switch`);
+      disabled++;
+      continue;
+    }
     const missingEnv = missingEnvBySection.get(section.label);
     if (missingEnv) {
       const reason = `missing required environment configuration: ${missingEnv.join(', ')}`;
@@ -411,7 +591,9 @@ export async function runBundle(label, sections, opts = {}) {
     const scriptPath = join(__dirname, section.script);
     const timeout = section.timeoutMs || DEFAULT_SECTION_TIMEOUT_MS;
 
-    const freshness = await readSectionFreshness(section);
+    const freshness = freshnessByLabel
+      ? freshnessByLabel.get(section.label) || null
+      : await readSectionFreshness(section);
     if (freshness?.fetchedAt) {
       const elapsed = Date.now() - freshness.fetchedAt;
       if (elapsed < section.intervalMs * 0.8) {
@@ -434,10 +616,29 @@ export async function runBundle(label, sections, opts = {}) {
       const needSec = Math.round(worstCase / 1000);
       console.log(`  [${section.label}] Deferred, needs ${needSec}s (timeout+grace) but only ${remainingSec}s left in bundle budget`);
       deferred++;
+      // #6562 item 4: a deferral is only pressure while the data can still
+      // afford to wait for a later tick. Once the section's seed-meta age
+      // exceeds STALL_AGE_INTERVAL_MULTIPLE of its own interval, it has been
+      // losing the budget race across whole intervals — a stall, and it must
+      // be loud regardless of what else ran (see the exit gate below).
+      if (freshness?.fetchedAt != null && Date.now() - freshness.fetchedAt > section.intervalMs * STALL_AGE_INTERVAL_MULTIPLE) {
+        const ageMin = Math.round((Date.now() - freshness.fetchedAt) / 60_000);
+        const intervalMin = Math.round(section.intervalMs / 60_000);
+        console.error(
+          `  [${section.label}] Deferred, but its data is ${ageMin}min old — over ${STALL_AGE_INTERVAL_MULTIPLE}x its ${intervalMin}min interval. `
+          + 'This is starvation, not pressure: the section keeps losing the budget race while the bundle stays green.',
+        );
+        stalled++;
+      }
       continue;
     }
 
-    const result = await spawnSeed(scriptPath, { timeoutMs: timeout, label: section.label, bundleStartedAtMs: t0 });
+    const result = await spawnSeed(scriptPath, {
+      timeoutMs: timeout,
+      label: section.label,
+      bundleStartedAtMs: t0,
+      completionMetaKey: section.freshnessMetaKey ? '' : section.completionMetaKey,
+    });
     if (result.ok) {
       console.log(`  [${section.label}] Done (${result.elapsed}s)`);
       // Bundle-level per-section summary — emitted from parent stdout so
@@ -476,23 +677,50 @@ export async function runBundle(label, sections, opts = {}) {
   }
 
   const totalSec = ((Date.now() - t0) / 1000).toFixed(1);
-  console.log(`[Bundle:${label}] Finished in ${totalSec}s, ran:${ran} skipped:${skipped} deferred:${deferred} failed:${failed} graceful:${gracefulFailed}`);
+  // `disabled:` is appended ONLY when non-zero. This line is the documented
+  // observability contract for bundle ticks — tools key off it — so the shape
+  // stays byte-identical when no kill switch is set. `stalled:` (this PR)
+  // rides along at the tail for the same reason: it is the starvation signal
+  // #6562 item 4 exists to surface.
+  const disabledField = disabled > 0 ? ` disabled:${disabled}` : '';
+  console.log(`[Bundle:${label}] Finished in ${totalSec}s, ran:${ran} skipped:${skipped} deferred:${deferred}${disabledField} failed:${failed} graceful:${gracefulFailed} stalled:${stalled}`);
   // A tick that completed no section while deferring a due one accomplished
   // nothing AND shed work. Deferral only pays for itself if the deferred
   // section runs on a later tick, so this state repeating is a stalled
   // service — the shape that made #6556 invisible for six hours. Report it as
   // a failure; `ran:0 deferred:0` (everything fresh) stays a healthy no-op.
-  // `gracefulFailed === 0` is load-bearing: a tick whose only admitted section
-  // hit a transient upstream blip (child exit 75, last-good TTL extended, no
-  // data lost) already has an exit-0 exemption precisely so one flaky source
-  // does not fire "Deploy Crashed!". Without this clause a benign 429 that
-  // happened to also push a sibling past the budget would page — alert fatigue
-  // on the exact alarm this change exists to make trustworthy.
-  const starvedTick = ran === 0 && deferred > 0 && gracefulFailed === 0;
+  // This used to carry `&& gracefulFailed === 0`, exempting a tick whose only
+  // admitted section hit a transient blip (child exit 75, last-good TTL
+  // extended, no data lost) so one flaky source would not fire "Deploy
+  // Crashed!". That premise holds for the FAILING section and not for the ones
+  // it shed — those published nothing and extended no TTL.
+  //
+  // seed-bundle-static-ref is the counter-example that removed it:
+  // Arms-Suppliers burns its full 390s fetch deadline (SIPRI answers in ~10.6s
+  // and it issues ~200 requests at concurrency 4) and exits 75, leaving 179s of
+  // a 570s budget. All four remaining due sections need >=190s, so every one
+  // defers and `ran:0`. gracefulFailed was 1, so this stayed false and the
+  // bundle reported success for weeks while mineralProduction and
+  // submarineCables had no key in Redis at all (#6799).
+  //
+  // The exemption below still covers the case it was written for — `ran > 0`
+  // with a graceful skip, where real work published and one source blipped. A
+  // tick that published NOTHING has no successful work to vouch for it.
+  const starvedTick = ran === 0 && deferred > 0;
   if (starvedTick) {
     console.error(
       `[Bundle:${label}] ran:0 while ${deferred} due section(s) were deferred — this tick published nothing and shed work. `
       + 'Exiting non-zero: a fully-deferred tick is indistinguishable from a healthy no-op, so it must not report success.',
+    );
+  } else if (stalled > 0) {
+    // #6562 item 4: partial starvation. starvedTick above stays scoped to the
+    // published-nothing tick; this branch covers the section that fits the
+    // budget on its own but never beside its siblings. The GRACEFUL_FAIL
+    // exemption does not soften this: a 2x-interval-old deferral cannot be
+    // produced by a single transient blip, so exiting non-zero here pages on
+    // a genuinely stalled member, not on alert fatigue.
+    console.error(
+      `[Bundle:${label}] ${stalled} deferred section(s) are older than ${STALL_AGE_INTERVAL_MULTIPLE}x their interval — starvation while the bundle reported progress. Exiting non-zero.`,
     );
   } else if (failed === 0 && gracefulFailed > 0) {
     // Graceful-only run (transient skips, no hard failures): exit 0 so Railway
@@ -500,5 +728,5 @@ export async function runBundle(label, sections, opts = {}) {
     // independently by the /api/health freshness monitor keyed on seed-meta TTL.
     console.log(`[Bundle:${label}] ${gracefulFailed} graceful fetch skip(s), no hard failures — no data lost, exiting 0 (not a crash)`);
   }
-  process.exit(failed > 0 || starvedTick ? 1 : 0);
+  process.exit(failed > 0 || starvedTick || stalled > 0 ? 1 : 0);
 }

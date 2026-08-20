@@ -74,6 +74,7 @@ import type { TrafficAnomaly as ProtoTrafficAnomaly, DdosLocationHit } from '@/g
 import type { RadiationObservation } from '@/services/radiation';
 import type { ScenarioVisualState } from '@/config/scenario-templates';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
+import { renderPopupSourceLinks } from './map-popup-source-links';
 import {
   applyPremiumLayerPresentation,
   getPremiumLayerPresentation,
@@ -208,6 +209,7 @@ interface ProtestMarker extends BaseMarker {
   title: string;
   eventType: string;
   country: string;
+  sourceUrls?: string[];
 }
 interface UcdpMarker extends BaseMarker {
   _kind: 'ucdp';
@@ -990,7 +992,7 @@ export class GlobeMap {
           }
           if (isAllowedPreviewUrl(d.previewUrl)) {
             const safeHref = escapeHtml(new URL(d.previewUrl!).href);
-            label += `<br><img src="${safeHref}" referrerpolicy="no-referrer" style="max-width:180px;max-height:120px;margin-top:4px;border-radius:4px;" class="imagery-preview">`;
+            label += `<br><img src="${safeHref}" referrerpolicy="no-referrer" style="max-width:180px;max-height:120px;margin-top:4px;border-radius:4px;" class="imagery-preview" alt="">`;
           }
           return label;
         }
@@ -1561,7 +1563,8 @@ export class GlobeMap {
       const c = typeColors[d.eventType] ?? '#ffaa00';
       html = `<span style="color:${c};font-weight:bold;">📢 ${esc(d.eventType)}</span>` +
              `<br><span style="opacity:.7;">${esc(d.country)}</span>` +
-             `<br><span style="opacity:.7;white-space:normal;display:block;">${esc(d.title.slice(0, 70))}</span>`;
+             `<br><span style="opacity:.7;white-space:normal;display:block;">${esc(d.title.slice(0, 70))}</span>` +
+             renderPopupSourceLinks(d.sourceUrls, { limit: 1 });
     } else if (d._kind === 'ucdp') {
       html = `<span style="color:#ff6400;font-weight:bold;">⚔ ${esc(d.country)}</span>` +
              `<br><span style="opacity:.7;">${esc(d.sideA)} vs ${esc(d.sideB)}</span>` +
@@ -1702,7 +1705,7 @@ export class GlobeMap {
       }
       if (isAllowedPreviewUrl(d.previewUrl)) {
         const safeHref = escapeHtml(new URL(d.previewUrl!).href);
-        html += `<br><img src="${safeHref}" referrerpolicy="no-referrer" style="max-width:180px;max-height:120px;margin-top:4px;border-radius:4px;" class="imagery-preview">`;
+        html += `<br><img src="${safeHref}" referrerpolicy="no-referrer" style="max-width:180px;max-height:120px;margin-top:4px;border-radius:4px;" class="imagery-preview" alt="">`;
       }
     } else if (d._kind === 'webcam') {
       html = '';
@@ -1951,9 +1954,9 @@ export class GlobeMap {
     setTrustedHtml(el, trustedHtml(`
       <span class="globe-beta-badge">BETA</span>
       <div class="zoom-controls">
-        <button class="map-btn zoom-in"    title="Zoom in">+</button>
-        <button class="map-btn zoom-out"   title="Zoom out">-</button>
-        <button class="map-btn zoom-reset" title="Reset view">&#8962;</button>
+        <button class="map-btn zoom-in"    title="Zoom in" aria-label="Zoom in">+</button>
+        <button class="map-btn zoom-out"   title="Zoom out" aria-label="Zoom out">-</button>
+        <button class="map-btn zoom-reset" title="Reset view" aria-label="Reset view">&#8962;</button>
       </div>`, "legacy direct innerHTML migration"));
     this.container.appendChild(el);
     el.addEventListener('click', (e) => {
@@ -3507,6 +3510,7 @@ export class GlobeMap {
       title: e.title ?? '',
       eventType: e.eventType ?? 'protest',
       country: e.country ?? '',
+      sourceUrls: e.sourceUrls,
     }));
     this.flushMarkers();
   }

@@ -1719,8 +1719,10 @@ export async function fetchYahooFxRatesWithProvenance(fxSymbols, fallbacks = {})
  * Returns null on any error by default — scripts must handle first-run (no prev
  * data). Pass strict:true when overwriting without the prior snapshot would lose
  * accumulated state; missing keys still return null, while read failures throw.
+ * Pass includeEnvelopeMeta:true when a cross-seed calculation must bind the
+ * payload and its fetchedAt clock to the same atomic Redis GET.
  */
-export async function readSeedSnapshot(canonicalKey, { strict = false } = {}) {
+export async function readSeedSnapshot(canonicalKey, { strict = false, includeEnvelopeMeta = false } = {}) {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
   if (!url || !token) return null;
@@ -1763,7 +1765,8 @@ export async function readSeedSnapshot(canonicalKey, { strict = false } = {}) {
     // Envelope-aware: WoW/prev baselines (bigmac, grocery-basket, fear-greed)
     // must see bare legacy-shape data whether the last write was pre- or post-
     // contract-migration. unwrapEnvelope is a no-op on legacy values.
-    return unwrapEnvelope(parsed).data;
+    const envelope = unwrapEnvelope(parsed);
+    return includeEnvelopeMeta ? { data: envelope.data, meta: envelope._seed } : envelope.data;
   } catch (error) {
     if (strict) throw error;
     return null;
@@ -1965,6 +1968,10 @@ export function raceFetchDeadline(promise, ms, label) {
   return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
 }
 
+// Set by _bundle-runner for canonical-clock members that need proof that every
+// publish side effect completed. Standalone seed runs leave it unset.
+export const BUNDLE_COMPLETION_META_KEY_ENV = 'WM_BUNDLE_COMPLETION_META_KEY';
+
 export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}) {
   const {
     validateFn,
@@ -1995,6 +2002,32 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
     fetchPhaseTimeoutMs,   // hard ceiling on the fetch phase; defaults to lockTtlMs + margin (#4786)
   } = opts;
   const contractMode = typeof declareRecords === 'function';
+  if (extraKeys && !Array.isArray(extraKeys)) {
+    console.error(`  CONTRACT VIOLATION: ${domain}:${resource} extraKeys must be an array`);
+    process.exit(1);
+  }
+  if (afterPublish && typeof afterPublish !== 'function') {
+    console.error(`  CONTRACT VIOLATION: ${domain}:${resource} afterPublish must be a function`);
+    process.exit(1);
+  }
+  if (afterFreshness && typeof afterFreshness !== 'function') {
+    console.error(`  CONTRACT VIOLATION: ${domain}:${resource} afterFreshness must be a function`);
+    process.exit(1);
+  }
+  const bundleCompletionMetaKey = String(process.env[BUNDLE_COMPLETION_META_KEY_ENV] ?? '').trim();
+  if (bundleCompletionMetaKey) {
+    if (!contractMode) {
+      console.error(`  CONTRACT VIOLATION: ${domain}:${resource} bundle completion attestation requires contract mode`);
+      process.exit(1);
+    }
+    if (!bundleCompletionMetaKey.startsWith('seed-completion:')) {
+      console.error(
+        `  CONTRACT VIOLATION: ${domain}:${resource} bundle completion key must use the dedicated `
+        + `seed-completion: namespace, got ${bundleCompletionMetaKey}`,
+      );
+      process.exit(1);
+    }
+  }
   if (contractMode) {
     // Soft-warn (PR 2) on other mandatory contract fields; PR 3 hard-aborts.
     const missing = [];
@@ -2574,6 +2607,28 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
         runId,
         freshnessMeta: meta,
       });
+    }
+
+    // This is the final required Redis write for an attested bundle member.
+    // It deliberately does not run on fetch failure, contract retry, or
+    // validation-skip paths. Bind it to the canonical envelope timestamp so a
+    // marker from any other run cannot attest this publish.
+    if (bundleCompletionMetaKey) {
+      if (meta == null) {
+        throw new Error(`${domain}:${resource} freshness metadata write failed before completion attestation`);
+      }
+      if (!Number.isFinite(envelopeMeta?.fetchedAt)) {
+        throw new Error(`${domain}:${resource} canonical envelope timestamp missing before completion attestation`);
+      }
+      await writeExtraKey(
+        bundleCompletionMetaKey,
+        {
+          fetchedAt: envelopeMeta.fetchedAt,
+          completedAt: Date.now(),
+          runId,
+        },
+        Math.max(7 * 24 * 60 * 60, ttlSeconds || 0),
+      );
     }
 
     const durationMs = Date.now() - startMs;

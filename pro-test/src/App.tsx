@@ -37,6 +37,8 @@ import {
 } from './routes';
 import { appendStoredContentAttributionToUrl } from '../../shared/content-attribution';
 import { isInternalSourceTag } from '../../shared/referral-namespaces';
+import { readMcpAttributionFromSearch } from '../../shared/mcp-attribution';
+import { LegalFooterNav } from './components/LegalFooterNav';
 
 const API_BASE = 'https://api.worldmonitor.app/api';
 const TURNSTILE_SITE_KEY = '0x4AAAAAACnaYgHIyxclu8Tj';
@@ -85,6 +87,13 @@ function getRefCode(): string | undefined {
   const code = params.get('ref') || undefined;
   if (!code || isInternalSourceTag(code)) return undefined;
   return code;
+}
+
+function getMcpAttributionSource(): string | undefined {
+  // Uses the shared allowlist rather than an inline literal so the /pro page,
+  // the checkout edge function, and the Convex webhook reader can never disagree
+  // about what the campaign marker is (#6716).
+  return readMcpAttributionFromSearch(window.location.search);
 }
 
 /**
@@ -1354,6 +1363,10 @@ const EnterprisePage = () => (
         </div>
         <span className="text-[10px] opacity-40 mt-4 md:mt-0">&copy; {new Date().getFullYear()} WorldMonitor</span>
       </div>
+      {/* This is the pricing page — the footer a buyer sees on the way to
+          checkout — so the documents they are agreeing to have to be one click
+          from here, not one FAQ answer deep (#6976). */}
+      <LegalFooterNav />
     </footer>
   </div>
 );
@@ -1431,7 +1444,7 @@ export default function App() {
           <AudiencePersonas />
           <SocialProof />
           <LivePreview />
-          <PricingSection refCode={getRefCode()} />
+          <PricingSection refCode={getRefCode()} attributionSource={getMcpAttributionSource()} />
           <PricingTable />
           <ApiSection />
           <EnterpriseShowcase />

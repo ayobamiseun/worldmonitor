@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'motion/react';
 import { Check, ShieldCheck, ArrowRight, Zap, Loader2 } from 'lucide-react';
 import { startCheckout, subscribeCheckoutPhase, type CheckoutPhase } from '../services/checkout';
+import { CheckoutConsent } from './CheckoutConsent';
 import { t, tArray } from '../i18n';
 
 // Static fallback from build-time generation (used while fetching live prices)
@@ -222,7 +223,11 @@ function TierCta({ cta, highlighted, loadingProductId, rateLimited, onCheckout }
   // Sibling tiers stay clickable; if the user changes their
   // mind mid-flow, their next click simply updates the
   // pending intent. The pricing page is never hard-locked.
+  // Assent sits immediately above the button, inside the same fragment, so a
+  // card can never render the CTA without it (#6976).
   return (
+    <>
+    <CheckoutConsent />
     <button
       onClick={() => onCheckout(cta.productId)}
       disabled={isDisabled}
@@ -246,10 +251,17 @@ function TierCta({ cta, highlighted, loadingProductId, rateLimited, onCheckout }
         </>
       )}
     </button>
+    </>
   );
 }
 
-export function PricingSection({ refCode }: { refCode?: string }) {
+export function PricingSection({
+  refCode,
+  attributionSource,
+}: {
+  refCode?: string;
+  attributionSource?: string;
+}) {
   const [billing, setBilling] = useState<'monthly' | 'annual'>(() => {
     const planKey = new URLSearchParams(window.location.search).get('wm_reactivate_plan');
     return planKey?.endsWith('_annual') ? 'annual' : 'monthly';
@@ -278,8 +290,8 @@ export function PricingSection({ refCode }: { refCode?: string }) {
   // checkoutInFlight in the service guards concurrent doCheckout runs.
   // The handler is fire-and-forget — no local loading state to manage.
   const handleCheckout = useCallback((productId: string) => {
-    void startCheckout(productId, { referralCode: refCode });
-  }, [refCode]);
+    void startCheckout(productId, { referralCode: refCode, attributionSource });
+  }, [refCode, attributionSource]);
 
   return (
     <section id="pricing" className="py-24 px-6 border-t border-wm-border bg-[#060606]">
