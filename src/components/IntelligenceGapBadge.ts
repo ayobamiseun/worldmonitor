@@ -594,7 +594,9 @@ export class IntelligenceFindingsBadge {
     });
 
     document.body.appendChild(overlay);
-    this.findingsModalTrap = createFocusTrap(overlay);
+    this.findingsModalTrap = createFocusTrap(overlay, {
+      onEscape: () => this.dismissFindingsModal(),
+    });
     this.findingsModalTrap.activate();
   }
 

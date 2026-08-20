@@ -334,7 +334,10 @@ export class AviationCommandBar {
       </div>`, "legacy direct innerHTML migration"));
 
         document.body.appendChild(this.overlay);
-        this.focusTrap = createFocusTrap(this.overlay, { onEscape: () => this.close() });
+        this.focusTrap = createFocusTrap(this.overlay, {
+            onEscape: () => this.close(),
+            initialFocus: () => this.overlay?.querySelector<HTMLInputElement>('#aviation-cmd-input') ?? null,
+        });
         this.focusTrap.activate();
 
         this.overlay.addEventListener('click', (e) => {
