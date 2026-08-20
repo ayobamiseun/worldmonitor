@@ -12,7 +12,13 @@ import { markNoCacheResponse } from '../../../_shared/response-headers';
 import { getRelayBaseUrl, getRelayHeaders } from './_shared';
 import { aviationStackBudgetMonth, reserveAviationStackCalls } from './_avstack-budget';
 
-const CACHE_TTL = 300;
+// 15min. Held at 300s until Aug 2026, when a scraper polling every ~5.7min
+// converted this endpoint to a ~100% cache-miss rate: 504 of 504 requests on a
+// single day went upstream because each poll landed just after the 300s key
+// expired. Any TTL at or below a caller's polling interval buys nothing — it
+// only guarantees the paid call. 900s breaks that resonance for any poller
+// faster than 15min, and departure boards do not move meaningfully inside it.
+const CACHE_TTL = 900;
 // Always fetch a full page upstream and cache it once per airport+direction,
 // then slice to the caller's requested limit in memory. Threading req.limit
 // into the cache key (and the upstream query) meant limit 30 vs 31 vs 50 were

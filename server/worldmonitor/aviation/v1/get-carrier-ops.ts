@@ -9,7 +9,10 @@ import { markNoCacheResponse } from '../../../_shared/response-headers';
 import { parseStringArray, DEFAULT_WATCHED_AIRPORTS } from './_shared';
 import { listAirportFlights } from './list-airport-flights';
 
-const CACHE_TTL = 300;
+// 15min, matching list-airport-flights — see the TTL note there. This route is
+// the more expensive of the two: every miss fans out to listAirportFlights once
+// PER AIRPORT, so one uncached request is N paid AviationStack calls, not one.
+const CACHE_TTL = 900;
 
 export async function getCarrierOps(
     ctx: ServerContext,

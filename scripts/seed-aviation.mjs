@@ -32,6 +32,7 @@ import {
   CHROME_UA,
   runSeed,
   writeExtraKeyWithMeta,
+  writeSeedMeta,
   extendExistingTtl,
   acquireLockSafely,
   releaseLock,
@@ -59,14 +60,21 @@ const FAA_KEY          = 'aviation:delays:faa:v1';
 const NOTAM_KEY        = 'aviation:notam:closures:v2';
 const NEWS_KEY         = 'aviation:news::24:v1';
 // Page-load hydration aggregate. Health (api/health.js BOOTSTRAP_KEYS.flightDelays)
-// reads STRLEN here. Historically only written as a 1800s RPC side-effect inside
+// reads STRLEN here, and its record count from BOOTSTRAP_META_KEY below — which
+// must be written from THIS payload, not from a contributing source's own count
+// (#6987). Historically only written as a 1800s RPC side-effect inside
 // list-airport-delays.ts — quiet user windows >30min would let it expire, tripping
 // EMPTY (CRIT) even with healthy upstream feeds. Now produced canonically by this
 // seeder; RPC keeps its write at the same TTL as a courtesy mid-tick refresh.
 // #3707: bumped to v2 after the UNKNOWN-row coverage fix so post-deploy clients
 // don't briefly see pre-fix cached payloads that synthesise NORMAL rows for
 // uncovered airports.
-const BOOTSTRAP_KEY = 'aviation:delays-bootstrap:v2';
+export const BOOTSTRAP_KEY = 'aviation:delays-bootstrap:v2';
+// Freshness + count for the aggregate above. flightDelays previously borrowed
+// seed-meta:aviation:faa, which counts FAA alerts only: a quiet FAA window
+// published recordCount=0 while this aggregate still served ~115 alerts from
+// AviationStack and NOTAM, and health read that zero as EMPTY_DATA (#6987).
+export const BOOTSTRAP_META_KEY = 'seed-meta:aviation:delays-bootstrap';
 
 const INTL_TTL      = 10_800; // 3h — survives ~5 consecutive missed 30min cron ticks
 const FAA_TTL       = 7_200;  // 2h
@@ -1203,6 +1211,12 @@ async function writeDelaysBootstrap(intlOverride) {
     const payload = buildDelaysBootstrapPayload({ faaPayload, intlPayload, notamPayload });
     const ok = await upstashSet(BOOTSTRAP_KEY, payload, BOOTSTRAP_TTL);
     if (ok) {
+      // Only after the aggregate itself landed: a heartbeat written ahead of a
+      // failed SET would claim freshness for a payload nobody stored. The meta
+      // TTL (writeSeedMeta's 7d default) deliberately outlives BOOTSTRAP_TTL, so
+      // an expired aggregate reads STALE_SEED against maxStaleMin rather than
+      // losing its clock at the same moment it loses its data.
+      await writeSeedMeta(BOOTSTRAP_KEY, payload.alerts.length, BOOTSTRAP_META_KEY);
       console.log(`[Bootstrap] wrote ${payload.alerts.length} alerts to ${BOOTSTRAP_KEY} (faa=${Array.isArray(faaPayload?.alerts) ? faaPayload.alerts.length : 0}, intl=${Array.isArray(intlPayload?.alerts) ? intlPayload.alerts.length : 0}, notam-closed=${Array.isArray(notamPayload?.closedIcaos) ? notamPayload.closedIcaos.length : 0}, notam-restricted=${Array.isArray(notamPayload?.restrictedIcaos) ? notamPayload.restrictedIcaos.length : 0})`);
     } else {
       console.warn(`[Bootstrap] SET ${BOOTSTRAP_KEY} returned false`);
