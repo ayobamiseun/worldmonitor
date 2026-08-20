@@ -105,7 +105,7 @@ function renderSidebar(): void {
   const progress = getTotalProgress();
   const overviewDotClass = progress.ready === progress.total ? 'dot-ok' : progress.ready > 0 ? 'dot-partial' : 'dot-warn';
   items.push(`
-    <button class="settings-nav-item${activeSection === 'overview' ? ' active' : ''}" data-section="overview" role="tab" aria-selected="${activeSection === 'overview'}">
+    <button class="settings-nav-item${activeSection === 'overview' ? ' active' : ''}" id="settingsTab-overview" data-section="overview" role="tab" aria-selected="${activeSection === 'overview'}" aria-controls="contentArea">
       ${SIDEBAR_ICONS.overview}
       <span class="settings-nav-label">Overview</span>
       <span class="settings-nav-dot ${overviewDotClass}"></span>
@@ -118,7 +118,7 @@ function renderSidebar(): void {
     const { ready, total } = getFeatureStatusCounts(cat);
     const dotClass = ready === total ? 'dot-ok' : ready > 0 ? 'dot-partial' : 'dot-warn';
     items.push(`
-      <button class="settings-nav-item${activeSection === cat.id ? ' active' : ''}" data-section="${cat.id}" role="tab" aria-selected="${activeSection === cat.id}">
+      <button class="settings-nav-item${activeSection === cat.id ? ' active' : ''}" id="settingsTab-${cat.id}" data-section="${cat.id}" role="tab" aria-selected="${activeSection === cat.id}" aria-controls="contentArea">
         ${SIDEBAR_ICONS[cat.id] || ''}
         <span class="settings-nav-label">${escapeHtml(cat.label)}</span>
         <span class="settings-nav-count">${ready}/${total}</span>
@@ -130,13 +130,17 @@ function renderSidebar(): void {
   items.push('<div class="settings-nav-sep"></div>');
 
   items.push(`
-    <button class="settings-nav-item${activeSection === 'debug' ? ' active' : ''}" data-section="debug" role="tab" aria-selected="${activeSection === 'debug'}">
+    <button class="settings-nav-item${activeSection === 'debug' ? ' active' : ''}" id="settingsTab-debug" data-section="debug" role="tab" aria-selected="${activeSection === 'debug'}" aria-controls="contentArea">
       ${SIDEBAR_ICONS.debug}
       <span class="settings-nav-label">Debug &amp; Logs</span>
     </button>
   `);
 
   setTrustedHtml(nav, trustedHtml(items.join(''), "legacy direct innerHTML migration"));
+  // Pair the tabpanel with the selected tab so AT announces which section
+  // the content belongs to (the tablist/tabpanel pairing was otherwise
+  // broken on both ends - tabs had no ids, the panel no aria-labelledby).
+  document.getElementById('contentArea')?.setAttribute('aria-labelledby', `settingsTab-${activeSection}`);
 }
 
 // ── Section rendering ──
