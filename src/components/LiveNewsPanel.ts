@@ -919,6 +919,7 @@ export class LiveNewsPanel extends Panel {
   private createChannelButton(channel: LiveChannel): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.className = `live-channel-btn ${channel.id === this.activeChannel.id ? 'active' : ''}`;
+    btn.setAttribute('aria-pressed', String(channel.id === this.activeChannel.id));
     btn.dataset.channelId = channel.id;
 
     btn.textContent = this.getChannelDisplayName(channel);
@@ -1118,6 +1119,8 @@ export class LiveNewsPanel extends Panel {
   private clearChannelLoadingState(): void {
     this.channelSwitcher?.querySelectorAll('.live-channel-btn.loading').forEach(btn => {
       (btn as HTMLElement).classList.remove('loading');
+      (btn as HTMLElement).removeAttribute('aria-busy');
+      (btn as HTMLButtonElement).disabled = false;
     });
   }
 
@@ -1131,15 +1134,23 @@ export class LiveNewsPanel extends Panel {
 
     this.channelSwitcher?.querySelectorAll('.live-channel-btn').forEach(btn => {
       const btnEl = btn as HTMLElement;
-      btnEl.classList.toggle('active', btnEl.dataset.channelId === channel.id);
-      if (shouldStartMedia && btnEl.dataset.channelId === channel.id) {
+      const isActive = btnEl.dataset.channelId === channel.id;
+      btnEl.classList.toggle('active', isActive);
+      btnEl.setAttribute('aria-pressed', String(isActive));
+      if (shouldStartMedia && isActive) {
         btnEl.classList.add('loading');
+        // CSS blocks the pointer during load (pointer-events: none); mirror
+        // that for keyboard/AT instead of leaving a silently dead button.
+        btnEl.setAttribute('aria-busy', 'true');
+        (btnEl as HTMLButtonElement).disabled = true;
       }
     });
 
     if (!shouldStartMedia) {
       this.channelSwitcher?.querySelectorAll('.live-channel-btn').forEach(btn => {
         (btn as HTMLElement).classList.remove('loading', 'offline');
+        (btn as HTMLElement).removeAttribute('aria-busy');
+        (btn as HTMLButtonElement).disabled = false;
       });
       this.renderPlaceholder();
       return;

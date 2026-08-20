@@ -1523,6 +1523,15 @@ export class Panel {
     this.severityDotEl.className = 'panel-severity-dot';
     if (level !== 'none') {
       this.severityDotEl.classList.add(`severity-${level}`);
+      // Severity was color+animation only (and aria-hidden), i.e. absent from
+      // the accessibility tree entirely; expose it as a named image.
+      this.severityDotEl.removeAttribute('aria-hidden');
+      this.severityDotEl.setAttribute('role', 'img');
+      this.severityDotEl.setAttribute('aria-label', `${level} severity`);
+    } else {
+      this.severityDotEl.setAttribute('aria-hidden', 'true');
+      this.severityDotEl.removeAttribute('role');
+      this.severityDotEl.removeAttribute('aria-label');
     }
   }
 

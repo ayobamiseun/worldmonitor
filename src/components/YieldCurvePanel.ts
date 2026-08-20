@@ -155,7 +155,7 @@ function renderChart(current: YieldPoint[], prior: YieldPoint[], ecbRates: Recor
   const ecbDots = ecbRates ? buildEcbCircles(ecbRates, yMin, yMax) : '';
 
   return `
-    <svg viewBox="0 0 ${SVG_W} ${SVG_H}" width="100%" style="display:block;overflow:visible">
+    <svg viewBox="0 0 ${SVG_W} ${SVG_H}" width="100%" role="img" aria-label="Treasury yield curve by maturity" style="display:block;overflow:visible">
       ${buildYAxisLabels(yMin, yMax)}
       ${buildXAxisLabels(current.length)}
       ${priorLine}
@@ -199,7 +199,7 @@ function miniRateSparkline(obs: RateObs[], color: string, w = 80, h = 22): strin
     const y = h - ((v - min) / range) * (h - 2) - 1;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');
-  return `<svg width="${w}" height="${h}" style="display:inline-block;vertical-align:middle"><polyline points="${pts}" fill="none" stroke="${escapeHtml(color)}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  return `<svg width="${w}" height="${h}" aria-hidden="true" style="display:inline-block;vertical-align:middle"><polyline points="${pts}" fill="none" stroke="${escapeHtml(color)}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
 
 function renderRatesTab(rows: RateRow[]): string {

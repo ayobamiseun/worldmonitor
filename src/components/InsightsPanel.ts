@@ -778,15 +778,15 @@ export class InsightsPanel extends Panel {
 
     return `
       <div class="insights-sentiment-bar">
-        <div class="sentiment-bar-track">
+        <div class="sentiment-bar-track" aria-hidden="true">
           <div class="sentiment-bar-negative" style="width: ${negPct}%"></div>
           <div class="sentiment-bar-neutral" style="width: ${neuPct}%"></div>
           <div class="sentiment-bar-positive" style="width: ${posPct}%"></div>
         </div>
-        <div class="sentiment-bar-labels">
-          <span class="sentiment-label negative">${negative}</span>
-          <span class="sentiment-label neutral">${neutral}</span>
-          <span class="sentiment-label positive">${positive}</span>
+        <div class="sentiment-bar-labels" role="img" aria-label="${negative} negative, ${neutral} neutral, ${positive} positive">
+          <span class="sentiment-label negative" aria-hidden="true">${negative}</span>
+          <span class="sentiment-label neutral" aria-hidden="true">${neutral}</span>
+          <span class="sentiment-label positive" aria-hidden="true">${positive}</span>
         </div>
         <div class="sentiment-tone ${toneClass}">${t('components.insights.overall', { tone: toneLabel })}</div>
       </div>

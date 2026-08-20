@@ -266,7 +266,7 @@ export class TradePolicyPanel extends Panel {
 
     const gap = effectiveRate.tariffRate - latestBaseline.tariffRate;
     const gapSign = gap > 0 ? '+' : '';
-    const gapClass = gap >= 0 ? 'trade-tariff-gap-positive' : 'trade-tariff-gap-negative';
+    const gapClass = gap >= 0 ? 'trade-tariff-gap-above' : 'trade-tariff-gap-below';
     const effectiveMetaParts = [
       effectiveRate.sourceName,
       effectiveRate.observationPeriod,

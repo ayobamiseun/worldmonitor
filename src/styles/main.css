@@ -12265,11 +12265,13 @@ a.prediction-link:hover {
   margin-left: 6px;
 }
 
-.trade-tariff-gap-positive {
+/* Named by direction vs baseline, not numeric sign: 'positive' colored orange
+   while .change-positive is green read as an inverted convention (#7023). */
+.trade-tariff-gap-above {
   color: var(--orange, #ffab40);
 }
 
-.trade-tariff-gap-negative {
+.trade-tariff-gap-below {
   color: var(--green, #69f0ae);
 }
 
@@ -16811,7 +16813,7 @@ a.prediction-link:hover {
 }
 
 .signal-sources-label {
-  font-size: 9px;
+  font-size: calc(9px * var(--wm-panel-effective-scale, 1));
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -16819,7 +16821,7 @@ a.prediction-link:hover {
 }
 
 .signal-source-chip {
-  font-size: 9px;
+  font-size: calc(9px * var(--wm-panel-effective-scale, 1));
   padding: 2px 6px;
   background: rgba(0, 170, 255, 0.15);
   color: var(--accent);
@@ -16840,7 +16842,7 @@ a.prediction-link:hover {
 }
 
 .signal-articles-header {
-  font-size: 9px;
+  font-size: calc(9px * var(--wm-panel-effective-scale, 1));
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -27974,4 +27976,22 @@ body.map-width-resizing {
   display: block;
   color: var(--text-dim, #9a9589);
   font-size: 12px;
+}
+
+
+/* Windows High Contrast / forced-colors (#7023): backgrounds are stripped by
+   the UA, which erased the color-only severity dots and flattened status
+   badges. Borders survive forced colors; the dot additionally opts out of
+   adjustment so its severity hue (now also exposed via aria-label) remains. */
+@media (forced-colors: active) {
+  .panel-severity-dot {
+    forced-color-adjust: none;
+    border: 1px solid CanvasText;
+  }
+
+  .panel-data-badge,
+  .pizzint-location-status,
+  .panel-count {
+    border: 1px solid CanvasText;
+  }
 }

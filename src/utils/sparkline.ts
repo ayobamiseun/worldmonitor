@@ -9,7 +9,7 @@ export function miniSparkline(data: number[] | undefined, change: number | null,
     const y = h - ((v - min) / range) * (h - 2) - 1;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');
-  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="mini-sparkline"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="mini-sparkline" aria-hidden="true"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
 
 export function sparkline(data: number[], color: string, w: number, h: number, style = ''): string {
@@ -22,5 +22,5 @@ export function sparkline(data: number[], color: string, w: number, h: number, s
     const y = h - ((v - min) / range) * (h - 2) - 1;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');
-  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"${style ? ` style="${style}"` : ''}><polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"${style ? ` style="${style}"` : ''} aria-hidden="true"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
