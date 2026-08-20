@@ -17,6 +17,7 @@
 
 import { escapeHtml } from '@/utils/sanitize';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
+import { bindActivationKeys } from '@/utils/activation';
 
 const VIRTUALIZE_ROW_THRESHOLD = 100;
 // Unscaled base for the `--watchlist-row-height` custom property in panels.css.
@@ -172,8 +173,11 @@ export class WatchlistTableView<T> {
       if (col.align === 'right') classes.push('watchlist-th-right');
       const classAttr = classes.length ? ` class="${classes.join(' ')}"` : '';
       const sortAttr = sortKey ? ` data-sortkey="${escapeHtml(sortKey)}"` : '';
+      const sortA11yAttr = sortKey
+        ? ` tabindex="0"${sortKey === this.state.sort ? ' aria-sort="descending"' : ''}`
+        : '';
       const activeSortIndicator = sortKey && sortKey === this.state.sort ? ' ↓' : '';
-      return `<th${classAttr}${sortAttr}>${escapeHtml(col.label)}${activeSortIndicator}</th>`;
+      return `<th${classAttr}${sortAttr}${sortA11yAttr}>${escapeHtml(col.label)}${activeSortIndicator}</th>`;
     }).join('');
     return `
       <div class="watchlist-table-view" data-watchlist-totalrows="${list.length}" data-watchlist-renderedrows="${this.getRenderedRowCount(list, start)}">
@@ -292,7 +296,7 @@ export class WatchlistTableView<T> {
       const alignClass = col.align === 'right' ? ' class="watchlist-td-right"' : '';
       return `<td${alignClass}>${col.cell(item)}</td>`;
     }).join('');
-    const row = `<tr class="watchlist-row${isExpanded ? ' watchlist-row-expanded' : ''}" data-rowkey="${escapeHtml(key)}">${cells}</tr>`;
+    const row = `<tr class="watchlist-row${isExpanded ? ' watchlist-row-expanded' : ''}" data-rowkey="${escapeHtml(key)}" tabindex="0" aria-expanded="${isExpanded ? 'true' : 'false'}">${cells}</tr>`;
     if (!isExpanded) return row;
     const detail = this.config.renderDetail(item);
     return `${row}<tr class="watchlist-detail-row"><td colspan="${this.config.columns.length}">${detail}</td></tr>`;
@@ -349,6 +353,8 @@ export class WatchlistTableView<T> {
       ?? previousHeaderHeight
       ?? 0;
     if (tableEl) {
+      bindActivationKeys(tableEl, '.watchlist-row');
+      bindActivationKeys(tableEl, '.watchlist-th-sortable');
       tableEl.addEventListener('click', (event) => {
         const target = event.target as HTMLElement | null;
         const rowEl = target?.closest<HTMLElement>('.watchlist-row');

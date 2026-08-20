@@ -20,6 +20,7 @@ import { hasPremiumAccess } from '@/services/panel-gating';
 import { trackGateHit } from '@/services/analytics';
 import { runScenario, getScenarioStatus } from '@/services/scenario';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
+import { bindActivationKeys } from '@/utils/activation';
 
 
 type TabId = 'chokepoints' | 'shipping' | 'indicators' | 'minerals' | 'stress';
@@ -52,6 +53,7 @@ export class SupplyChainPanel extends Panel {
 
   constructor() {
     super({ id: 'supply-chain', title: t('panels.supplyChain'), defaultRowSpan: 2, infoTooltip: t('components.supplyChain.infoTooltip') });
+    bindActivationKeys(this.content, '.trade-restriction-card');
     this.content.addEventListener('click', (e) => {
       const stageBtn = (e.target as HTMLElement).closest('[data-mineral-stage]') as HTMLElement | null;
       if (stageBtn?.dataset.mineralStage === 'mine' || stageBtn?.dataset.mineralStage === 'refinery') {
@@ -458,7 +460,7 @@ export class SupplyChainPanel extends Panel {
           ? `<span class="trade-badge">${cp.disruptionScore}/100</span> <span class="trade-badge trade-badge--projected" style="background:#7f1d1d;color:#fff;margin-left:4px">\u2192 ${projectedScore}/100</span>`
           : `<span class="trade-badge">${cp.disruptionScore}/100</span>`;
 
-        return `<div class="trade-restriction-card${expanded ? ' expanded' : ''}${isAffectedByScenario ? ' scenario-affected' : ''}" data-cp-id="${escapeHtml(cp.name)}" style="cursor:pointer${isAffectedByScenario ? ';border-left:3px solid #dc2626' : ''}">
+        return `<div class="trade-restriction-card${expanded ? ' expanded' : ''}${isAffectedByScenario ? ' scenario-affected' : ''}" data-cp-id="${escapeHtml(cp.name)}" role="button" tabindex="0" aria-expanded="${expanded ? 'true' : 'false'}" style="cursor:pointer${isAffectedByScenario ? ';border-left:3px solid #dc2626' : ''}">
           <div class="trade-restriction-header">
             <span class="trade-country">${escapeHtml(cp.name)}</span>
             <span class="sc-status-dot ${statusDot}"></span>
