@@ -14286,7 +14286,7 @@ a.prediction-link:hover {
   padding: 8px 16px;
   border-top: 1px solid var(--overlay-medium);
   font-size: calc(10px * var(--wm-panel-effective-scale, 1));
-  color: var(--text-ghost);
+  color: var(--text-faint);
 }
 
 .pizzint-footer a {
@@ -14488,7 +14488,7 @@ a.prediction-link:hover {
 
 .mobile-menu-footer-links a {
   font-size: calc(12px * var(--wm-panel-effective-scale, 1));
-  color: var(--text-ghost);
+  color: var(--text-faint);
   text-decoration: none;
   letter-spacing: 0.02em;
 }
@@ -14500,7 +14500,7 @@ a.prediction-link:hover {
 .mobile-menu-version {
   padding: 4px 20px 16px;
   font-size: calc(11px * var(--wm-panel-effective-scale, 1));
-  color: var(--text-ghost);
+  color: var(--text-faint);
 }
 
 .region-sheet-backdrop {
@@ -22835,7 +22835,7 @@ body.has-breaking-alert .panels-grid {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-ghost);
+  color: var(--text-faint);
   font-size: calc(11px * var(--wm-panel-effective-scale, 1));
 }
 
@@ -23098,7 +23098,7 @@ body.has-breaking-alert .panels-grid {
 
 .cw-dismiss {
   font-size: calc(10px * var(--wm-panel-effective-scale, 1));
-  color: var(--text-ghost, #444);
+  color: var(--text-faint, #555);
   cursor: pointer;
   background: none;
   border: none;
