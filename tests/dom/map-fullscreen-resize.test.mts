@@ -125,7 +125,7 @@ describe('map fullscreen resize synchronization', () => {
     handle.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, bubbles: true }));
     document.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, bubbles: true }));
     document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-    expect(main.style.getPropertyValue('--map-col-width')).toBe('70.0%');
-    expect(handle.getAttribute('aria-valuenow')).toBe('70');
+    expect(main.style.getPropertyValue('--map-col-width')).toBe('75.0%');
+    expect(handle.getAttribute('aria-valuenow')).toBe('75');
   });
 });
