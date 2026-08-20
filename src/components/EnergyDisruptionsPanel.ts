@@ -14,6 +14,7 @@ import {
   type DisruptionStatus,
 } from '@/shared/disruption-timeline';
 import { SupplyChainServiceClient } from '@/services/generated-rpc-clients';
+import { bindActivationKeys } from '@/utils/activation';
 
 const getSupplyChainClient = createLazyClient(() => new SupplyChainServiceClient(getRpcBaseUrl(), {
   fetch: rpcFetch,
@@ -97,6 +98,7 @@ export class EnergyDisruptionsPanel extends Panel {
     // data-attributes, so it works regardless of whether the DOM has
     // flushed yet or has been re-rendered since the last filter change.
     this.content.addEventListener('click', this.handleContentClick);
+    bindActivationKeys(this.content, '.ed-row');
   }
 
   private handleContentClick = (e: Event): void => {
@@ -285,7 +287,7 @@ export class EnergyDisruptionsPanel extends Panel {
     const causeChain = e.causeChain.join(' → ') || '—';
 
     return `
-      <tr class="ed-row"
+      <tr class="ed-row" tabindex="0"
           data-event-id="${escapeHtml(e.id)}"
           data-asset-id="${escapeHtml(e.assetId)}"
           data-asset-type="${escapeHtml(e.assetType)}">

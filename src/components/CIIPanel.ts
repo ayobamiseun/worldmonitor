@@ -15,6 +15,7 @@ import {
   partitionByFollowed,
   shouldRenderSectionLabels,
 } from './_cii-panel-partition';
+import { bindActivationKeys } from '@/utils/activation';
 
 export const CII_METHODOLOGY_HREF = '/docs/methodology/cii-risk-scores';
 
@@ -55,6 +56,7 @@ export class CIIPanel extends Panel {
     this.followedUnsubscribe = subscribeFollowed(() => {
       this.rerenderRows();
     });
+    bindActivationKeys(this.content, '.cii-country');
   }
 
   public setShareStoryHandler(handler: (code: string, name: string) => void): void {
@@ -133,7 +135,7 @@ export class CIIPanel extends Panel {
     // stopPropagation pattern in `bindShareButtons`).
     followHost.addEventListener('click', (e) => e.stopPropagation());
 
-    return h('div', { className: 'cii-country', dataset: { code: country.code } },
+    return h('div', { className: 'cii-country', role: 'button', tabindex: '0', dataset: { code: country.code } },
       followHost,
       h('div', { className: 'cii-header' },
         h('span', { className: 'cii-emoji' }, emoji),

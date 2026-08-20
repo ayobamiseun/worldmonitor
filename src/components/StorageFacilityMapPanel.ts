@@ -18,6 +18,7 @@ import {
   type RawStorageFacilityRegistry,
 } from '@/shared/storage-facility-registry-store';
 import { SupplyChainServiceClient } from '@/services/generated-rpc-clients';
+import { bindActivationKeys } from '@/utils/activation';
 
 const getSupplyChainClient = createLazyClient(() => new SupplyChainServiceClient(getRpcBaseUrl(), {
   fetch: rpcFetch,
@@ -191,6 +192,7 @@ export class StorageFacilityMapPanel extends Panel {
     if (typeof window !== 'undefined') {
       window.addEventListener('energy:open-storage-facility-detail', this.openDetailHandler);
     }
+    bindActivationKeys(this.content, '.sf-row');
   }
 
   public destroy(): void {
@@ -392,7 +394,7 @@ export class StorageFacilityMapPanel extends Panel {
     const glyph = TYPE_GLYPH[f.facilityType] ?? '🔹';
     const typeLabel = TYPE_LABEL[f.facilityType] ?? f.facilityType;
     return `
-      <tr class="sf-row" data-facility-id="${escapeHtml(f.id)}">
+      <tr class="sf-row" data-facility-id="${escapeHtml(f.id)}" tabindex="0">
         <td>
           <div class="sf-name">${glyph} ${escapeHtml(f.name)}</div>
           <div class="sf-sub">${escapeHtml(f.operator || '')}</div>

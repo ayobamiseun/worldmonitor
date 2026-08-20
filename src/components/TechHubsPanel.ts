@@ -3,6 +3,7 @@ import { t } from '@/services/i18n';
 import type { TechHubActivity } from '@/services/tech-activity';
 import { escapeHtml, sanitizeUrl, unsafeRawHtml } from '@/utils/sanitize';
 import { getCSSColor } from '@/utils';
+import { bindActivationKeys } from '@/utils/activation';
 
 const COUNTRY_FLAGS: Record<string, string> = {
   'USA': '🇺🇸', 'United States': '🇺🇸',
@@ -74,6 +75,7 @@ export class TechHubsPanel extends Panel {
         lowColor: getCSSColor('--text-dim'),
       }),
     });
+    bindActivationKeys(this.content, '.tech-hub-item');
   }
 
   public setOnHubClick(handler: (hub: TechHubActivity) => void): void {
@@ -102,7 +104,7 @@ export class TechHubsPanel extends Panel {
       const topStory = hub.topStories[0];
 
       return `
-        <div class="tech-hub-item ${hub.activityLevel}" data-hub-id="${escapeHtml(hub.hubId)}" data-index="${index}">
+        <div class="tech-hub-item ${hub.activityLevel}" data-hub-id="${escapeHtml(hub.hubId)}" data-index="${index}" role="button" tabindex="0">
           <div class="hub-rank">${index + 1}</div>
           <span class="hub-indicator ${hub.activityLevel}"></span>
           <div class="hub-info">

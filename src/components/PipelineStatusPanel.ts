@@ -22,6 +22,7 @@ import {
   type RawPipelineRegistry,
 } from '@/shared/pipeline-registry-store';
 import { SupplyChainServiceClient } from '@/services/generated-rpc-clients';
+import { bindActivationKeys } from '@/utils/activation';
 
 const getSupplyChainClient = createLazyClient(() => new SupplyChainServiceClient(getRpcBaseUrl(), {
   fetch: rpcFetch,
@@ -200,6 +201,7 @@ export class PipelineStatusPanel extends Panel {
     if (typeof window !== 'undefined') {
       window.addEventListener('energy:open-pipeline-detail', this.openDetailHandler);
     }
+    bindActivationKeys(this.content, '.pp-row');
   }
 
   public destroy(): void {
@@ -410,7 +412,7 @@ export class PipelineStatusPanel extends Panel {
     const commodity = p.commodityType === 'gas' ? '⛽' : '🛢️';
     const route = `${escapeHtml(p.fromCountry)} → ${escapeHtml(p.toCountry)}`;
     return `
-      <tr class="pp-row" data-pipeline-id="${escapeHtml(p.id)}">
+      <tr class="pp-row" data-pipeline-id="${escapeHtml(p.id)}" tabindex="0">
         <td>
           <div class="pp-name">${commodity} ${escapeHtml(p.name)}</div>
           <div class="pp-sub">${escapeHtml(p.operator || '')}</div>

@@ -7,6 +7,7 @@ import { isDesktopRuntime } from '@/services/runtime';
 import { t } from '../services/i18n';
 import type { NewsItem, DeductContextDetail } from '@/types';
 import { buildNewsContext } from '@/utils/news-context';
+import { bindActivationKeys } from '@/utils/activation';
 
 export class StrategicPosturePanel extends Panel {
   private postures: TheaterPostureSummary[] = [];
@@ -27,6 +28,7 @@ export class StrategicPosturePanel extends Panel {
       defaultRowSpan: 2,
     });
     this.init();
+    bindActivationKeys(this.content, '.posture-theater');
   }
 
   private init(): void {
@@ -403,7 +405,7 @@ export class StrategicPosturePanel extends Panel {
       if (p.totalVessels > 0) chips.push(`<span class="posture-chip naval">⚓ ${p.totalVessels}</span>`);
 
       return `
-        <div class="posture-theater posture-compact" data-lat="${p.centerLat}" data-lon="${p.centerLon}" title="${t('components.strategicPosture.clickToView', { name: escapeHtml(displayName) })}">
+        <div class="posture-theater posture-compact" role="button" tabindex="0" data-lat="${p.centerLat}" data-lon="${p.centerLon}" title="${t('components.strategicPosture.clickToView', { name: escapeHtml(displayName) })}">
           <span class="posture-name">${escapeHtml(p.shortName)}</span>
           <div class="posture-chips">${chips.join('')}</div>
           ${this.getPostureBadge(p.postureLevel)}
@@ -441,7 +443,7 @@ export class StrategicPosturePanel extends Panel {
     const hasNaval = navalChips.length > 0;
 
     return `
-      <div class="posture-theater posture-expanded ${p.postureLevel}" data-lat="${p.centerLat}" data-lon="${p.centerLon}" title="${t('components.strategicPosture.clickToViewMap')}">
+      <div class="posture-theater posture-expanded ${p.postureLevel}" role="button" tabindex="0" data-lat="${p.centerLat}" data-lon="${p.centerLon}" title="${t('components.strategicPosture.clickToViewMap')}">
         <div class="posture-theater-header">
           <span class="posture-name">${escapeHtml(displayName)}</span>
           ${this.getPostureBadge(p.postureLevel)}

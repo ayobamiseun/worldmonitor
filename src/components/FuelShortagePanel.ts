@@ -19,6 +19,7 @@ import {
   type RawFuelShortageRegistry,
 } from '@/shared/fuel-shortage-registry-store';
 import { SupplyChainServiceClient } from '@/services/generated-rpc-clients';
+import { bindActivationKeys } from '@/utils/activation';
 
 const getSupplyChainClient = createLazyClient(() => new SupplyChainServiceClient(getRpcBaseUrl(), {
   fetch: rpcFetch,
@@ -146,6 +147,7 @@ export class FuelShortagePanel extends Panel {
     if (typeof window !== 'undefined') {
       window.addEventListener('energy:open-fuel-shortage-detail', this.openDetailHandler);
     }
+    bindActivationKeys(this.content, '.fs-row');
   }
 
   public destroy(): void {
@@ -321,7 +323,7 @@ export class FuelShortagePanel extends Panel {
     const glyph = PRODUCT_GLYPH[s.product] ?? '•';
     const quality = deriveShortageEvidenceQuality(s.evidence);
     return `
-      <tr class="fs-row" data-shortage-id="${escapeHtml(s.id)}">
+      <tr class="fs-row" data-shortage-id="${escapeHtml(s.id)}" tabindex="0">
         <td>
           <div class="fs-name">${glyph} ${escapeHtml(s.country)} · ${escapeHtml(s.product)}</div>
           <div class="fs-sub">${escapeHtml(s.causeChain.join(' · ') || '—')}</div>

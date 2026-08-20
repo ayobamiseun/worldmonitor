@@ -27872,3 +27872,26 @@ body.map-width-resizing {
   color: var(--text-dim, #9a9589);
   font-size: 12px;
 }
+
+/* Keyboard-activatable drill-in rows (#7023): visible focus for the
+   role="button" cards and tabindex'd table rows wired via bindActivationKeys. */
+.geo-hub-item:focus-visible,
+.tech-hub-item:focus-visible,
+.te-card:focus-visible,
+.fdi-row:focus-visible,
+.risk-item-clickable:focus-visible,
+.risk-alert-clickable:focus-visible,
+.posture-theater:focus-visible,
+.finding-item:focus-visible,
+.cii-country:focus-visible,
+.climate-row:focus-visible,
+.ucdp-row:focus-visible,
+.disp-row:focus-visible,
+.radiation-row:focus-visible,
+.fs-row:focus-visible,
+.pp-row:focus-visible,
+.sf-row:focus-visible,
+.ed-row:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+}
