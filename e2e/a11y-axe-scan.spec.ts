@@ -13,6 +13,9 @@ import AxeBuilder from '@axe-core/playwright';
  * The known-violation lists are shrink-only escape hatches: an entry that
  * stops firing fails the test until it is deleted, so the lists always
  * reflect reality. Both are empty as of introduction.
+ *
+ * CI invokes this file via `npm run test:e2e:ci-smoke` (nothing in CI runs
+ * the `e2e/` glob). `REQUIRED_CI_SMOKE_SPECS` pins the argv token.
  */
 
 async function loadDashboard(page: Page): Promise<void> {

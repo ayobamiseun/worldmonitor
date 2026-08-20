@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -44,6 +44,7 @@ const REQUIRED_CI_SMOKE_SPECS = [
   'e2e/dashboard-news-request-budget.spec.ts',
   'e2e/keyword-spike-flow.spec.ts',
   'e2e/breaking-news-banner-provenance.spec.ts',
+  'e2e/a11y-axe-scan.spec.ts',
 ] as const;
 
 const REQUIRED_TEST_JOBS = [
@@ -419,6 +420,10 @@ describe('CI workflow coverage', () => {
         argvTokens.includes(spec),
         `test:e2e:ci-smoke must pass ${spec} as a live argv token — a spec dropped ` +
           '(or commented out) from this command has no other CI invocation',
+      );
+      assert.ok(
+        existsSync(resolve(root, spec)),
+        `${spec} must exist on disk — a missing file would only fail once Playwright starts`,
       );
     }
     assert.ok(
