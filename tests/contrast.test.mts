@@ -54,12 +54,33 @@ describe('theme text-token contrast', () => {
   const readFile = (rel: string): string =>
     readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
 
-  /** Extract the first `--name: #hex` after `blockStart` in `css`. */
-  const token = (css: string, blockStart: string, name: string): string => {
+  /**
+   * Brace-match the rule that starts at `blockStart`. Markers must include the
+   * opening `{` so a comment such as `overridden by [data-theme="light"] below`
+   * cannot steal the light-theme lookup, and so a prefix such as
+   * `:root[data-variant="happy"]` cannot leak into the happy-dark block.
+   */
+  const extractBlock = (css: string, blockStart: string): string => {
     const start = css.indexOf(blockStart);
     assert.ok(start >= 0, `theme block not found: ${blockStart}`);
-    const slice = css.slice(start, start + 4000);
-    const m = slice.match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{3,6})`));
+    const open = css.indexOf('{', start);
+    assert.ok(open >= 0, `opening brace for ${blockStart} not found`);
+    let depth = 0;
+    for (let i = open; i < css.length; i++) {
+      const ch = css[i];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) return css.slice(open, i + 1);
+      }
+    }
+    assert.fail(`unclosed theme block: ${blockStart}`);
+  };
+
+  /** Extract the first `--name: #hex` inside the brace-bounded `blockStart` rule. */
+  const token = (css: string, blockStart: string, name: string): string => {
+    const slice = extractBlock(css, blockStart);
+    const m = slice.match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{3,8})`));
     assert.ok(m, `${name} not found in block ${blockStart}`);
     return m![1]!;
   };
@@ -69,10 +90,19 @@ describe('theme text-token contrast', () => {
 
   const themes: Array<{ name: string; css: string; block: string }> = [
     { name: 'dark', css: mainCss, block: ':root {' },
-    { name: 'light', css: mainCss, block: '[data-theme="light"]' },
-    { name: 'happy light', css: happyCss, block: ':root[data-variant="happy"]' },
-    { name: 'happy dark', css: happyCss, block: ':root[data-variant="happy"][data-theme="dark"]' },
+    { name: 'light', css: mainCss, block: '[data-theme="light"] {' },
+    { name: 'happy light', css: happyCss, block: ':root[data-variant="happy"][data-theme="light"] {' },
+    { name: 'happy dark', css: happyCss, block: ':root[data-variant="happy"][data-theme="dark"] {' },
   ];
+
+  it('extracts a distinct --bg from each theme block', () => {
+    const backgrounds = themes.map((theme) => token(theme.css, theme.block, '--bg').toLowerCase());
+    assert.equal(
+      new Set(backgrounds).size,
+      themes.length,
+      `theme --bg values must not collide (got ${backgrounds.join(', ')}) — a shared value usually means the extractor landed in the wrong block`,
+    );
+  });
 
   for (const theme of themes) {
     it(`${theme.name}: text tokens clear their contrast floors on --bg and --surface`, () => {
