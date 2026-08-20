@@ -32,6 +32,7 @@ These subscription licenses cover the hosted Service and its outputs. They are s
 - Annual price: $359.99/year
 - Annual savings: 3 months free versus monthly billing
 - Best for: Investors, analysts, researchers, traders and operators who need the decision layer on top of the free dashboard
+- Seats: 1 named user
 - Includes: WM Analyst chat across live services with citations, Scenario Engine, Route Explorer, personal AI digest, custom widget builder, the Resilience map layer, and MCP access under one key
 - License: Personal use
 - Limits: 10 custom dashboards, 500 dashboard-AI requests/day, MCP + SDK 50 calls/day
@@ -43,7 +44,8 @@ These subscription licenses cover the hosted Service and its outputs. They are s
 - Price: $49.99/month
 - Annual price: $449.99/year
 - Annual savings: 3 months free versus monthly billing
-- Best for: Consultants, agencies and teams who use the Pro dashboard for client work, internal tools or reporting
+- Best for: Consultants, agencies and independent analysts who use the Pro dashboard for client work, internal tools or reporting
+- Seats: 1 named user — a seat is one person, not a shared login
 - Includes: Everything in Pro, plus data export (CSV, JSON and PDF reports)
 - License: Commercial license included — use WorldMonitor for client work, internal tools and reporting
 - Limits: 25 custom dashboards, 2,500 dashboard-AI requests/day, MCP + SDK 250 calls/day
