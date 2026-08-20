@@ -304,7 +304,6 @@ export class Panel {
     this.resizeHandle.title = t('components.panel.dragToResize');
     this.element.appendChild(this.resizeHandle);
     this.setupResizeHandlers();
-    this.setupKeyboardRowResize();
 
     // Right-edge handle for width resizing
     this.colResizeHandle = document.createElement('div');
@@ -312,7 +311,6 @@ export class Panel {
     this.colResizeHandle.title = t('components.panel.dragToResize');
     this.element.appendChild(this.colResizeHandle);
     this.setupColResizeHandlers();
-    this.setupKeyboardColResize();
 
     // Apply default row span (before restore, so saved preferences win)
     if (options.defaultRowSpan && options.defaultRowSpan > 1) {
@@ -329,6 +327,8 @@ export class Panel {
     // Restore saved col-span
     this.restoreSavedColSpan();
     this.reconcileColSpanAfterAttach();
+    this.setupKeyboardRowResize();
+    this.setupKeyboardColResize();
 
     this.showLoading();
   }
@@ -369,6 +369,7 @@ export class Panel {
       }
       this.colSpanReconcileRaf = null;
       this.restoreSavedColSpan();
+      this.syncKeyboardColResizeAria();
     };
 
     tryReconcile(attempts);
@@ -412,8 +413,7 @@ export class Panel {
     handle.setAttribute('aria-label', t('components.panel.dragToResize'));
     handle.setAttribute('aria-valuemin', '1');
     handle.setAttribute('aria-valuemax', '4');
-    const sync = () => handle.setAttribute('aria-valuenow', String(getRowSpan(this.element)));
-    sync();
+    this.syncKeyboardRowResizeAria();
     handle.addEventListener('keydown', (e: KeyboardEvent) => {
       const current = getRowSpan(this.element);
       let next: number | null = null;
@@ -427,7 +427,7 @@ export class Panel {
       setSpanClass(this.element, next);
       savePanelSpan(this.panelId, next);
       trackPanelResized(this.panelId, next);
-      sync();
+      this.syncKeyboardRowResizeAria();
     });
   }
 
@@ -439,12 +439,7 @@ export class Panel {
     handle.setAttribute('aria-orientation', 'vertical');
     handle.setAttribute('aria-label', t('components.panel.dragToResize'));
     handle.setAttribute('aria-valuemin', '1');
-    const sync = () => {
-      const maxSpan = getMaxColSpan(this.element);
-      handle.setAttribute('aria-valuemax', String(maxSpan));
-      handle.setAttribute('aria-valuenow', String(clampColSpan(getColSpan(this.element), maxSpan)));
-    };
-    sync();
+    this.syncKeyboardColResizeAria();
     handle.addEventListener('keydown', (e: KeyboardEvent) => {
       const maxSpan = getMaxColSpan(this.element);
       const current = clampColSpan(getColSpan(this.element), maxSpan);
@@ -458,8 +453,22 @@ export class Panel {
       if (next === current) return;
       setColSpanClass(this.element, next);
       persistPanelColSpan(this.panelId, this.element);
-      sync();
+      this.syncKeyboardColResizeAria();
     });
+  }
+
+  private syncKeyboardRowResizeAria(): void {
+    this.resizeHandle?.setAttribute('aria-valuenow', String(getRowSpan(this.element)));
+  }
+
+  private syncKeyboardColResizeAria(): void {
+    if (!this.colResizeHandle) return;
+    const maxSpan = getMaxColSpan(this.element);
+    this.colResizeHandle.setAttribute('aria-valuemax', String(maxSpan));
+    this.colResizeHandle.setAttribute(
+      'aria-valuenow',
+      String(clampColSpan(getColSpan(this.element), maxSpan)),
+    );
   }
 
   private setupResizeHandlers(): void {
@@ -491,6 +500,7 @@ export class Panel {
       const currentSpan = getRowSpan(this.element);
       savePanelSpan(this.panelId, currentSpan);
       trackPanelResized(this.panelId, currentSpan);
+      this.syncKeyboardRowResizeAria();
     };
 
     this.onRowWindowBlur = () => this.onRowMouseUp?.();
@@ -563,6 +573,7 @@ export class Panel {
       const currentSpan = getRowSpan(this.element);
       savePanelSpan(this.panelId, currentSpan);
       trackPanelResized(this.panelId, currentSpan);
+      this.syncKeyboardRowResizeAria();
     };
     this.onTouchCancel = this.onTouchEnd;
 
@@ -632,6 +643,7 @@ export class Panel {
       if (finalSpan !== this.startColSpan) {
         persistPanelColSpan(this.panelId, this.element);
       }
+      this.syncKeyboardColResizeAria();
     };
 
     this.onColWindowBlur = () => this.onColMouseUp?.();
@@ -703,6 +715,7 @@ export class Panel {
       if (finalSpan !== this.startColSpan) {
         persistPanelColSpan(this.panelId, this.element);
       }
+      this.syncKeyboardColResizeAria();
     };
     this.onColTouchCancel = this.onColTouchEnd;
   }
@@ -1518,11 +1531,13 @@ export class Panel {
   public resetHeight(): void {
     this.element.classList.remove('resized', 'span-1', 'span-2', 'span-3', 'span-4');
     clearPanelSpan(this.panelId);
+    this.syncKeyboardRowResizeAria();
   }
 
   public resetWidth(): void {
     clearColSpanClass(this.element);
     clearPanelColSpan(this.panelId);
+    this.syncKeyboardColResizeAria();
   }
 
   protected get signal(): AbortSignal {

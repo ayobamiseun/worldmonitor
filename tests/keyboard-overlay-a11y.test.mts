@@ -12,6 +12,7 @@ import type {
   GetRouteExplorerLaneResponse,
 } from '../src/generated/server/worldmonitor/supply_chain/v1/service_server.ts';
 import { createBrowserEnvironment } from './helpers/mini-dom.mts';
+import { movePanelToKeyboardZone } from '../src/app/panel-keyboard-reorder.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (...parts: string[]) => readFileSync(resolve(root, ...parts), 'utf8');
@@ -168,6 +169,60 @@ describe('AlternativesTab listbox tab stops', () => {
       cards.map((card) => card.getAttribute('tabindex')),
       ['-1', '0'],
     );
+  });
+
+  it('moves to the next option on the first ArrowDown press', () => {
+    const tab = new AlternativesTab({ onSelectBypass() {} });
+    tab.update(lane([
+      corridor({ id: 'cape', name: 'Cape' }),
+      corridor({ id: 'panama', name: 'Panama' }),
+    ]));
+
+    const event = Object.assign(new Event('keydown', { cancelable: true }), { key: 'ArrowDown' });
+    tab.element.dispatchEvent(event);
+
+    const cards = tab.element.querySelectorAll('.re-route-card');
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(cards[0]?.getAttribute('aria-selected'), 'false');
+    assert.equal(cards[1]?.getAttribute('aria-selected'), 'true');
+  });
+});
+
+describe('panel keyboard zone moves', () => {
+  it('moves a panel between both grids and keeps bottom-set persistence aligned', () => {
+    const sidebarGrid = document.createElement('div');
+    sidebarGrid.className = 'panels-grid';
+    const bottomGrid = document.createElement('div');
+    bottomGrid.className = 'map-bottom-grid';
+    const panel = document.createElement('section');
+    panel.className = 'panel';
+    const addPanelBlock = document.createElement('button');
+    addPanelBlock.className = 'add-panel-block';
+    sidebarGrid.append(panel, addPanelBlock);
+    const bottomSet = new Set<string>();
+
+    assert.equal(movePanelToKeyboardZone({
+      panel,
+      panelKey: 'live-news',
+      targetZone: 'bottom',
+      sidebarGrid,
+      bottomGrid,
+      bottomSet,
+    }), true);
+    assert.equal(panel.parentElement, bottomGrid);
+    assert.equal(bottomSet.has('live-news'), true);
+
+    assert.equal(movePanelToKeyboardZone({
+      panel,
+      panelKey: 'live-news',
+      targetZone: 'sidebar',
+      sidebarGrid,
+      bottomGrid,
+      bottomSet,
+    }), true);
+    assert.equal(panel.parentElement, sidebarGrid);
+    assert.equal(panel.nextElementSibling, addPanelBlock);
+    assert.equal(bottomSet.has('live-news'), false);
   });
 });
 

@@ -89,6 +89,7 @@ import {
   hydrateGeoHubPanelFromClusters,
   hydrateTechHubPanelFromClusters,
 } from '@/app/hub-activity-hydration';
+import { movePanelToKeyboardZone } from '@/app/panel-keyboard-reorder';
 
 function readSessionStorageValue(key: string): string | null {
   try {
@@ -3802,17 +3803,49 @@ export class PanelLayoutManager implements AppModule {
     // equivalent, so layout customization was impossible without a pointer.
     // A visually-hidden-until-focused button in the header moves the panel
     // one slot per arrow press and persists through the same savePanelOrder()
-    // path as a completed drag. Within-grid only; grid-to-grid moves still
-    // need a pointer.
+    // path as a completed drag. Page Up/Page Down move between the sidebar
+    // and below-map grids when both zones are active on an ultra-wide layout.
     const header = el.querySelector<HTMLElement>('.panel-header');
     if (header && !header.querySelector('.panel-move-btn')) {
       const moveBtn = document.createElement('button');
       moveBtn.type = 'button';
       moveBtn.className = 'panel-move-btn';
       const panelTitle = el.querySelector('.panel-title')?.textContent?.trim() || key;
-      moveBtn.setAttribute('aria-label', `Move ${panelTitle} panel (arrow keys)`);
+      moveBtn.setAttribute(
+        'aria-label',
+        `Move ${panelTitle} panel; arrow keys reorder, Page Up moves to sidebar, Page Down moves below map`,
+      );
+      moveBtn.setAttribute(
+        'aria-keyshortcuts',
+        'ArrowLeft ArrowRight ArrowUp ArrowDown PageUp PageDown',
+      );
       moveBtn.textContent = '⇅';
       moveBtn.addEventListener('keydown', (e: KeyboardEvent) => {
+        const targetZone = e.key === 'PageUp'
+          ? 'sidebar'
+          : e.key === 'PageDown'
+            ? 'bottom'
+            : null;
+        if (targetZone) {
+          if (!this.getEffectiveUltraWide()) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const sidebarGrid = document.getElementById('panelsGrid');
+          const bottomGrid = document.getElementById('mapBottomGrid');
+          if (!sidebarGrid || !bottomGrid) return;
+          const moved = movePanelToKeyboardZone({
+            panel: el,
+            panelKey: key,
+            targetZone,
+            sidebarGrid,
+            bottomGrid,
+            bottomSet: this.bottomSetMemory,
+          });
+          if (moved) this.savePanelOrder();
+          moveBtn.focus();
+          return;
+        }
+
         const back = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
         const fwd = e.key === 'ArrowRight' || e.key === 'ArrowDown';
         if (!back && !fwd) return;

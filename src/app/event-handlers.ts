@@ -2136,6 +2136,29 @@ export class EventHandlerManager implements AppModule {
       }
     };
 
+    const getTarget = () => (window.innerWidth >= 1600 ? mapContainer : mapSection);
+    const getCurrentHeight = () => {
+      const target = getTarget();
+      const inlineHeight = Number.parseFloat(target.style.height);
+      return Number.isFinite(inlineHeight) ? inlineHeight : target.offsetHeight;
+    };
+    const syncHeightSeparatorAria = () => {
+      const target = getTarget();
+      const minHeight = getMinHeight();
+      const maxHeight = getMaxHeight();
+      const currentHeight = Math.max(minHeight, Math.min(getCurrentHeight(), maxHeight));
+      resizeHandle.setAttribute('aria-controls', target.id);
+      resizeHandle.setAttribute('aria-valuemin', String(Math.round(minHeight)));
+      resizeHandle.setAttribute('aria-valuemax', String(Math.round(maxHeight)));
+      resizeHandle.setAttribute('aria-valuenow', String(Math.round(currentHeight)));
+      resizeHandle.setAttribute('aria-valuetext', `${Math.round(currentHeight)} pixels`);
+    };
+
+    resizeHandle.tabIndex = 0;
+    resizeHandle.setAttribute('role', 'separator');
+    resizeHandle.setAttribute('aria-orientation', 'horizontal');
+    resizeHandle.setAttribute('aria-label', t('components.panel.dragToResize'));
+
     const savedHeight = readStorageValue('map-height');
     if (savedHeight) {
       const numeric = Number.parseInt(savedHeight, 10);
@@ -2154,12 +2177,11 @@ export class EventHandlerManager implements AppModule {
         removeStorageValue('map-height');
       }
     }
+    syncHeightSeparatorAria();
 
     let isResizing = false;
     let startY = 0;
     let startHeight = 0;
-
-    const getTarget = () => (window.innerWidth >= 1600 ? mapContainer : mapSection);
 
     this.boundMapEndResizeHandler = () => {
       if (!isResizing) return;
@@ -2169,6 +2191,7 @@ export class EventHandlerManager implements AppModule {
       mapSection.classList.remove('resizing');
       document.body.style.cursor = '';
       writeStorageValue('map-height', getTarget().style.height);
+      syncHeightSeparatorAria();
     };
     const endResize = this.boundMapEndResizeHandler;
 
@@ -2195,6 +2218,7 @@ export class EventHandlerManager implements AppModule {
 
       if (isWide) target.style.flex = 'none';
       target.style.height = `${finalHeight}px`;
+      syncHeightSeparatorAria();
 
       let fired = false;
       const onEnd = () => {
@@ -2206,6 +2230,7 @@ export class EventHandlerManager implements AppModule {
         writeStorageValue('map-height', `${finalHeight}px`);
         this.ctx.map?.setIsResizing(false);
         this.ctx.map?.resize();
+        syncHeightSeparatorAria();
       };
 
       target.addEventListener('transitionend', onEnd);
@@ -2215,10 +2240,6 @@ export class EventHandlerManager implements AppModule {
 
     // Keyboard path (WAI-ARIA window-splitter): the drag strip is a focusable
     // separator; arrow keys step the height and persist like a finished drag.
-    resizeHandle.tabIndex = 0;
-    resizeHandle.setAttribute('role', 'separator');
-    resizeHandle.setAttribute('aria-orientation', 'horizontal');
-    resizeHandle.setAttribute('aria-label', t('components.panel.dragToResize'));
     resizeHandle.addEventListener('keydown', (e: KeyboardEvent) => {
       const step = e.key === 'ArrowUp' ? -40 : e.key === 'ArrowDown' ? 40 : 0;
       if (step === 0) return;
@@ -2229,6 +2250,7 @@ export class EventHandlerManager implements AppModule {
       target.style.height = `${newHeight}px`;
       this.ctx.map?.resize();
       writeStorageValue('map-height', `${newHeight}px`);
+      syncHeightSeparatorAria();
     });
 
     this.boundMapResizeMoveHandler = (e: MouseEvent) => {
@@ -2243,6 +2265,7 @@ export class EventHandlerManager implements AppModule {
       target.style.height = `${newHeight}px`;
 
       this.ctx.map?.resize();
+      syncHeightSeparatorAria();
     };
     document.addEventListener('mousemove', this.boundMapResizeMoveHandler);
 
@@ -2259,8 +2282,29 @@ export class EventHandlerManager implements AppModule {
     const widthHandle = document.getElementById('mapWidthResizeHandle');
     if (!mainContent || !widthHandle) return;
 
+    const getCurrentWidthPercent = () => {
+      const raw = mainContent.style.getPropertyValue('--map-col-width') || '60%';
+      const parsed = Number.parseFloat(raw);
+      return Number.isFinite(parsed) ? Math.max(25, Math.min(75, parsed)) : 60;
+    };
+    const syncWidthSeparatorAria = () => {
+      const current = getCurrentWidthPercent();
+      const mapSection = document.getElementById('mapSection');
+      if (mapSection) widthHandle.setAttribute('aria-controls', mapSection.id);
+      widthHandle.setAttribute('aria-valuemin', '25');
+      widthHandle.setAttribute('aria-valuemax', '75');
+      widthHandle.setAttribute('aria-valuenow', String(current));
+      widthHandle.setAttribute('aria-valuetext', `${current}%`);
+    };
+
+    widthHandle.tabIndex = 0;
+    widthHandle.setAttribute('role', 'separator');
+    widthHandle.setAttribute('aria-orientation', 'vertical');
+    widthHandle.setAttribute('aria-label', t('components.panel.dragToResize'));
+
     const saved = readStorageValue('map-col-width');
     if (saved) mainContent.style.setProperty('--map-col-width', saved);
+    syncWidthSeparatorAria();
 
     let isResizing = false;
     let startX = 0;
@@ -2276,6 +2320,7 @@ export class EventHandlerManager implements AppModule {
       widthHandle.classList.remove('resizing');
       const current = mainContent.style.getPropertyValue('--map-col-width');
       if (current) writeStorageValue('map-col-width', current);
+      syncWidthSeparatorAria();
     };
 
     widthHandle.addEventListener('mousedown', (e) => {
@@ -2291,10 +2336,6 @@ export class EventHandlerManager implements AppModule {
     });
 
     // Keyboard path, mirroring the height handle above.
-    widthHandle.tabIndex = 0;
-    widthHandle.setAttribute('role', 'separator');
-    widthHandle.setAttribute('aria-orientation', 'vertical');
-    widthHandle.setAttribute('aria-label', t('components.panel.dragToResize'));
     widthHandle.addEventListener('keydown', (e: KeyboardEvent) => {
       const step = e.key === 'ArrowLeft' ? -5 : e.key === 'ArrowRight' ? 5 : 0;
       if (step === 0) return;
@@ -2305,6 +2346,7 @@ export class EventHandlerManager implements AppModule {
       mainContent.style.setProperty('--map-col-width', value);
       this.ctx.map?.resize();
       writeStorageValue('map-col-width', value);
+      syncWidthSeparatorAria();
     });
 
     this.boundMapWidthResizeMoveHandler = (e: MouseEvent) => {
@@ -2313,6 +2355,7 @@ export class EventHandlerManager implements AppModule {
       const newPct = Math.max(25, Math.min(75, ((startColPx + delta) / startTotalWidth) * 100));
       mainContent.style.setProperty('--map-col-width', `${newPct.toFixed(1)}%`);
       this.ctx.map?.resize();
+      syncWidthSeparatorAria();
     };
 
     document.addEventListener('mousemove', this.boundMapWidthResizeMoveHandler);
