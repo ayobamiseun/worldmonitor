@@ -82,7 +82,8 @@ describe('LiveNewsPanel channel keyboard reorder', () => {
   });
 
   it('leaves order unchanged on ArrowRight at the last channel and does not preventDefault', () => {
-    const last = channelButtons().at(-1);
+    const buttons = channelButtons();
+    const last = buttons[buttons.length - 1];
     expect(last).toBeDefined();
     last?.focus();
 
