@@ -393,6 +393,7 @@ export class LiveNewsPanel extends Panel {
   private desktopEmbedIframe: HTMLIFrameElement | null = null;
   private desktopEmbedSession: { iframe: HTMLIFrameElement; channelId: string; sessionToken: number } | null = null;
   private desktopEmbedRenderToken = 0;
+  private channelSwitchGeneration = 0;
   private suppressChannelClick = false;
   private boundMessageHandler!: (e: MessageEvent) => void;
   private muteSyncInterval: ReturnType<typeof setInterval> | null = null;
@@ -1116,17 +1117,38 @@ export class LiveNewsPanel extends Panel {
     channel.hlsUrl = (!hlsCooldownActive && info.hlsUrl) ? info.hlsUrl : undefined;
   }
 
+  private resetChannelButtonLoading(btn: HTMLElement): void {
+    btn.classList.remove('loading');
+    btn.removeAttribute('aria-busy');
+    (btn as HTMLButtonElement).disabled = false;
+  }
+
+  // Clear every channel button, not only `.loading`. Success used to drop the
+  // spinner class while leaving aria-busy/disabled set, and a later switch
+  // could strip `.loading` from a still-disabled predecessor.
   private clearChannelLoadingState(): void {
-    this.channelSwitcher?.querySelectorAll('.live-channel-btn.loading').forEach(btn => {
-      (btn as HTMLElement).classList.remove('loading');
-      (btn as HTMLElement).removeAttribute('aria-busy');
-      (btn as HTMLButtonElement).disabled = false;
+    this.channelSwitcher?.querySelectorAll('.live-channel-btn').forEach(btn => {
+      this.resetChannelButtonLoading(btn as HTMLElement);
+    });
+  }
+
+  private markChannelButtonLoading(channelId: string): void {
+    this.clearChannelLoadingState();
+    this.channelSwitcher?.querySelectorAll('.live-channel-btn').forEach(btn => {
+      const btnEl = btn as HTMLElement;
+      if (btnEl.dataset.channelId !== channelId) return;
+      btnEl.classList.add('loading');
+      // CSS blocks the pointer during load (pointer-events: none); mirror
+      // that for keyboard/AT instead of leaving a silently dead button.
+      btnEl.setAttribute('aria-busy', 'true');
+      (btnEl as HTMLButtonElement).disabled = true;
     });
   }
 
   private async switchChannel(channel: LiveChannel): Promise<void> {
     if (channel.id === this.activeChannel.id) return;
 
+    const generation = ++this.channelSwitchGeneration;
     this.activeChannel = channel;
     saveToStorage(STORAGE_KEYS.activeChannel, channel.id);
     const shouldStartMedia = this.hasPlaybackIntent();
@@ -1137,50 +1159,46 @@ export class LiveNewsPanel extends Panel {
       const isActive = btnEl.dataset.channelId === channel.id;
       btnEl.classList.toggle('active', isActive);
       btnEl.setAttribute('aria-pressed', String(isActive));
-      if (shouldStartMedia && isActive) {
-        btnEl.classList.add('loading');
-        // CSS blocks the pointer during load (pointer-events: none); mirror
-        // that for keyboard/AT instead of leaving a silently dead button.
-        btnEl.setAttribute('aria-busy', 'true');
-        (btnEl as HTMLButtonElement).disabled = true;
-      }
     });
 
     if (!shouldStartMedia) {
+      this.clearChannelLoadingState();
       this.channelSwitcher?.querySelectorAll('.live-channel-btn').forEach(btn => {
-        (btn as HTMLElement).classList.remove('loading', 'offline');
-        (btn as HTMLElement).removeAttribute('aria-busy');
-        (btn as HTMLButtonElement).disabled = false;
+        (btn as HTMLElement).classList.remove('offline');
       });
       this.renderPlaceholder();
       return;
     }
 
-    await this.resolveChannelVideo(channel);
-    if (!this.element?.isConnected) return;
-    // Every early return below bails after the loading spinner was set; clear it
-    // so an interrupted/aborted switch doesn't leave a button spinning forever.
-    if (this.activeChannel.id !== channel.id) { this.clearChannelLoadingState(); return; }
-    if (hadLiveNewsOwnership && !this.ownsLiveNewsMedia()) {
-      this.clearChannelLoadingState();
-      this.renderPlaceholder();
-      return;
-    }
-    if (!this.hasPlaybackIntent()) {
-      this.clearChannelLoadingState();
-      this.renderPlaceholder();
-      return;
-    }
+    this.markChannelButtonLoading(channel.id);
 
-    this.channelSwitcher?.querySelectorAll('.live-channel-btn').forEach(btn => {
-      const btnEl = btn as HTMLElement;
-      btnEl.classList.remove('loading');
-      if (btnEl.dataset.channelId === channel.id && !channel.videoId) {
-        btnEl.classList.add('offline');
+    try {
+      await this.resolveChannelVideo(channel);
+      if (generation !== this.channelSwitchGeneration) return;
+      if (!this.element?.isConnected) return;
+      if (this.activeChannel.id !== channel.id) return;
+      if (hadLiveNewsOwnership && !this.ownsLiveNewsMedia()) {
+        this.renderPlaceholder();
+        return;
       }
-    });
+      if (!this.hasPlaybackIntent()) {
+        this.renderPlaceholder();
+        return;
+      }
 
-    this.requestPlaybackForActiveChannel();
+      this.channelSwitcher?.querySelectorAll('.live-channel-btn').forEach(btn => {
+        const btnEl = btn as HTMLElement;
+        if (btnEl.dataset.channelId === channel.id && !channel.videoId) {
+          btnEl.classList.add('offline');
+        }
+      });
+
+      this.requestPlaybackForActiveChannel();
+    } finally {
+      if (generation === this.channelSwitchGeneration) {
+        this.clearChannelLoadingState();
+      }
+    }
   }
 
   private showOfflineMessage(channel: LiveChannel): void {
