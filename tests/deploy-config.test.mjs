@@ -1511,7 +1511,7 @@ const getNginxHeaderValueFrom = (file, key) => {
   const line = nginxConf
     .split('\n')
     .find((candidate) => new RegExp(`^add_header\\s+${escapedKey}\\s+"`, 'i').test(candidate));
-  const match = line?.match(/^add_header\s+\S+\s+"(.*)"\s+always;$/i);
+  const match = line?.match(/^add_header\s+\S+\s+"(.*)"\s+always;(?:\s*#.*)?$/i);
   return match?.[1].replace(/\\"/g, '"') ?? null;
 };
 
