@@ -20,7 +20,14 @@ describe('data/x-accounts.json registry (#6654)', () => {
     assert.ok(Array.isArray(registry.channels.finance));
   });
 
-  it('starts with about 64 enabled accounts, matching the Telegram analogue', () => {
+  it('stays in the Telegram analogue ballpark of enabled accounts', () => {
+    // Back to 64. Both accounts first disabled here as `protected` were the
+    // registry naming the wrong account, not the publisher being unreachable:
+    // handle `OSINTdefender` is 'Depressed Defender' (626 followers, bio:
+    // "Backup Account of @sentdefender"), while the 2.5M-follower OSINT monitor
+    // is @sentdefender; and DW's English newsroom is public at @DeutscheWelle
+    // while @dwnews is locked. Disabling them dropped two real sources to
+    // silence a symptom. Verified against the API 2026-08-21.
     const enabled = xNews.countEnabledAccounts(registry);
     assert.equal(enabled, 64, `expected 64 enabled accounts, got ${enabled}`);
     const all = xNews.loadXAccounts(registry);
@@ -32,7 +39,14 @@ describe('data/x-accounts.json registry (#6654)', () => {
     assert.equal(tech.length, 8);
   });
 
-  it('stores numeric accountId when known and always has handle/label/topic/tier', () => {
+  it('pins a verified numeric accountId on every enabled account', () => {
+    // This assertion used to read `if (account.accountId)`, which is vacuous
+    // for an account that has none — and 41 of 64 shipped without one. The
+    // registry was curated with no API access, so six handles pointed at
+    // accounts that do not exist and four pinned ids pointed at unrelated
+    // private individuals whose posts would have published as trusted tier-2
+    // wire services. An id is the identity the poll loop actually uses, so it
+    // is required, not optional (#6654 follow-up).
     const accounts = [
       ...xNews.loadXAccounts(registry, { set: 'full' }),
       ...xNews.loadXAccounts(registry, { set: 'tech' }),
@@ -44,11 +58,40 @@ describe('data/x-accounts.json registry (#6654)', () => {
       assert.ok(account.topic, 'topic required');
       assert.ok(Number.isFinite(account.tier) && account.tier >= 1 && account.tier <= 3, `${account.handle} tier`);
       assert.equal(account.enabled, true);
-      if (account.accountId) {
-        assert.match(account.accountId, /^[1-9]\d{0,18}$/);
-      }
+      assert.ok(account.accountId, `@${account.handle} must ship a verified accountId`);
+      assert.match(account.accountId, /^[1-9]\d{0,18}$/, `@${account.handle} accountId shape`);
     }
     assert.equal(accounts.find((a) => a.handle === 'Reuters')?.accountId, '1652541');
+  });
+
+  it('never points two accounts at the same X identity', () => {
+    // A copy-paste during curation is how @TheEconomist ended up on another
+    // account's id. Duplicate ids would silently double-count one timeline
+    // while the shadowed source went dark.
+    const accounts = [
+      ...xNews.loadXAccounts(registry, { set: 'full' }),
+      ...xNews.loadXAccounts(registry, { set: 'tech' }),
+    ];
+    const ids = accounts.map((a) => a.accountId);
+    assert.equal(new Set(ids).size, ids.length, 'duplicate accountId in the registry');
+    // sourceName is deliberately NOT unique: a masthead can run several
+    // accounts that share one trust identity (@BBCBreaking + @BBCWorld ->
+    // 'BBC World', @CNN + @cnnbrk -> 'CNN World', both Iran International
+    // feeds). Trust is keyed on the publisher; only the X identity is 1:1.
+    const handles = accounts.map((a) => a.handle.toLowerCase());
+    assert.equal(new Set(handles).size, handles.length, 'duplicate handle in the registry');
+  });
+
+  it('records when each enabled account was last verified against the API', () => {
+    for (const account of xNews.loadXAccounts(registry)) {
+      const raw = [...registry.channels.full, ...registry.channels.tech]
+        .find((a) => a.handle === account.handle);
+      assert.match(
+        String(raw?.verifiedAt || ''),
+        /^\d{4}-\d{2}-\d{2}$/,
+        `@${account.handle} needs a verifiedAt date (run scripts/verify-x-accounts.mjs)`,
+      );
+    }
   });
 });
 
@@ -1117,5 +1160,155 @@ describe('versioned X feed snapshot', () => {
     const empty = xNews.hydrateXFeedSnapshot({ version: xNews.X_FEED_SNAPSHOT_VERSION, items: [] });
     assert.ok(empty);
     assert.equal(empty.items.length, 0);
+  });
+});
+
+// X answers an unreadable account with HTTP 200 and an `errors` array rather
+// than a 4xx — observed live against @OSINTdefender and @dwnews, both of which
+// are `protected`. (Both are since replaced in the registry by the publishers'
+// real public accounts, @sentdefender and @DeutscheWelle — the ids below stay
+// as the verbatim live payloads that proved the bug.) The timeline loop only
+// tested `!response.ok`, so a 200 fell
+// through to `tweets = []`, found no `next_token`, and recorded a COMPLETE
+// window: a protected, suspended, or deleted account counted as a healthy
+// empty poll forever, with no error and nothing for an operator to see. Every
+// account now ships a pinned accountId, which makes this the only path that
+// runs for them, so it has to fail loudly.
+describe('unreadable-account timeline responses (#6654 follow-up)', () => {
+  const protectedAccount = {
+    handle: 'OSINTdefender',
+    accountId: '1496286557053071361',
+    label: 'OSINTdefender',
+    sourceName: 'OSINTdefender',
+    topic: 'osint',
+    tier: 2,
+    maxMessages: 10,
+  };
+
+  const authErrorBody = JSON.stringify({
+    errors: [{
+      value: '1496286557053071361',
+      detail: 'Sorry, you are not authorized to see the user with id: [1496286557053071361].',
+      title: 'Authorization Error',
+      type: 'https://api.twitter.com/2/problems/not-authorized-for-resource',
+    }],
+  });
+
+  const unreadable = async () => new Response(authErrorBody, {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  it('counts a 200-with-errors timeline as a failure, not a complete window', async () => {
+    const state = await xNews.pollXFeed({
+      accounts: [protectedAccount],
+      state: { cursorByAccountId: {}, accountIdByHandle: {}, items: [] },
+      bearerToken: 'test-token',
+      fetchImpl: unreadable,
+      now: () => Date.parse('2026-08-21T06:00:00.000Z'),
+      wait: async () => {},
+    });
+
+    assert.equal(state.accountsFailed, 1, 'an unreadable account must count as failed');
+    assert.equal(state.accountsPolled, 0, 'an unreadable account must not count as polled');
+  });
+
+  it('names the handle and the upstream reason so an operator can act', async () => {
+    const state = await xNews.pollXFeed({
+      accounts: [protectedAccount],
+      state: { cursorByAccountId: {}, accountIdByHandle: {}, items: [] },
+      bearerToken: 'test-token',
+      fetchImpl: unreadable,
+      now: () => Date.parse('2026-08-21T06:00:00.000Z'),
+      wait: async () => {},
+    });
+
+    assert.match(state.lastError || '', /OSINTdefender/, 'lastError must name the account');
+    assert.match(state.lastError || '', /Authorization Error/, 'lastError must carry the upstream title');
+    assert.doesNotMatch(state.lastError || '', /HTTP 200/, 'reporting an unreadable account as "HTTP 200" misleads the operator');
+  });
+
+  it('does not advance the cursor for an unreadable account', async () => {
+    const state = await xNews.pollXFeed({
+      accounts: [protectedAccount],
+      state: {
+        cursorByAccountId: { '1496286557053071361': '900' },
+        accountIdByHandle: {},
+        items: [],
+      },
+      bearerToken: 'test-token',
+      fetchImpl: unreadable,
+      now: () => Date.parse('2026-08-21T06:00:00.000Z'),
+      wait: async () => {},
+    });
+
+    assert.equal(state.cursorByAccountId['1496286557053071361'], '900', 'cursor must not move on a failed read');
+  });
+
+  // Positive control: without this the fix could be "call every empty page a
+  // failure", which would red the whole fleet on a quiet night.
+  //
+  // The body is the VERBATIM live response for an account with nothing in the
+  // window (verified 2026-08-21 against @thePentagon over a 24h start_time):
+  // no `data` key at all and no `errors` key, only `meta.result_count`. An
+  // earlier draft of this test asserted `{ data: [], meta: {...} }`, a shape X
+  // never sends — it would have passed against a guard that wrongly keys on
+  // `data` being absent, which is the exact false positive being ruled out.
+  it('still reports a genuinely empty timeline as a successful poll', async () => {
+    const state = await xNews.pollXFeed({
+      accounts: [{ ...protectedAccount, handle: 'Reuters', accountId: '1652541', sourceName: 'Reuters' }],
+      state: { cursorByAccountId: {}, accountIdByHandle: {}, items: [] },
+      bearerToken: 'test-token',
+      fetchImpl: async () => new Response(JSON.stringify({ meta: { result_count: 0 } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      now: () => Date.parse('2026-08-21T06:00:00.000Z'),
+      wait: async () => {},
+    });
+
+    assert.equal(state.accountsFailed, 0, 'a quiet account is not a broken one');
+    assert.equal(state.accountsPolled, 1);
+  });
+
+  // The deleted-post tombstone path depends on `data` and `errors` arriving
+  // TOGETHER from /2/tweets. Treating any payload carrying `errors` as a fault
+  // would misread that as a broken account, so prove the two stay
+  // distinguishable. Tombstone semantics themselves are asserted by the
+  // dedicated deletion test above; this one guards the failure accounting.
+  it('does not count a data-plus-errors tombstone response as an account failure', async () => {
+    const account = { ...protectedAccount, handle: 'Reuters', accountId: '1652541', sourceName: 'Reuters' };
+    const prior = xNews.normalizeXPost(
+      { id: '50', text: 'old post', created_at: '2026-08-20T09:00:00.000Z' },
+      account,
+    );
+    const state = await xNews.pollXFeed({
+      accounts: [account],
+      state: { cursorByAccountId: { 1652541: '100' }, accountIdByHandle: {}, items: [prior] },
+      bearerToken: 'test-token',
+      fetchImpl: async (url) => {
+        const { pathname } = new URL(url);
+        if (pathname === '/2/users/1652541/tweets') {
+          return new Response(JSON.stringify({
+            data: [{ id: '101', text: 'live post', created_at: '2026-08-21T05:00:00.000Z' }],
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({
+          data: [{ id: '101' }],
+          errors: [{
+            resource_id: '50',
+            value: '50',
+            title: 'Not Found Error',
+            detail: 'Could not find tweet with ids: [50].',
+          }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      },
+      now: () => Date.parse('2026-08-21T06:00:00.000Z'),
+      wait: async () => {},
+    });
+
+    assert.equal(state.accountsFailed, 0, 'a tombstone response is not an account failure');
+    assert.equal(state.accountsPolled, 1);
+    assert.equal(state.cursorByAccountId['1652541'], '101', 'the live page still advances the cursor');
   });
 });

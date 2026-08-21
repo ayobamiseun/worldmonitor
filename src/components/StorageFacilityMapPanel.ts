@@ -18,6 +18,7 @@ import {
   type RawStorageFacilityRegistry,
 } from '@/shared/storage-facility-registry-store';
 import { SupplyChainServiceClient } from '@/services/generated-rpc-clients';
+import { bindActivationKeys } from '@/utils/activation';
 
 const getSupplyChainClient = createLazyClient(() => new SupplyChainServiceClient(getRpcBaseUrl(), {
   fetch: rpcFetch,
@@ -191,7 +192,22 @@ export class StorageFacilityMapPanel extends Panel {
     if (typeof window !== 'undefined') {
       window.addEventListener('energy:open-storage-facility-detail', this.openDetailHandler);
     }
+    this.content.addEventListener('click', this.handleContentClick);
+    bindActivationKeys(this.content, '.sf-row');
   }
+
+  private handleContentClick = (e: Event): void => {
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    if (target.closest('.sf-drawer-close')) {
+      this.closeDetail();
+      return;
+    }
+    const row = target.closest<HTMLTableRowElement>('tr.sf-row');
+    if (!row || !this.content.contains(row)) return;
+    const id = row.dataset.facilityId;
+    if (id) void this.loadDetail(id);
+  };
 
   public destroy(): void {
     if (typeof window !== 'undefined') {
@@ -344,10 +360,10 @@ export class StorageFacilityMapPanel extends Panel {
         <table class="sf-table">
           <thead>
             <tr>
-              <th>Facility</th>
-              <th>Country · Type</th>
-              <th>Capacity</th>
-              <th>Status</th>
+              <th scope="col">Facility</th>
+              <th scope="col">Country · Type</th>
+              <th scope="col">Capacity</th>
+              <th scope="col">Status</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -377,22 +393,13 @@ export class StorageFacilityMapPanel extends Panel {
         .sf-ev-item a:hover { text-decoration: underline; }
       </style>
     `, 'legacy Panel.setContent() migration'));
-
-    const table = this.element?.querySelector('.sf-table') as HTMLTableElement | null;
-    table?.querySelectorAll<HTMLTableRowElement>('tr.sf-row').forEach(tr => {
-      const id = tr.dataset.facilityId;
-      if (!id) return;
-      tr.addEventListener('click', () => void this.loadDetail(id));
-    });
-    const closeBtn = this.element?.querySelector<HTMLButtonElement>('.sf-drawer-close');
-    closeBtn?.addEventListener('click', () => this.closeDetail());
   }
 
   private renderRow(f: StorageFacilityEntry): string {
     const glyph = TYPE_GLYPH[f.facilityType] ?? '🔹';
     const typeLabel = TYPE_LABEL[f.facilityType] ?? f.facilityType;
     return `
-      <tr class="sf-row" data-facility-id="${escapeHtml(f.id)}">
+      <tr class="sf-row" data-facility-id="${escapeHtml(f.id)}" tabindex="${this.selectedId ? '-1' : '0'}">
         <td>
           <div class="sf-name">${glyph} ${escapeHtml(f.name)}</div>
           <div class="sf-sub">${escapeHtml(f.operator || '')}</div>

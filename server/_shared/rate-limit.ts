@@ -364,7 +364,10 @@ export const ENDPOINT_RATE_POLICIES: Record<string, EndpointRatePolicy> = {
   // fail-open budget. The dashboard can legitimately fan out across 50 Pro
   // watchlist symbols, so those three per-symbol routes admit one full load
   // plus headroom. analyze-stock remains separately constrained by the
-  // fail-closed per-user daily direct-LLM quota.
+  // fail-closed per-user daily direct-LLM quota. backtest-stock is technical
+  // only, so its cache-miss Yahoo fetches use a separate per-user daily
+  // provider-work budget (`provider:backtest-yahoo:*`) instead of
+  // `llm:direct-usage`.
   '/api/market/v1/analyze-stock': { limit: 60, window: '60 s' },
   '/api/market/v1/backtest-stock': { limit: 60, window: '60 s' },
   '/api/market/v1/get-insider-transactions': { limit: 60, window: '60 s' },
@@ -547,7 +550,7 @@ export const FAIL_CLOSED_ENDPOINT_RATE_POLICY_REQUIRED: Record<string, RateLimit
     reason: 'Per-symbol analysis can fan out to Finnhub plus the Exa, Brave, and SerpAPI search ladder on cache miss.',
   },
   '/api/market/v1/backtest-stock': {
-    reason: 'Per-symbol backtests proxy scraped Yahoo Finance data with unbounded symbol cardinality.',
+    reason: 'Per-symbol backtests proxy scraped Yahoo Finance data with unbounded symbol cardinality. Cache misses also consume a per-user daily provider-work budget separate from dashboard AI.',
   },
   '/api/market/v1/get-insider-transactions': {
     reason: 'Per-symbol insider lookups proxy the paid Finnhub provider on cache miss.',

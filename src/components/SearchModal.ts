@@ -25,6 +25,7 @@ import {
   searchSourceItemsEqual,
   type SearchIndexQueryResult,
 } from '@/components/search-engine';
+import { decorateSearchResultOptions } from '@/components/search-result-options';
 import {
   searchMatchIdentity,
   type SearchCommandMatch,
@@ -120,6 +121,7 @@ export class SearchModal {
   private focusTrap: FocusTrap | null = null;
   private input: HTMLInputElement | null = null;
   private resultsList: HTMLElement | null = null;
+  private resultsObserver: MutationObserver | null = null;
   private chipsContainer: HTMLElement | null = null;
   private scopeContainer: HTMLElement | null = null;
   private closeTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -400,6 +402,8 @@ export class SearchModal {
     if (this.overlay) {
       this.overlay.classList.remove('open');
       const remove = () => {
+        this.resultsObserver?.disconnect();
+        this.resultsObserver = null;
         this.overlay?.remove();
         this.overlay = null;
         this.input = null;
@@ -550,6 +554,22 @@ export class SearchModal {
     this.input = this.overlay.querySelector('.search-input');
     this.resultsList = this.overlay.querySelector('.search-results');
     this.scopeContainer = this.overlay.querySelector('.search-scope-rail');
+
+    // Combobox/listbox contract: results are options, arrow-key selection is
+    // reported through aria-activedescendant (see decorateResultOptions).
+    if (this.input && this.resultsList) {
+      this.resultsList.id = 'searchResultsListbox';
+      this.resultsList.setAttribute('role', 'listbox');
+      this.input.setAttribute('role', 'combobox');
+      this.input.setAttribute('aria-expanded', 'true');
+      this.input.setAttribute('aria-controls', 'searchResultsListbox');
+      this.input.setAttribute('aria-autocomplete', 'list');
+      // Every render path replaces the listbox's children wholesale; the
+      // observer re-applies option semantics without each path having to know.
+      this.resultsObserver?.disconnect();
+      this.resultsObserver = new MutationObserver(() => this.decorateResultOptions());
+      this.resultsObserver.observe(this.resultsList, { childList: true, subtree: true });
+    }
 
     this.input?.addEventListener('input', () => this.debouncedSearch());
     this.input?.addEventListener('keydown', (e) => this.handleKeydown(e));
@@ -1134,8 +1154,23 @@ export class SearchModal {
       el.classList.toggle('selected', i === this.selectedIndex);
     });
 
+    this.decorateResultOptions();
     const selected = this.resultsList.querySelector('.selected');
     selected?.scrollIntoView({ block: 'nearest' });
+  }
+
+  /**
+   * Apply option semantics to whatever the last render left in the listbox:
+   * each result becomes an id'd role="option" with aria-selected, section
+   * headers become presentational, and the input's aria-activedescendant
+   * tracks the visually selected row — without this, arrow keys move a CSS
+   * class that screen readers never hear about.
+   */
+  private decorateResultOptions(): void {
+    if (!this.resultsList || !this.input) return;
+    decorateSearchResultOptions(this.resultsList, this.input, {
+      skipOptions: this.showingAllCommands,
+    });
   }
 
   private selectResult(index: number): void {

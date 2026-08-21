@@ -53,6 +53,16 @@ Free and signed-out dashboard users keep the normal keyword/cache fallback for f
 
 Signed-out callers are rejected outright, and Pro-gated AI routes deny free accounts before any spend. Separately from these plan allowances, a small non-plan safety floor of **50 requests/day** applies to any caller whose paid entitlement cannot be confirmed at request time — a lapsed subscription, or a transient entitlement-lookup outage. It exists so an outage degrades gracefully instead of rejecting paying customers; it is not an allowance any plan includes, and it is never larger than the smallest paid allowance.
 
+## Stock backtest provider-work quota
+
+`GET /api/market/v1/backtest-stock` is not LLM-backed. On a cache miss it fetches Yahoo Finance history for a caller-chosen symbol, so it must not share `llm:direct-usage` or `dashboardAiCallsPerDay`. Independently of the **60 requests / 60 s** route policy:
+
+| Scope | Limit | Window |
+|-------|-------|--------|
+| Per authenticated user | **200** uncached Yahoo-history fetches | UTC day |
+
+The 200 ceiling is four full 50-symbol Pro watchlist hydrations. Cached repeats and invalid symbols do not consume the budget. Exceeding it returns **429** with `Retry-After` until the next **00:00 UTC**. If the quota store cannot prove a reservation, the route **fails closed** with **503** rather than fetching Yahoo.
+
 ## OAuth endpoints
 
 | Endpoint | Limit | Window | Scope |

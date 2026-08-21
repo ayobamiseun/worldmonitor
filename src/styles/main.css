@@ -2016,6 +2016,15 @@ body.panel-resize-active iframe {
   outline-offset: -2px;
 }
 
+/* Disclosure cards/rows and sortable headers made keyboard-operable (#7023). */
+.trade-restriction-header:focus-visible,
+.chain-node:focus-visible,
+.watchlist-row:focus-visible,
+.watchlist-th-sortable:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+}
+
 .panel-header-error {
   background: rgba(255, 50, 50, 0.15);
   border-bottom-color: rgba(255, 80, 80, 0.5);
@@ -27978,7 +27987,6 @@ body.map-width-resizing {
   font-size: 12px;
 }
 
-
 /* Windows High Contrast / forced-colors (#7023): backgrounds are stripped by
    the UA, which erased the color-only severity dots and flattened status
    badges. Borders survive forced colors; the dot additionally opts out of
@@ -27994,4 +28002,27 @@ body.map-width-resizing {
   .panel-count {
     border: 1px solid CanvasText;
   }
+}
+
+/* Keyboard-activatable drill-in rows (#7023): visible focus for the
+   role="button" cards and tabindex'd table rows wired via bindActivationKeys. */
+.geo-hub-item:focus-visible,
+.tech-hub-item:focus-visible,
+.te-card:focus-visible,
+.fdi-row:focus-visible,
+.risk-item-clickable:focus-visible,
+.risk-alert-clickable:focus-visible,
+.posture-theater:focus-visible,
+.finding-item:focus-visible,
+.cii-name:focus-visible,
+.climate-row:focus-visible,
+.ucdp-row:focus-visible,
+.disp-row:focus-visible,
+.radiation-row:focus-visible,
+.fs-row:focus-visible,
+.pp-row:focus-visible,
+.sf-row:focus-visible,
+.ed-row:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
 }

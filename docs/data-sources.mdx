@@ -370,6 +370,8 @@ The channel set intentionally includes official, state-affiliated, partisan, and
 
 Messages are deduplicated by ID, filtered to exclude media-only posts (images without text), truncated to 800 characters, and stored in a rolling 200-item buffer. The relay connects with a 60-second startup delay to prevent `AUTH_KEY_DUPLICATED` errors during Railway container restarts (the old container must fully disconnect before the new one authenticates). Topic classification (breaking, conflict, alerts, osint, politics, middleeast) and channel-based filtering happen at query time via the `/telegram/feed` relay endpoint.
 
+Message text is R4. The first-party panel (`GET /api/telegram-feed`) requires a dashboard session credential and is not publicly cacheable.
+
 ### X News Accounts
 
 Product-managed public news-account monitoring on X. The registry in `data/x-accounts.json` is not user-configurable. The Railway ais-relay poller uses the official X API (`GET /2/users/:id/tweets` with `since_id`) on a 5–15 minute cadence, with 429 backoff. Scraping is prohibited.

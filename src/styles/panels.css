@@ -2136,6 +2136,11 @@
   margin: -10px -4px;
 }
 
+.wc-drag-handle:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+}
+
 .wc-drag-handle:hover {
   color: var(--text-dim);
 }

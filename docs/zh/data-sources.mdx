@@ -315,6 +315,8 @@ Client (1 RPC call) → listFeedDigest → Redis check (digest:v1:{variant}:{lan
 
 消息按 ID 去重，过滤掉纯媒体帖子（无文字的图片），截断为 800 字符，并存入一个滚动 200 条的缓冲区。中继以 60 秒启动延迟连接，以防止 Railway 容器重启期间出现 `AUTH_KEY_DUPLICATED` 错误（旧容器必须在新容器认证之前完全断开）。主题分类（突发、冲突、警报、osint、政治、中东）和基于频道的过滤在查询时通过 `/telegram/feed` 中继端点完成。
 
+消息正文为 R4。第一方面板（`GET /api/telegram-feed`）需要仪表盘会话凭证，且不可被公开缓存。
+
 ### X 新闻账号
 
 产品管理的 X 公开新闻账号监测。`data/x-accounts.json` 中的注册表不可由用户配置。Railway ais-relay 轮询器使用官方 X API（`GET /2/users/:id/tweets` 与 `since_id`），节奏为 5–15 分钟，并对 429 进行退避。禁止抓取。
