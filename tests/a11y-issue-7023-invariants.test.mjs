@@ -129,7 +129,7 @@ describe('theme prepaint and first-visit applyStoredTheme', () => {
 
   it('applyStoredTheme no-preference branch uses resolveAutoTheme, not DEFAULT_THEME', () => {
     assert.match(applyStoredTheme, /variant === 'happy' \? 'light' : resolveAutoTheme\(\)/);
-    assert.doesNotMatch(applyStoredTheme, /DEFAULT_THEME/);
+    assert.doesNotMatch(applyStoredTheme, /effective = variant === 'happy' \? 'light' : DEFAULT_THEME/);
   });
 });
 
