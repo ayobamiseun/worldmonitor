@@ -5,17 +5,29 @@ export interface MapContextMenuItem {
 
 let activeMenu: HTMLElement | null = null;
 let returnFocus: HTMLElement | null = null;
+let clickDismiss: AbortController | null = null;
 
 function menuItems(): HTMLElement[] {
   return activeMenu ? Array.from(activeMenu.querySelectorAll<HTMLElement>('.map-context-menu-item')) : [];
 }
 
+function menuContainsFocus(): boolean {
+  return !!activeMenu?.contains(document.activeElement);
+}
+
+function onMenuFocusIn(e: FocusEvent): void {
+  const target = e.target;
+  if (activeMenu && target instanceof Node && !activeMenu.contains(target)) {
+    dismissMapContextMenu();
+  }
+}
+
 function onMenuKeydown(e: KeyboardEvent): void {
-  if (e.key === 'Escape') {
+  if (e.key === 'Escape' || e.key === 'Tab') {
     dismissMapContextMenu();
     return;
   }
-  if (!activeMenu) return;
+  if (!activeMenu || !menuContainsFocus()) return;
 
   const items = menuItems();
   if (items.length === 0) return;
@@ -42,12 +54,22 @@ function onMenuKeydown(e: KeyboardEvent): void {
 export function dismissMapContextMenu(): void {
   if (activeMenu) {
     const hadFocus = activeMenu.contains(document.activeElement);
-    activeMenu.remove();
+    const menu = activeMenu;
+    clickDismiss?.abort();
+    clickDismiss = null;
+    menu.remove();
     activeMenu = null;
     document.removeEventListener('keydown', onMenuKeydown);
+    document.removeEventListener('focusin', onMenuFocusIn);
     // Removing the menu while focus was inside drops focus to <body>;
-    // hand it back to whatever had it before the menu opened.
-    if (hadFocus && returnFocus?.isConnected) returnFocus.focus();
+    // hand it back to whatever had it before the menu opened — unless
+    // another overlay already took focus (Cmd+K / search).
+    const active = document.activeElement;
+    const keepCurrent = active instanceof HTMLElement
+      && active.isConnected
+      && active !== document.body
+      && active !== menu;
+    if (hadFocus && !keepCurrent && returnFocus?.isConnected) returnFocus.focus();
     returnFocus = null;
   }
 }
@@ -71,10 +93,14 @@ export function showMapContextMenu(x: number, y: number, items: MapContextMenuIt
     el.addEventListener('click', (e) => { e.stopPropagation(); item.action(); dismissMapContextMenu(); });
     menu.append(el);
   });
+  clickDismiss = new AbortController();
+  const { signal } = clickDismiss;
   requestAnimationFrame(() => {
-    document.addEventListener('click', dismissMapContextMenu, { once: true });
+    if (signal.aborted || !activeMenu) return;
+    document.addEventListener('click', dismissMapContextMenu, { once: true, signal });
   });
   document.addEventListener('keydown', onMenuKeydown);
+  document.addEventListener('focusin', onMenuFocusIn);
   document.body.appendChild(menu);
   activeMenu = menu;
   // Menu pattern: focus moves into the menu on open; arrows walk the items.
