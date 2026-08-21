@@ -25,6 +25,7 @@ import {
   searchSourceItemsEqual,
   type SearchIndexQueryResult,
 } from '@/components/search-engine';
+import { decorateSearchResultOptions } from '@/components/search-result-options';
 import {
   searchMatchIdentity,
   type SearchCommandMatch,
@@ -1167,19 +1168,9 @@ export class SearchModal {
    */
   private decorateResultOptions(): void {
     if (!this.resultsList || !this.input) return;
-    let selectedId = '';
-    this.resultsList.querySelectorAll('.search-result-item').forEach((el, i) => {
-      el.setAttribute('role', 'option');
-      if (!el.id) el.id = `search-option-${i}`;
-      const isSelected = el.classList.contains('selected');
-      el.setAttribute('aria-selected', String(isSelected));
-      if (isSelected) selectedId = el.id;
+    decorateSearchResultOptions(this.resultsList, this.input, {
+      skipOptions: this.showingAllCommands,
     });
-    this.resultsList.querySelectorAll('.search-section-header').forEach((el) => {
-      el.setAttribute('role', 'presentation');
-    });
-    if (selectedId) this.input.setAttribute('aria-activedescendant', selectedId);
-    else this.input.removeAttribute('aria-activedescendant');
   }
 
   private selectResult(index: number): void {
