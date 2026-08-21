@@ -85,9 +85,11 @@ Errors: 401 (missing/invalid JWT), 403 `pro_required` — and, like every Pro-ga
 
 ## Telegram
 
-### `GET /api/telegram-feed?userId=...`
+### `GET /api/telegram-feed`
 
-Returns the pre-rendered brief feed for a given Telegram-linked user. Used by the Telegram mini-app.
+First-party browser path for the topic-tabbed Telegram Intel panel. Accepts `limit`, `topic`, and `channel`; there is no per-user (`userId`) form. Requires the dashboard session credential (`wms_`) and responds `private, max-age=30` — it is not publicly cacheable, and an uncredentialed request returns `401` with `no-store`. Message text is R4.
+
+For programmatic and partner access use the authenticated RPC [`GET /api/intelligence/v1/list-telegram-feed`](/panels/telegram-intel) instead.
 
 ## YouTube
 

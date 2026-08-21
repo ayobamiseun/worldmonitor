@@ -28,6 +28,7 @@ export class StrategicPosturePanel extends Panel {
       defaultRowSpan: 2,
     });
     this.init();
+    this.content.addEventListener('click', this.handleContentClick);
     bindActivationKeys(this.content, '.posture-theater');
   }
 
@@ -514,70 +515,65 @@ export class StrategicPosturePanel extends Panel {
     `;
 
     this.setSafeContent(unsafeRawHtml(html, 'legacy Panel.setContent() migration'));
-    this.attachEventListeners();
   }
 
-  private attachEventListeners(): void {
-    this.content.querySelector('.posture-refresh-btn')?.addEventListener('click', () => {
+  private handleContentClick = (e: Event): void => {
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+
+    if (target.closest('.posture-refresh-btn')) {
       this.refresh();
+      return;
+    }
+
+    const deduceBtn = target.closest<HTMLElement>('.posture-deduce-btn');
+    if (deduceBtn) {
+      e.stopPropagation();
+      try {
+        const theaterDataStr = deduceBtn.dataset.theater;
+        if (!theaterDataStr) return;
+
+        const p = JSON.parse(theaterDataStr);
+        const query = `What is the expected strategic impact of the current military posture in the ${p.shortName} theater?`;
+        let geoContext = `Theater: ${p.shortName} (${p.theaterName}). Military Assets: ${p.totalAircraft} aircraft, ${p.totalVessels} naval vessels. Readiness Level: ${p.postureLevel}. Assets breakdown: ${p.fighters} fighters, ${p.bombers} bombers, ${p.carriers} carriers, ${p.submarines} submarines. Focus/Target: ${p.targetNation || 'Unknown'}.`;
+
+        if (this.getLatestNews) {
+          const newsCtx = buildNewsContext(this.getLatestNews);
+          if (newsCtx) geoContext += `\n\n${newsCtx}`;
+        }
+
+        const detail: DeductContextDetail = { query, geoContext, autoSubmit: true };
+        document.dispatchEvent(new CustomEvent('wm:deduct-context', { detail }));
+      } catch (err) {
+        console.error('[StrategicPosturePanel] Failed to dispatch deduction event', err);
+      }
+      return;
+    }
+
+    const el = target.closest<HTMLElement>('.posture-theater');
+    if (!el || !this.content.contains(el)) return;
+
+    const lat = parseFloat(el.dataset.lat || '0');
+    const lon = parseFloat(el.dataset.lon || '0');
+    console.log('[StrategicPosturePanel] Theater clicked:', {
+      lat,
+      lon,
+      dataLat: el.dataset.lat,
+      dataLon: el.dataset.lon,
+      element: el.textContent?.slice(0, 30),
+      hasHandler: !!this.onLocationClick,
     });
-
-    const theaters = this.content.querySelectorAll('.posture-theater');
-    theaters.forEach((el) => {
-      el.addEventListener('click', (e) => {
-        // Prevent click if we clicked the deduce button specifically
-        if ((e.target as HTMLElement).closest('.posture-deduce-btn')) {
-          return;
-        }
-
-        const lat = parseFloat((el as HTMLElement).dataset.lat || '0');
-        const lon = parseFloat((el as HTMLElement).dataset.lon || '0');
-        console.log('[StrategicPosturePanel] Theater clicked:', {
-          lat,
-          lon,
-          dataLat: (el as HTMLElement).dataset.lat,
-          dataLon: (el as HTMLElement).dataset.lon,
-          element: (el as HTMLElement).textContent?.slice(0, 30),
-          hasHandler: !!this.onLocationClick,
-        });
-        if (this.onLocationClick && !Number.isNaN(lat) && !Number.isNaN(lon)) {
-          console.log('[StrategicPosturePanel] Calling onLocationClick with:', lat, lon);
-          this.onLocationClick(lat, lon);
-        } else {
-          console.warn('[StrategicPosturePanel] No handler or invalid coords!', {
-            hasHandler: !!this.onLocationClick,
-            lat,
-            lon,
-          });
-        }
+    if (this.onLocationClick && !Number.isNaN(lat) && !Number.isNaN(lon)) {
+      console.log('[StrategicPosturePanel] Calling onLocationClick with:', lat, lon);
+      this.onLocationClick(lat, lon);
+    } else {
+      console.warn('[StrategicPosturePanel] No handler or invalid coords!', {
+        hasHandler: !!this.onLocationClick,
+        lat,
+        lon,
       });
-    });
-
-    const deduceBtns = this.content.querySelectorAll('.posture-deduce-btn');
-    deduceBtns.forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        try {
-          const theaterDataStr = (btn as HTMLElement).dataset.theater;
-          if (!theaterDataStr) return;
-
-          const p = JSON.parse(theaterDataStr);
-          const query = `What is the expected strategic impact of the current military posture in the ${p.shortName} theater?`;
-          let geoContext = `Theater: ${p.shortName} (${p.theaterName}). Military Assets: ${p.totalAircraft} aircraft, ${p.totalVessels} naval vessels. Readiness Level: ${p.postureLevel}. Assets breakdown: ${p.fighters} fighters, ${p.bombers} bombers, ${p.carriers} carriers, ${p.submarines} submarines. Focus/Target: ${p.targetNation || 'Unknown'}.`;
-
-          if (this.getLatestNews) {
-            const newsCtx = buildNewsContext(this.getLatestNews);
-            if (newsCtx) geoContext += `\n\n${newsCtx}`;
-          }
-
-          const detail: DeductContextDetail = { query, geoContext, autoSubmit: true };
-          document.dispatchEvent(new CustomEvent('wm:deduct-context', { detail }));
-        } catch (err) {
-          console.error('[StrategicPosturePanel] Failed to dispatch deduction event', err);
-        }
-      });
-    });
-  }
+    }
+  };
 
   public setLocationClickHandler(handler: (lat: number, lon: number) => void): void {
     console.log('[StrategicPosturePanel] setLocationClickHandler called, handler:', typeof handler);

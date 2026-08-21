@@ -924,6 +924,20 @@ export class LiveNewsPanel extends Panel {
     btn.textContent = this.getChannelDisplayName(channel);
 
     btn.style.cursor = 'grab';
+    // Keyboard parity for the mouse drag reorder in createChannelSwitcher:
+    // arrows move the focused channel one slot and persist through the same
+    // applyChannelOrderFromDom path a completed drag uses.
+    btn.addEventListener('keydown', (e) => {
+      const back = e.key === 'ArrowLeft';
+      const fwd = e.key === 'ArrowRight';
+      if (!back && !fwd) return;
+      const sibling = back ? btn.previousElementSibling : btn.nextElementSibling;
+      if (!(sibling instanceof HTMLElement) || !sibling.classList.contains('live-channel-btn')) return;
+      e.preventDefault();
+      btn.parentElement?.insertBefore(btn, back ? sibling : sibling.nextElementSibling);
+      this.applyChannelOrderFromDom();
+      btn.focus();
+    });
     btn.addEventListener('click', (e) => {
       if (this.suppressChannelClick) {
         e.preventDefault();
@@ -1180,9 +1194,15 @@ export class LiveNewsPanel extends Panel {
       <div class="live-offline live-offline-compact">
         <div class="offline-icon">📺</div>
         <div class="offline-text">${t('components.liveNews.notLive', { name: safeName })}</div>
-        <button class="offline-retry" onclick="this.closest('.panel').querySelector('.live-channel-btn.active')?.click()">${t('common.retry')}</button>
+        <button class="offline-retry" data-live-retry>${t('common.retry')}</button>
       </div>
     `, "legacy direct innerHTML migration"));
+    // The repo's last inline onclick= lived here (CSP unsafe-inline
+    // dependency). switchChannel no-ops when the id is already active, so
+    // retry must re-request playback for the current stream.
+    this.content.querySelector('[data-live-retry]')?.addEventListener('click', () => {
+      this.requestPlaybackForActiveChannel();
+    });
   }
 
   private showEmbedError(channel: LiveChannel, errorCode: number): void {
