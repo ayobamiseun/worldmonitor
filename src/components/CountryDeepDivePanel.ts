@@ -3488,6 +3488,9 @@ export class CountryDeepDivePanel implements CountryBriefPanel {
     const node = document.createElement(tag);
     if (className) node.className = className;
     if (text) node.textContent = text;
+    if (tag === 'th') {
+      (node as HTMLTableCellElement).scope = 'col';
+    }
     return node;
   }
 
