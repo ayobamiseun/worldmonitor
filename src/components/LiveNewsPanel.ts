@@ -931,9 +931,9 @@ export class LiveNewsPanel extends Panel {
       const back = e.key === 'ArrowLeft';
       const fwd = e.key === 'ArrowRight';
       if (!back && !fwd) return;
-      e.preventDefault();
       const sibling = back ? btn.previousElementSibling : btn.nextElementSibling;
       if (!(sibling instanceof HTMLElement) || !sibling.classList.contains('live-channel-btn')) return;
+      e.preventDefault();
       btn.parentElement?.insertBefore(btn, back ? sibling : sibling.nextElementSibling);
       this.applyChannelOrderFromDom();
       btn.focus();
@@ -1198,9 +1198,10 @@ export class LiveNewsPanel extends Panel {
       </div>
     `, "legacy direct innerHTML migration"));
     // The repo's last inline onclick= lived here (CSP unsafe-inline
-    // dependency); a bound listener retries the active channel instead.
+    // dependency). switchChannel no-ops when the id is already active, so
+    // retry must re-request playback for the current stream.
     this.content.querySelector('[data-live-retry]')?.addEventListener('click', () => {
-      void this.switchChannel(this.activeChannel);
+      this.requestPlaybackForActiveChannel();
     });
   }
 

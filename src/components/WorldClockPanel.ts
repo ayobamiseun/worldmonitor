@@ -257,21 +257,25 @@ export class WorldClockPanel extends Panel {
     // one slot and persist through the same saveSelectedCities path.
     content.addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      // A live pointer gesture owns selectedCities until mouseup.
+      if (this.dragCityId) return;
       const handle = (e.target as HTMLElement).closest('.wc-drag-handle');
       const row = handle?.closest('.wc-row') as HTMLElement | null;
       const cityId = row?.dataset.cityId;
-      if (!cityId) return;
-      e.preventDefault();
+      if (!cityId || !row) return;
       const fromIdx = this.selectedCities.indexOf(cityId);
       const toIdx = e.key === 'ArrowUp' ? fromIdx - 1 : fromIdx + 1;
       if (fromIdx === -1 || toIdx < 0 || toIdx >= this.selectedCities.length) return;
+      const sibling = e.key === 'ArrowUp' ? row.previousElementSibling : row.nextElementSibling;
+      if (!(sibling instanceof HTMLElement) || !sibling.classList.contains('wc-row')) return;
+      e.preventDefault();
       this.selectedCities.splice(fromIdx, 1);
       this.selectedCities.splice(toIdx, 0, cityId);
       saveSelectedCities(this.selectedCities);
-      this.renderClocks();
-      // renderClocks rebuilds the rows; put focus back on the moved handle
-      // so repeated presses keep moving the same city.
-      content.querySelector<HTMLElement>(`.wc-row[data-city-id="${cityId}"] .wc-drag-handle`)?.focus();
+      // Move the live row. renderClocks() is a 150ms setSafeContent rebuild and
+      // would destroy the focused handle before afterUpdate runs.
+      row.parentElement?.insertBefore(row, e.key === 'ArrowUp' ? sibling : sibling.nextElementSibling);
+      if (handle instanceof HTMLElement) handle.focus();
     });
 
     content.addEventListener('mousedown', (e: MouseEvent) => {
