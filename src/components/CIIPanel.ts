@@ -56,7 +56,10 @@ export class CIIPanel extends Panel {
     this.followedUnsubscribe = subscribeFollowed(() => {
       this.rerenderRows();
     });
-    bindActivationKeys(this.content, '.cii-country');
+    // Drill-in lives on `.cii-name`, not `.cii-country`. The row wraps
+    // Follow + Share buttons; role="button" on the wrapper trips axe
+    // nested-interactive (WCAG 4.1.2) and fails e2e/a11y-axe-scan.
+    bindActivationKeys(this.content, '.cii-name');
   }
 
   public setShareStoryHandler(handler: (code: string, name: string) => void): void {
@@ -135,11 +138,11 @@ export class CIIPanel extends Panel {
     // stopPropagation pattern in `bindShareButtons`).
     followHost.addEventListener('click', (e) => e.stopPropagation());
 
-    return h('div', { className: 'cii-country', role: 'button', tabindex: '0', dataset: { code: country.code } },
+    return h('div', { className: 'cii-country', dataset: { code: country.code } },
       followHost,
       h('div', { className: 'cii-header' },
         h('span', { className: 'cii-emoji' }, emoji),
-        h('span', { className: 'cii-name' }, country.name),
+        h('span', { className: 'cii-name', role: 'button', tabindex: '0' }, country.name),
         h('span', { className: 'cii-score' }, String(country.score)),
         this.buildTrendArrow(country.trend, country.change24h),
         shareBtn,
