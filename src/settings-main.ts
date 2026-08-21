@@ -140,7 +140,19 @@ function renderSidebar(): void {
   // Pair the tabpanel with the selected tab so AT announces which section
   // the content belongs to (the tablist/tabpanel pairing was otherwise
   // broken on both ends - tabs had no ids, the panel no aria-labelledby).
-  document.getElementById('contentArea')?.setAttribute('aria-labelledby', `settingsTab-${activeSection}`);
+  labelSettingsContentArea('section');
+}
+
+function labelSettingsContentArea(mode: 'section' | 'search'): void {
+  const contentArea = document.getElementById('contentArea');
+  if (!contentArea) return;
+  if (mode === 'search') {
+    contentArea.removeAttribute('aria-labelledby');
+    contentArea.setAttribute('aria-label', 'Search results');
+    return;
+  }
+  contentArea.removeAttribute('aria-label');
+  contentArea.setAttribute('aria-labelledby', `settingsTab-${activeSection}`);
 }
 
 // ── Section rendering ──
@@ -789,6 +801,7 @@ function handleSearch(query: string): void {
 
   if (matches.length === 0) {
     setTrustedHtml(area, trustedHtml(`<div class="settings-search-empty"><p>No features match "${escapeHtml(query)}"</p></div>`, "legacy direct innerHTML migration"));
+    labelSettingsContentArea('search');
     return;
   }
 
@@ -835,6 +848,7 @@ function handleSearch(query: string): void {
     <div class="settings-feat-list">${cards}</div>
   `, "legacy direct innerHTML migration"));
 
+  labelSettingsContentArea('search');
   initFeatureSectionListeners(area);
 }
 
