@@ -110,7 +110,7 @@ describe('WatchlistTableView virtualization', () => {
     const view = createView();
     stateOf(view).sort = 'rank-desc';
     const html = view.render();
-    assert.match(html, /data-sortkey="rank-desc"[^>]*aria-sort="descending"/);
+    assert.match(html, /<th scope="col"[^>]*data-sortkey="rank-desc"[^>]*aria-sort="descending"/);
     assert.doesNotMatch(html, /data-sortkey="symbol-asc"[^>]*aria-sort=/);
   });
 
