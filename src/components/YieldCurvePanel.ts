@@ -167,7 +167,7 @@ function renderChart(current: YieldPoint[], prior: YieldPoint[], ecbRates: Recor
 }
 
 function renderTable(points: YieldPoint[]): string {
-  const headers = points.map(p => `<th style="font-size:calc(9px * var(--wm-panel-effective-scale, 1));font-weight:600;color:var(--text-dim);padding:4px 6px;text-align:center">${escapeHtml(p.tenor)}</th>`).join('');
+  const headers = points.map(p => `<th scope="col" style="font-size:calc(9px * var(--wm-panel-effective-scale, 1));font-weight:600;color:var(--text-dim);padding:4px 6px;text-align:center">${escapeHtml(p.tenor)}</th>`).join('');
   const cells = points.map(p => {
     const val = p.value !== null ? `${p.value.toFixed(2)}%` : 'N/A';
     return `<td style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));color:var(--text);padding:4px 6px;text-align:center">${escapeHtml(val)}</td>`;

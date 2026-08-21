@@ -220,11 +220,11 @@ export class EnergyDisruptionsPanel extends Panel {
         <table class="ed-table">
           <thead>
             <tr>
-              <th>Event</th>
-              <th>Asset</th>
-              <th>Window</th>
-              <th>Offline</th>
-              <th>Status</th>
+              <th scope="col">Event</th>
+              <th scope="col">Asset</th>
+              <th scope="col">Window</th>
+              <th scope="col">Offline</th>
+              <th scope="col">Status</th>
             </tr>
           </thead>
           <tbody>${rows || `<tr><td colspan="5" class="ed-empty">No events match the current filter.</td></tr>`}</tbody>

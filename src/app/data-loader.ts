@@ -128,6 +128,7 @@ import { fetchSecurityAdvisories } from '@/services/security-advisories';
 import { fetchThermalEscalations } from '@/services/thermal-escalation';
 import { fetchCrossSourceSignals } from '@/services/cross-source-signals';
 import { fetchTelegramFeed } from '@/services/telegram-intel';
+import { fetchXFeed, isUsableHydratedXFeed } from '@/services/x-intel';
 import { fetchOrefAlerts, startOrefPolling, stopOrefPolling, onOrefAlertsUpdate } from '@/services/oref-alerts';
 import { getResilienceRanking } from '@/services/resilience';
 import { buildResilienceChoroplethMap } from '@/components/resilience-choropleth-utils';
@@ -435,6 +436,11 @@ export class DataLoaderManager implements AppModule {
   private loadAllDataPromise: Promise<void> | null = null;
   private loadAllDataRerunRequested = false;
   private loadAllDataQueuedForceAll = false;
+  private xIntelAbortController: AbortController | null = null;
+  // True once a live X fetch has rendered. Gates whether a later transport
+  // failure may blank the panel (it may not) or must surface an error (it must,
+  // when nothing good is on screen yet).
+  private xIntelHasLiveData = false;
 
   private digestBreaker = { state: 'closed' as 'closed' | 'open' | 'half-open', failures: 0, cooldownUntil: 0 };
   private readonly digestRequestTimeoutMs = 8000;
@@ -561,6 +567,8 @@ export class DataLoaderManager implements AppModule {
     this.stopSatellitePropagation();
     if (this.imageryRetryTimer) { clearTimeout(this.imageryRetryTimer); this.imageryRetryTimer = null; }
     this.applyTimeRangeFilterToNewsPanelsDebounced.cancel();
+    this.xIntelAbortController?.abort();
+    this.xIntelAbortController = null;
     stopOrefPolling();
     if (this.boundMarketWatchlistHandler) {
       window.removeEventListener('wm-market-watchlist-changed', this.boundMarketWatchlistHandler as EventListener);
@@ -3146,6 +3154,10 @@ export class DataLoaderManager implements AppModule {
       tasks.push(this.loadTelegramIntel());
     }
 
+    if (!_desktopLocked) {
+      tasks.push(this.loadXIntel());
+    }
+
     // OREF sirens (premium-locked on desktop without API key)
     if (!_desktopLocked) {
       tasks.push((async () => {
@@ -4492,6 +4504,56 @@ export class DataLoaderManager implements AppModule {
       this.callPanel('telegram-intel', 'setData', {
         source: 'telegram', enabled: false, count: 0, updatedAt: null, items: [],
       });
+    }
+  }
+
+  async loadXIntel(): Promise<void> {
+    if (isDesktopRuntime() && !hasPremiumAccess()) return;
+    // `xFeed` is intentionally NOT a bootstrap tier key (R4, #6654): its items
+    // carry post bodies, and every tier is served unauthenticated at
+    // `?tier=<t>&public=1` with ACAO:*. So this read is inert today and always
+    // returns undefined — the panel gets its data from the fetch below.
+    // Deliberately kept rather than deleted: it is the hydrated-else-fetch
+    // fallback the DOM tests in tests/dom/x-intel-data-loader.test.mts exercise,
+    // and it is what would resume working if the key is ever re-registered with
+    // `text` stripped on the bootstrap path. Note the bootstrap coverage guards
+    // in tests/bootstrap.test.mjs only run key -> consumer, so nothing flags a
+    // consumer whose key is absent.
+    const hydrated = getHydratedData('xFeed') as import('@/services/x-intel').XFeedResponse | undefined;
+    const hydratedUsable = isUsableHydratedXFeed(hydrated);
+    if (hydratedUsable && !this.ctx.isDestroyed) {
+      this.callPanel('x-intel', 'setData', hydrated);
+    }
+    const controller = new AbortController();
+    this.xIntelAbortController?.abort();
+    this.xIntelAbortController = controller;
+    try {
+      const result = await fetchXFeed(50, controller.signal);
+      if (controller.signal.aborted || this.ctx.isDestroyed) return;
+      this.callPanel('x-intel', 'setData', result);
+      this.xIntelHasLiveData = true;
+    } catch (error) {
+      if (controller.signal.aborted || this.ctx.isDestroyed) return;
+      console.error('[App] X news-account fetch failed:', error);
+      if (hydratedUsable) return;
+      // A transport failure is NOT `enabled: false`. That sentinel means "the
+      // relay has no X credentials", and reusing it here rendered the permanent
+      // "disabled" copy over a panel that was showing good posts a moment
+      // earlier. With hydration now intentionally absent (xFeed is not a
+      // bootstrap key, R4), `hydratedUsable` is always false, so every transient
+      // 502 hit this path.
+      //
+      // Once a live fetch has succeeded, keep that render: the panel refreshes
+      // every 15 min, so one failed poll should not blank it. Note showError
+      // also calls replaceContent, so it is NOT a "keep what's on screen" path —
+      // hence the explicit early return rather than falling through to it.
+      if (this.xIntelHasLiveData) return;
+      // Nothing good on screen yet (first load, or only expired hydration we
+      // deliberately refused to render): surface the failure rather than leave a
+      // stuck loading state.
+      this.callPanel('x-intel', 'showError');
+    } finally {
+      if (this.xIntelAbortController === controller) this.xIntelAbortController = null;
     }
   }
 

@@ -490,11 +490,11 @@ export class StockAnalysisPanel extends Panel {
       <table style="width:100%;border-collapse:collapse;font-size:calc(11px * var(--wm-panel-effective-scale, 1));margin-top:6px">
         <thead>
           <tr style="color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em;text-align:left">
-            <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Name</th>
-            <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Type</th>
-            <th style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:right">Shares</th>
-            <th style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:right">Value</th>
-            <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Date</th>
+            <th scope="col" style="padding:4px 6px;border-bottom:1px solid var(--border)">Name</th>
+            <th scope="col" style="padding:4px 6px;border-bottom:1px solid var(--border)">Type</th>
+            <th scope="col" style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:right">Shares</th>
+            <th scope="col" style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:right">Value</th>
+            <th scope="col" style="padding:4px 6px;border-bottom:1px solid var(--border)">Date</th>
           </tr>
         </thead>
         <tbody>

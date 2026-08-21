@@ -516,6 +516,13 @@
       "removal_issue": null
     },
     {
+      "path": "api/x-feed.js",
+      "category": "upstream-proxy",
+      "reason": "First-party X news-account feed proxy for the dashboard panel. MCP/embed partners must use list-x-feed (permalink + derived facts only).",
+      "owner": "@SebastienMelki",
+      "removal_issue": null
+    },
+    {
       "path": "api/supply-chain/hormuz-tracker.js",
       "category": "upstream-proxy",
       "reason": "Transparent proxy to Hormuz strait AIS tracker feed. Shape is upstream's.",

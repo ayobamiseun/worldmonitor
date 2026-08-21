@@ -364,10 +364,10 @@ export class PipelineStatusPanel extends Panel {
         <table class="pp-table">
           <thead>
             <tr>
-              <th>Asset</th>
-              <th>From → To</th>
-              <th>Capacity</th>
-              <th>Status</th>
+              <th scope="col">Asset</th>
+              <th scope="col">From → To</th>
+              <th scope="col">Capacity</th>
+              <th scope="col">Status</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>

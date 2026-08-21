@@ -190,7 +190,7 @@ export class WatchlistTableView<T> {
         ? ` tabindex="0"${ariaSortAttr(sortKey, this.state.sort)}`
         : '';
       const activeSortIndicator = sortKey && sortKey === this.state.sort ? ' ↓' : '';
-      return `<th${classAttr}${sortAttr}${sortA11yAttr}>${escapeHtml(col.label)}${activeSortIndicator}</th>`;
+      return `<th scope="col"${classAttr}${sortAttr}${sortA11yAttr}>${escapeHtml(col.label)}${activeSortIndicator}</th>`;
     }).join('');
     return `
       <div class="watchlist-table-view" data-watchlist-totalrows="${list.length}" data-watchlist-renderedrows="${this.getRenderedRowCount(list, start)}">

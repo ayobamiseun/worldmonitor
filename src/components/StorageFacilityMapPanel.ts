@@ -346,10 +346,10 @@ export class StorageFacilityMapPanel extends Panel {
         <table class="sf-table">
           <thead>
             <tr>
-              <th>Facility</th>
-              <th>Country · Type</th>
-              <th>Capacity</th>
-              <th>Status</th>
+              <th scope="col">Facility</th>
+              <th scope="col">Country · Type</th>
+              <th scope="col">Capacity</th>
+              <th scope="col">Status</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>

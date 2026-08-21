@@ -76,3 +76,12 @@ test('flushPendingSearch runs handleSearch only when input changed since last se
 test('handleSearch records lastSearchedQuery so staleness can be detected (R4)', () => {
   assert.match(searchModalSrc, /this\.lastSearchedQuery = query/, 'handleSearch stores the searched query');
 });
+
+test('decorateResultOptions skips option stamping in the all-commands view', () => {
+  assert.match(searchModalSrc, /import \{ decorateSearchResultOptions \} from '@\/components\/search-result-options'/);
+  assert.match(
+    searchModalSrc,
+    /decorateSearchResultOptions\(this\.resultsList, this\.input, \{\s*skipOptions:\s*this\.showingAllCommands,?\s*\}\)/,
+    'all-commands view must not stamp role=option on command rows',
+  );
+});

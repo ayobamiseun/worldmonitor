@@ -102,7 +102,7 @@ describe('WatchlistTableView virtualization', () => {
     assert.match(html, /SYM043/);
     assert.doesNotMatch(html, /SYM044/);
     assert.doesNotMatch(html, /SYM617/);
-    assert.match(html, /data-sortkey="symbol-asc"[^>]*aria-sort="ascending"/);
+    assert.match(html, /<th scope="col"[^>]*data-sortkey="symbol-asc"[^>]*aria-sort="ascending"/);
     assert.doesNotMatch(html, /data-sortkey="rank-desc"[^>]*aria-sort=/);
   });
 

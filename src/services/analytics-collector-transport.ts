@@ -61,11 +61,14 @@ export type CollectorFailure = {
    *
    * KNOWN LIMITATION: this is a timing inference, not a fact reported by the
    * transport. `LATCH_RELEASE_GRACE_MS` makes a false positive unlikely, not
-   * impossible — a hidden tab under intensive timer throttling can leave both
-   * clocks due in one wake-up, and a cleanly-cancelled write would then be
-   * marked `raced` and lose both its retry and its durable marker. The inverse
-   * (a genuinely outstanding request NOT marked `raced`) cannot happen: only
-   * this module's deadline sets the marker.
+   * impossible — and #6968 pauses the latch while the tab is hidden so a
+   * frozen WebKit fetch is no longer the main source of that false positive.
+   * A hidden tab under intensive timer throttling can still leave the abort
+   * and the latch due in one wake-up if both fire after the tab returns, and
+   * a cleanly-cancelled write would then be marked `raced` and lose both its
+   * retry and its durable marker. The inverse (a genuinely outstanding
+   * request NOT marked `raced`) cannot happen: only this module's deadline
+   * sets the marker.
    *
    * A MARKER rather than a `kind`, for the same reason as `botFiltered`: the
    * delivery classification and the health cohorts keep treating it as the
@@ -245,6 +248,8 @@ type CollectorRequest = {
   requestType: CollectorRequestType;
   eventName?: string;
   critical: boolean;
+  visibilityAtSend?: CollectorVisibilitySnapshot;
+  sentAt?: number;
   resolve: (response: Response) => void;
   reject: (error: unknown) => void;
   resolveDelivery: (response: Response) => void;
@@ -301,8 +306,10 @@ const collectorRequestQueue: CollectorRequest[] = [];
 let collectorRequestInFlight = false;
 let collectorFetchOriginal: typeof window.fetch | null = null;
 let collectorFetchWrapper: typeof window.fetch | null = null;
-let collectorUnloadFlush: (() => void) | null = null;
-let collectorVisibilityFlush: (() => void) | null = null;
+let collectorUnloadFlush: ((event?: Event) => void) | null = null;
+let collectorVisibilityChangeHandler: (() => void) | null = null;
+let collectorPageShowHandler: (() => void) | null = null;
+let collectorPageActive = true;
 let collectorTransportGeneration = 0;
 type CollectorHealthCounters = {
   writes: number;
@@ -315,6 +322,7 @@ type CollectorHealthWindow = {
   startedAt: number;
   writes: number;
   failures: number;
+  raced: number;
   noiseReported: boolean;
   reportedFailureSignatures: Set<string>;
   cohorts: Record<CollectorHealthCohort, CollectorHealthCounters>;
@@ -329,6 +337,7 @@ function createCollectorHealthWindow(startedAt = 0): CollectorHealthWindow {
     startedAt,
     writes: 0,
     failures: 0,
+    raced: 0,
     noiseReported: false,
     reportedFailureSignatures: new Set(),
     cohorts: {
@@ -498,7 +507,9 @@ export function isRetryableCollectorFailure(failure: CollectorFailure): boolean 
   // still commit. That is the same "committed, then we stopped listening"
   // ambiguity that rules out retrying a 500 or a gateway status, so it gets the
   // same answer. Releasing the queue must not be paid for in duplicate
-  // conversions (#6288).
+  // conversions (#6288). #6968 keeps this door closed: hidden-tab writes are
+  // held instead of raced, so the remaining `raced` population is still an
+  // outstanding request. See docs/analytics-collector-operations.md.
   if (failure.raced) return false;
   // A dropped request never reached the network, but re-queueing it just feeds
   // the same saturated queue.
@@ -664,6 +675,34 @@ function reportCompletedCollectorHealthWindow(): void {
   }
 }
 
+type CollectorVisibilitySnapshot = DocumentVisibilityState | 'unknown';
+
+function collectorVisibilityState(): CollectorVisibilitySnapshot {
+  try {
+    if (typeof document === 'undefined' || typeof document.visibilityState !== 'string') {
+      return 'unknown';
+    }
+    return document.visibilityState;
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * Serialized drain runs only while the page is in the foreground.
+ *
+ * A non-DOM host (this module's unit tests, the sidecar) has no visibility
+ * signal, so it stays active. Treating `hidden`/`prerender` as inactive is the
+ * #6968 fix: WebKit freezes in-flight `fetch` on a backgrounded tab, and the
+ * previous visibilitychange→hidden flush handed the whole backlog to that
+ * freeze. `pagehide` with `persisted === false` still bypasses this and
+ * dispatches concurrently; a persisted pagehide (bfcache) keeps the hold.
+ */
+function isCollectorPageActive(): boolean {
+  const visibility = collectorVisibilityState();
+  return visibility === 'unknown' || visibility === 'visible';
+}
+
 function emitCollectorFailureToSentry(
   request: CollectorRequest,
   failure: CollectorFailure,
@@ -717,6 +756,7 @@ function emitCollectorFailureToSentry(
         requestType: request.requestType,
         healthCohort: cohort,
         raced: String(failure.raced ?? false),
+        visibilityAtSend: request.visibilityAtSend ?? 'unknown',
       },
       extra: diagnostics,
     }));
@@ -760,6 +800,10 @@ function recordCollectorOutcome(request: CollectorRequest, failure: CollectorFai
   const environmentFailureRate = cohortWindow.writes > 0
     ? cohortWindow.environmentFailures / cohortWindow.writes
     : 0;
+  if (failure.raced) collectorHealthWindow.raced += 1;
+  const racedRate = collectorHealthWindow.writes > 0
+    ? collectorHealthWindow.raced / collectorHealthWindow.writes
+    : 0;
   const diagnostics = {
     requestType: request.requestType,
     healthCohort: cohort,
@@ -769,6 +813,8 @@ function recordCollectorOutcome(request: CollectorRequest, failure: CollectorFai
     environmentFailureRate,
     failureCount: collectorHealthWindow.failures,
     writeCount: collectorHealthWindow.writes,
+    racedCount: collectorHealthWindow.raced,
+    racedRate,
     cohortFailureCount: cohortWindow.failures,
     cohortWriteCount: cohortWindow.writes,
     prismaCode: failure.prismaCode ?? null,
@@ -777,6 +823,11 @@ function recordCollectorOutcome(request: CollectorRequest, failure: CollectorFai
     // WHY a receiptless 200 happened — otherwise a developer reading devtools
     // during a bot-filtered write starts debugging a write path that is fine.
     botFiltered: failure.botFiltered ?? false,
+    visibilityAtSend: request.visibilityAtSend ?? 'unknown',
+    visibilityAtDeadline: failure.kind === 'timeout' ? collectorVisibilityState() : null,
+    elapsedAtDeadlineMs: failure.kind === 'timeout' && request.sentAt !== undefined
+      ? Math.max(0, Date.now() - request.sentAt)
+      : null,
     // True means the request is STILL OUTSTANDING — the queue was released
     // without it, so this page is behind a fetch wrapper that ignores aborts.
     raced: failure.raced ?? false,
@@ -865,6 +916,10 @@ type TimeoutBoundInit = AbortBoundInit & {
    * serialized slot never depends on the callee honoring `init.signal`.
    */
   deadline: Promise<never>;
+  /** Freeze the latch while the tab is backgrounded (#6968). */
+  pause: () => void;
+  /** Re-arm remaining latch time when the tab is foregrounded again. */
+  resume: () => void;
 };
 
 /**
@@ -959,25 +1014,81 @@ function withCollectorDeadline(
 ): TimeoutBoundInit {
   // First, because withManualAbort throws when AbortController is unavailable.
   const bound = withRequestAbort(init, timeoutMs);
+  let remainingMs = timeoutMs + LATCH_RELEASE_GRACE_MS;
+  let startedAt = Date.now();
   let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  let paused = false;
+  let settleGraceGranted = false;
+  let settled = false;
+  let rejectDeadline: (error: Error) => void = () => {};
   const deadline = new Promise<never>((_resolve, reject) => {
-    deadlineTimer = setTimeout(
-      () => reject(createTimeoutError(timeoutMs, true)),
-      timeoutMs + LATCH_RELEASE_GRACE_MS,
-    );
+    rejectDeadline = reject;
   });
   // The transport wins the race in every healthy case, and the loser of a
   // Promise.race is still rejected. Keep that from surfacing as an unhandled
   // rejection on the page.
   void deadline.catch(() => {});
+
+  const arm = (): void => {
+    if (settled || paused) return;
+    startedAt = Date.now();
+    deadlineTimer = setTimeout(() => {
+      if (settled || paused) return;
+      settled = true;
+      const fired = deadlineTimer;
+      deadlineTimer = undefined;
+      // Tests fire the callback directly; still mark the fake timer cancelled
+      // so a later findLatchDeadline cannot pick up this spent deadline.
+      if (fired !== undefined) clearTimeout(fired);
+      rejectDeadline(createTimeoutError(timeoutMs, true));
+    }, remainingMs);
+  };
+  const pause = (): void => {
+    if (paused || settled || deadlineTimer === undefined) return;
+    remainingMs = Math.max(0, remainingMs - (Date.now() - startedAt));
+    clearTimeout(deadlineTimer);
+    deadlineTimer = undefined;
+    paused = true;
+  };
+  const resume = (): void => {
+    if (!paused || settled) return;
+    paused = false;
+    // Hidden time can leave a 1ms–Nms sliver. Firing that sliver on the first
+    // visible tick would race a fetch that is only now unfreezing. Grant one
+    // settle-grace per request, then consume the real remaining foreground
+    // budget on later visibility cycles so a stalled wrapper stays bounded.
+    if (!settleGraceGranted && remainingMs < LATCH_RELEASE_GRACE_MS) {
+      remainingMs = LATCH_RELEASE_GRACE_MS;
+      settleGraceGranted = true;
+    }
+    arm();
+  };
+
+  arm();
   return {
     init: bound.init,
     deadline,
+    pause,
+    resume,
     cleanup: () => {
-      clearTimeout(deadlineTimer);
+      settled = true;
+      if (deadlineTimer !== undefined) {
+        clearTimeout(deadlineTimer);
+        deadlineTimer = undefined;
+      }
       bound.cleanup();
     },
   };
+}
+
+const pausableCollectorDeadlines = new Set<Pick<TimeoutBoundInit, 'pause' | 'resume'>>();
+
+function pauseCollectorLatchDeadlines(): void {
+  for (const handle of pausableCollectorDeadlines) handle.pause();
+}
+
+function resumeCollectorLatchDeadlines(): void {
+  for (const handle of pausableCollectorDeadlines) handle.resume();
 }
 
 async function runCollectorRequest(request: CollectorRequest, generation: number): Promise<void> {
@@ -992,7 +1103,10 @@ async function runCollectorRequest(request: CollectorRequest, generation: number
     let deadline: Promise<never>;
     collectorDispatchDepth += 1;
     try {
+      request.sentAt = Date.now();
+      request.visibilityAtSend = collectorVisibilityState();
       timeoutBoundInit = withCollectorDeadline(request.init);
+      pausableCollectorDeadlines.add(timeoutBoundInit);
       deadline = timeoutBoundInit.deadline;
       responsePromise = request.originalFetch(request.input, timeoutBoundInit.init);
     } finally {
@@ -1063,12 +1177,14 @@ async function runCollectorRequest(request: CollectorRequest, generation: number
     );
     request.rejectDelivery(error);
   } finally {
+    if (timeoutBoundInit) pausableCollectorDeadlines.delete(timeoutBoundInit);
     timeoutBoundInit?.cleanup();
   }
 }
 
 function drainCollectorRequestQueue(): void {
   if (collectorRequestInFlight || collectorRequestQueue.length === 0) return;
+  if (!collectorPageActive) return;
   const request = collectorRequestQueue.shift();
   if (!request) return;
 
@@ -1202,19 +1318,51 @@ export function installCollectorFetchGate(): boolean {
   }
   collectorFetchOriginal = originalFetch;
   collectorFetchWrapper = wrappedFetch;
+  collectorPageActive = isCollectorPageActive();
 
-  // pagehide ALWAYS flushes — the page is leaving whatever visibilityState says.
-  // visibilitychange flushes only once actually hidden, since it also fires on
-  // the way back to visible.
-  const onPageHide = (): void => { flushCollectorQueueForUnload(); };
-  const onVisibilityChange = (): void => {
-    if (typeof document !== 'undefined' && document.visibilityState === 'visible') return;
+  // pagehide flushes only for a real navigation. `event.persisted` means the
+  // page is entering bfcache — the same freeze as visibilitychange→hidden —
+  // so we keep the hold. visibilitychange→hidden used to flush too, as a
+  // Safari-friendly unload analogue. That is the #6968 Apple-skew population:
+  // WebKit freezes those concurrent fetches, the latch fires, and both
+  // recovery doors close. Hold the serialized queue and pause in-flight
+  // latches until the page is visible again.
+  const onPageHide = (event?: Event): void => {
+    const persisted = Boolean(
+      event && 'persisted' in event && (event as PageTransitionEvent).persisted,
+    );
+    if (persisted) {
+      collectorPageActive = false;
+      pauseCollectorLatchDeadlines();
+      return;
+    }
+    resumeCollectorLatchDeadlines();
     flushCollectorQueueForUnload();
   };
+  const onVisibilityChange = (): void => {
+    const wasActive = collectorPageActive;
+    collectorPageActive = isCollectorPageActive();
+    if (collectorPageActive) {
+      if (!wasActive) resumeCollectorLatchDeadlines();
+      drainCollectorRequestQueue();
+      return;
+    }
+    if (wasActive) pauseCollectorLatchDeadlines();
+  };
+  const onPageShow = (): void => {
+    const wasActive = collectorPageActive;
+    collectorPageActive = isCollectorPageActive();
+    if (collectorPageActive) {
+      if (!wasActive) resumeCollectorLatchDeadlines();
+      drainCollectorRequestQueue();
+    }
+  };
   collectorUnloadFlush = onPageHide;
-  collectorVisibilityFlush = onVisibilityChange;
+  collectorVisibilityChangeHandler = onVisibilityChange;
+  collectorPageShowHandler = onPageShow;
   try {
     window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', onVisibilityChange);
     }
@@ -1273,17 +1421,23 @@ export function resetCollectorTransportForTesting(): void {
   if (typeof window !== 'undefined' && collectorUnloadFlush) {
     try {
       window.removeEventListener('pagehide', collectorUnloadFlush);
-      if (typeof document !== 'undefined' && collectorVisibilityFlush) {
-        document.removeEventListener('visibilitychange', collectorVisibilityFlush);
+      if (collectorPageShowHandler) {
+        window.removeEventListener('pageshow', collectorPageShowHandler);
+      }
+      if (typeof document !== 'undefined' && collectorVisibilityChangeHandler) {
+        document.removeEventListener('visibilitychange', collectorVisibilityChangeHandler);
       }
     } catch {
       // Listener teardown is best-effort.
     }
   }
   collectorUnloadFlush = null;
-  collectorVisibilityFlush = null;
+  collectorVisibilityChangeHandler = null;
+  collectorPageShowHandler = null;
+  collectorPageActive = true;
   collectorFetchOriginal = null;
   collectorFetchWrapper = null;
+  pausableCollectorDeadlines.clear();
   collectorHealthEndpoint = DEFAULT_COLLECTOR_HEALTH_ENDPOINT;
   collectorHealthReporter = (report) => sendCollectorHealthReport(collectorHealthEndpoint, report);
   resetCollectorHealthWindow(0);
@@ -1293,6 +1447,7 @@ export function resetCollectorTransportForTesting(): void {
 export function getCollectorHealthForTesting(): {
   writes: number;
   failures: number;
+  raced: number;
   noiseReported: boolean;
   reportedFailureSignatures: number;
   cohorts: Record<CollectorHealthCohort, CollectorHealthCounters>;
@@ -1300,6 +1455,7 @@ export function getCollectorHealthForTesting(): {
   return {
     writes: collectorHealthWindow.writes,
     failures: collectorHealthWindow.failures,
+    raced: collectorHealthWindow.raced,
     noiseReported: collectorHealthWindow.noiseReported,
     reportedFailureSignatures: collectorHealthWindow.reportedFailureSignatures.size,
     cohorts: {

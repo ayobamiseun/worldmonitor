@@ -907,18 +907,25 @@ export interface UsageHook {
  * `opts.cacheFailures: false` similarly makes nulls, no-store payloads, and
  * thrown fetches non-cacheable. `opts.inflightKey` lets callers share positive
  * cache entries while isolating provider-local work and failures.
+ * `opts.isCallerLocalError` identifies admission failures that belong only to
+ * the fetch leader. These errors do not arm shared cache backoff, and an
+ * in-flight follower re-enters admission under its own request instead of
+ * inheriting any preceding leader's failure.
  */
+type CachedFetchWithMetaOpts = CachedFetchOpts & {
+  usage?: UsageHook;
+  shouldFetch?: () => boolean;
+  cacheFailures?: boolean;
+  inflightKey?: string;
+  isCallerLocalError?: (error: unknown) => boolean;
+};
+
 export async function cachedFetchJsonWithMeta<T extends object>(
   key: string,
   ttlSeconds: number,
   fetcher: () => Promise<T | null>,
   negativeTtlSeconds = 120,
-  opts?: CachedFetchOpts & {
-    usage?: UsageHook;
-    shouldFetch?: () => boolean;
-    cacheFailures?: boolean;
-    inflightKey?: string;
-  },
+  opts?: CachedFetchWithMetaOpts,
 ): Promise<{ data: T | null; source: 'cache' | 'fresh' | 'skipped'; leader: boolean }> {
   const cached = await readCachedJson(key);
   if (cached.status === 'hit') {
@@ -937,10 +944,20 @@ export async function cachedFetchJsonWithMeta<T extends object>(
   }
 
   const inflightKey = opts?.inflightKey ?? key;
-  const existing = inflight.get(inflightKey);
-  if (existing) {
-    const data = (await existing) as T | null;
-    return { data, source: 'fresh', leader: false };
+  while (true) {
+    const existing = inflight.get(inflightKey);
+    if (!existing) break;
+    try {
+      const data = (await existing) as T | null;
+      return { data, source: 'fresh', leader: false };
+    } catch (error) {
+      if (!opts?.isCallerLocalError?.(error)) throw error;
+      // The leader's promise removes itself from `inflight` before its
+      // rejection reaches followers. Loop so one follower becomes the next
+      // leader and the rest coalesce behind that request's own admission. If
+      // several caller-local leaders fail in sequence, each waiter keeps its
+      // own outcome instead of inheriting the last failed principal's error.
+    }
   }
 
   if (opts?.shouldFetch && !opts.shouldFetch()) {
@@ -990,7 +1007,10 @@ export async function cachedFetchJsonWithMeta<T extends object>(
     })
     .catch(async (err: unknown) => {
       upstreamStatus = 0;
-      if (opts?.cacheFailures === false) {
+      if (opts?.isCallerLocalError?.(err)) {
+        // Caller-local admission failures must not mutate provider-independent
+        // cache or backoff state shared by other principals.
+      } else if (opts?.cacheFailures === false) {
         // Provider-local failures must not mutate a provider-independent key.
       } else if (opts?.cacheFetcherErrors !== false) {
         cacheStatus = 'neg-sentinel';

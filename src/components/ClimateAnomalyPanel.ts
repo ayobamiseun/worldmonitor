@@ -67,10 +67,10 @@ export class ClimateAnomalyPanel extends Panel {
         <table class="climate-table">
           <thead>
             <tr>
-              <th>${t('components.climate.zone')}</th>
-              <th>${t('components.climate.temp')}</th>
-              <th>${t('components.climate.precip')}</th>
-              <th>${t('components.climate.severityLabel')}</th>
+              <th scope="col">${t('components.climate.zone')}</th>
+              <th scope="col">${t('components.climate.temp')}</th>
+              <th scope="col">${t('components.climate.precip')}</th>
+              <th scope="col">${t('components.climate.severityLabel')}</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>

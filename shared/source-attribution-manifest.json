@@ -1416,6 +1416,12 @@
       "references": [
         {
           "path": "scripts/lib/company-monitoring-x-provider.mjs"
+        },
+        {
+          "path": "scripts/lib/x-news-accounts.cjs"
+        },
+        {
+          "path": "scripts/verify-x-accounts.mjs"
         }
       ]
     },
@@ -9914,6 +9920,9 @@
         },
         {
           "path": "scripts/lib/company-monitoring-classifier-client.mjs"
+        },
+        {
+          "path": "scripts/lib/x-news-accounts.cjs"
         },
         {
           "path": "scripts/mcp-live-smoke.mjs"

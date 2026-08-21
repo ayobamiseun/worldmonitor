@@ -23517,6 +23517,109 @@ body.map-width-resizing {
   color: var(--bg);
 }
 
+/* ==========================================================================
+   X News Accounts Panel (#6654)
+   ========================================================================== */
+
+.x-intel-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.x-intel-degraded {
+  margin: 6px 8px;
+  padding: 6px 8px;
+  border: 1px solid rgb(245 158 11 / 35%);
+  border-radius: 4px;
+  color: var(--color-warning, #f59e0b);
+  background: rgb(245 158 11 / 8%);
+  font-size: calc(11px * var(--wm-panel-effective-scale, 1));
+}
+
+.x-intel-item {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  background: var(--surface);
+  transition: background 0.15s ease, border-left-color 0.15s ease;
+  border-left: 2px solid transparent;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.x-intel-item.is-live {
+  background: rgba(0, 255, 127, 0.02);
+  border-left-color: var(--green);
+}
+
+.x-intel-item:hover {
+  background: var(--overlay-light);
+}
+
+.x-intel-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.x-intel-account-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.x-intel-account {
+  font-weight: 600;
+  font-size: calc(12px * var(--wm-panel-effective-scale, 1));
+}
+
+.x-intel-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.x-intel-topic {
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.x-intel-time {
+  font-size: calc(11px * var(--wm-panel-effective-scale, 1));
+  color: var(--text-muted);
+}
+
+.x-intel-text {
+  font-size: calc(12px * var(--wm-panel-effective-scale, 1));
+  line-height: 1.4;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.x-intel-item-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.x-intel-follow-btn {
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+  padding: 4px 8px;
+  border: 1px solid var(--accent-dim);
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.x-intel-follow-btn:hover {
+  background: var(--accent-dim);
+  color: var(--bg);
+}
+
 /* ─── Globe Map Styles ──────────────────────────────────────────────────────── */
 
 .globe-mode {

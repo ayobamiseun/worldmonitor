@@ -140,12 +140,12 @@ export class WsbTickerScannerPanel extends Panel {
         <table style="width:100%;border-collapse:collapse;border-spacing:0">
           <thead>
             <tr style="border-bottom:1px solid var(--border)">
-              <th style="${headerStyle};text-align:right">#</th>
-              <th style="${headerStyle};text-align:left">Ticker</th>
-              <th style="${headerStyle};text-align:right" data-sort="mentionCount">Mentions${this._sortIndicator('mentionCount')}</th>
-              <th style="${headerStyle};text-align:right" data-sort="totalScore">Score${this._sortIndicator('totalScore')}</th>
-              <th style="${headerStyle};text-align:left" data-sort="velocityScore">Velocity${this._sortIndicator('velocityScore')}</th>
-              <th style="${headerStyle};text-align:left">Source</th>
+              <th scope="col" style="${headerStyle};text-align:right">#</th>
+              <th scope="col" style="${headerStyle};text-align:left">Ticker</th>
+              <th scope="col" style="${headerStyle};text-align:right" data-sort="mentionCount">Mentions${this._sortIndicator('mentionCount')}</th>
+              <th scope="col" style="${headerStyle};text-align:right" data-sort="totalScore">Score${this._sortIndicator('totalScore')}</th>
+              <th scope="col" style="${headerStyle};text-align:left" data-sort="velocityScore">Velocity${this._sortIndicator('velocityScore')}</th>
+              <th scope="col" style="${headerStyle};text-align:left">Source</th>
             </tr>
           </thead>
           <tbody>${rows || '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text-dim);font-size:calc(12px * var(--wm-panel-effective-scale, 1))">No ticker data</td></tr>'}</tbody>
