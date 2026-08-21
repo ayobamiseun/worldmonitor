@@ -194,6 +194,7 @@ function injectStyles(): void {
     .fc-prob-hdr { display: grid; grid-template-columns: 1fr 80px 100px 60px; padding: 8px 14px; border-bottom: 1px solid var(--border-color, #30363d); }
     .fc-prob-hdr span { font-size: calc(9px * var(--wm-panel-effective-scale, 1)); color: var(--text-secondary, #7d8590); text-transform: uppercase; letter-spacing: 0.08em; }
     .fc-prob-item { border-bottom: 1px solid var(--border-color, #30363d); }
+    .fc-prob-item:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
     .fc-prob-item:last-child { border-bottom: none; }
     .fc-prob-row { display: grid; grid-template-columns: 1fr 80px 100px 60px; align-items: center; padding: 9px 14px; cursor: pointer; transition: background 0.1s; }
     .fc-prob-item:hover .fc-prob-row { background: rgba(255,255,255,0.02); }
@@ -669,7 +670,7 @@ export class ForecastPanel extends Panel {
     const demoted = f.demotedBySimulation ?? false;
 
     return `
-      <div class="fc-prob-item">
+      <div class="fc-prob-item" tabindex="0">
         <div class="fc-prob-row"${demoted ? ' style="opacity:0.5"' : ''}>
           <div class="fc-prob-label"
                style="border-left:2px solid ${catColor}47;padding-left:6px">

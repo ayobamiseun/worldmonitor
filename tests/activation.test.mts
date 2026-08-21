@@ -29,17 +29,28 @@ function restoreDom(): void {
   else delete (globalThis as { HTMLElement?: unknown }).HTMLElement;
 }
 
+function dispatchKey(
+  root: MiniElement,
+  target: MiniElement,
+  key: string,
+  options: { repeat?: boolean } = {},
+): Event {
+  const event = new Event('keydown', { bubbles: true, cancelable: true });
+  Object.defineProperties(event, {
+    target: { configurable: true, get: () => target },
+    key: { value: key },
+    repeat: { value: options.repeat ?? false },
+  });
+  root.dispatchEvent(event);
+  return event;
+}
+
 afterEach(restoreDom);
 
 describe('bindActivationKeys', () => {
   it('turns Enter/Space on a matching row into a click, ignoring other keys and non-rows', () => {
     const document = installDom();
     const content = document.createElement('div');
-    const handlers = new Map<string, EventListener>();
-    content.addEventListener = ((type: string, listener: EventListener) => {
-      handlers.set(type, listener);
-    }) as typeof content.addEventListener;
-
     const row = document.createElement('div');
     row.className = 'drill-row';
     content.appendChild(row);
@@ -47,25 +58,14 @@ describe('bindActivationKeys', () => {
     content.appendChild(outside);
 
     let clicks = 0;
-    (row as unknown as { click: () => void }).click = () => { clicks += 1; };
-    (outside as unknown as { click: () => void }).click = () => { clicks += 100; };
+    content.addEventListener('click', () => { clicks += 1; });
 
     bindActivationKeys(content as unknown as HTMLElement, '.drill-row');
 
-    const dispatch = (target: MiniElement, key: string): Event => {
-      const event = new Event('keydown', { cancelable: true });
-      Object.defineProperties(event, {
-        target: { value: target },
-        key: { value: key },
-      });
-      handlers.get('keydown')?.(event);
-      return event;
-    };
-
-    const enter = dispatch(row, 'Enter');
-    const space = dispatch(row, ' ');
-    dispatch(row, 'Tab');
-    dispatch(outside, 'Enter');
+    const enter = dispatchKey(content, row, 'Enter');
+    const space = dispatchKey(content, row, ' ');
+    dispatchKey(content, row, 'Tab');
+    dispatchKey(content, outside, 'Enter');
 
     assert.equal(clicks, 2);
     assert.equal(enter.defaultPrevented, true);
@@ -75,30 +75,79 @@ describe('bindActivationKeys', () => {
   it('leaves keydown alone when focus is on a nested control inside the row', () => {
     const document = installDom();
     const content = document.createElement('div');
-    const handlers = new Map<string, EventListener>();
-    content.addEventListener = ((type: string, listener: EventListener) => {
-      handlers.set(type, listener);
-    }) as typeof content.addEventListener;
-
     const row = document.createElement('div');
     row.className = 'drill-row';
     const nested = document.createElement('button');
     row.appendChild(nested);
     content.appendChild(row);
 
-    let rowClicks = 0;
-    (row as unknown as { click: () => void }).click = () => { rowClicks += 1; };
+    let clicks = 0;
+    content.addEventListener('click', () => { clicks += 1; });
 
     bindActivationKeys(content as unknown as HTMLElement, '.drill-row');
 
-    const event = new Event('keydown', { cancelable: true });
-    Object.defineProperties(event, {
-      target: { value: nested },
-      key: { value: 'Enter' },
-    });
-    handlers.get('keydown')?.(event);
+    const event = dispatchKey(content, nested, 'Enter');
 
-    assert.equal(rowClicks, 0);
+    assert.equal(clicks, 0);
     assert.equal(event.defaultPrevented, false);
+  });
+
+  it('does not stack listeners when bound twice on the same root and selector', () => {
+    const document = installDom();
+    const content = document.createElement('div');
+    const row = document.createElement('div');
+    row.className = 'drill-row';
+    content.appendChild(row);
+
+    let clicks = 0;
+    content.addEventListener('click', () => { clicks += 1; });
+
+    bindActivationKeys(content as unknown as HTMLElement, '.drill-row');
+    bindActivationKeys(content as unknown as HTMLElement, '.drill-row');
+
+    dispatchKey(content, row, 'Enter');
+    assert.equal(clicks, 1);
+  });
+
+  it('ignores repeating Enter/Space so a held key does not keep clicking', () => {
+    const document = installDom();
+    const content = document.createElement('div');
+    const row = document.createElement('div');
+    row.className = 'drill-row';
+    content.appendChild(row);
+
+    let clicks = 0;
+    content.addEventListener('click', () => { clicks += 1; });
+
+    bindActivationKeys(content as unknown as HTMLElement, '.drill-row');
+
+    const held = dispatchKey(content, row, ' ', { repeat: true });
+    assert.equal(clicks, 0);
+    assert.equal(held.defaultPrevented, false);
+
+    const first = dispatchKey(content, row, ' ');
+    assert.equal(clicks, 1);
+    assert.equal(first.defaultPrevented, true);
+  });
+
+  it('still activates a replacement row after the bound root is re-filled', () => {
+    const document = installDom();
+    const content = document.createElement('div');
+    const firstRow = document.createElement('div');
+    firstRow.className = 'drill-row';
+    content.appendChild(firstRow);
+
+    let clicks = 0;
+    content.addEventListener('click', () => { clicks += 1; });
+
+    bindActivationKeys(content as unknown as HTMLElement, '.drill-row');
+
+    content.innerHTML = '';
+    const replacement = document.createElement('div');
+    replacement.className = 'drill-row';
+    content.appendChild(replacement);
+
+    dispatchKey(content, replacement, 'Enter');
+    assert.equal(clicks, 1);
   });
 });

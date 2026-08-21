@@ -20,6 +20,16 @@ import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
 import { bindActivationKeys } from '@/utils/activation';
 
 const VIRTUALIZE_ROW_THRESHOLD = 100;
+
+function ariaSortAttr(sortKey: string, activeSort: string): string {
+  if (sortKey !== activeSort) return '';
+  const direction = activeSort.endsWith('-asc')
+    ? 'ascending'
+    : activeSort.endsWith('-desc')
+      ? 'descending'
+      : 'none';
+  return ` aria-sort="${direction}"`;
+}
 // Unscaled base for the `--watchlist-row-height` custom property in panels.css.
 // Spacer generation uses this base; bind() measures the rendered row after
 // global or per-panel scaling for exact scroll-to-index mapping.
@@ -100,6 +110,9 @@ export class WatchlistTableView<T> {
   private scaleObservationGeneration = 0;
   private lastMeasuredVirtualRowHeight: number | null = null;
   private lastMeasuredTableHeaderHeight: number | null = null;
+  // Keyboard activation is delegated on the owning panel's stable content
+  // node so it survives innerHTML replace and same-HTML short-circuits.
+  private activationRoot: HTMLElement | null = null;
   private state: {
     sort: string;
     filter: string;
@@ -174,7 +187,7 @@ export class WatchlistTableView<T> {
       const classAttr = classes.length ? ` class="${classes.join(' ')}"` : '';
       const sortAttr = sortKey ? ` data-sortkey="${escapeHtml(sortKey)}"` : '';
       const sortA11yAttr = sortKey
-        ? ` tabindex="0"${sortKey === this.state.sort ? ' aria-sort="descending"' : ''}`
+        ? ` tabindex="0"${ariaSortAttr(sortKey, this.state.sort)}`
         : '';
       const activeSortIndicator = sortKey && sortKey === this.state.sort ? ' ↓' : '';
       return `<th${classAttr}${sortAttr}${sortA11yAttr}>${escapeHtml(col.label)}${activeSortIndicator}</th>`;
@@ -337,6 +350,14 @@ export class WatchlistTableView<T> {
   }
 
   public bind(root: HTMLElement, onRerender: () => void): void {
+    if (this.activationRoot !== root) {
+      this.activationRoot = root;
+      // Bind on the panel content, not the table: `closest` still finds
+      // rows/headers after a replace, and the helper is idempotent per
+      // root+selector so a same-HTML short-circuit cannot stack listeners.
+      bindActivationKeys(root, '.watchlist-row');
+      bindActivationKeys(root, '.watchlist-th-sortable');
+    }
     this.disconnectScaleObserver();
     const rootEl = root.querySelector('.watchlist-table-view') as HTMLElement | null;
     if (!rootEl) return;
@@ -353,8 +374,6 @@ export class WatchlistTableView<T> {
       ?? previousHeaderHeight
       ?? 0;
     if (tableEl) {
-      bindActivationKeys(tableEl, '.watchlist-row');
-      bindActivationKeys(tableEl, '.watchlist-th-sortable');
       tableEl.addEventListener('click', (event) => {
         const target = event.target as HTMLElement | null;
         const rowEl = target?.closest<HTMLElement>('.watchlist-row');

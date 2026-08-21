@@ -2017,7 +2017,7 @@ body.panel-resize-active iframe {
 }
 
 /* Disclosure cards/rows and sortable headers made keyboard-operable (#7023). */
-.trade-restriction-card:focus-visible,
+.trade-restriction-header:focus-visible,
 .chain-node:focus-visible,
 .watchlist-row:focus-visible,
 .watchlist-th-sortable:focus-visible {

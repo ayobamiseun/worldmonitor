@@ -10,10 +10,24 @@
  * activation behavior cannot drift between mouse and keyboard.
  *
  * Bind once on a stable container (panel content), not on re-rendered rows.
+ * Repeated calls with the same root+selector are no-ops so a re-bind after a
+ * same-HTML `setSafeContent` short-circuit cannot stack listeners.
  */
+const boundActivationSelectors = new WeakMap<HTMLElement, Set<string>>();
+
 export function bindActivationKeys(root: HTMLElement, selector: string): void {
+  let selectors = boundActivationSelectors.get(root);
+  if (!selectors) {
+    selectors = new Set();
+    boundActivationSelectors.set(root, selectors);
+  }
+  if (selectors.has(selector)) return;
+  selectors.add(selector);
+
   root.addEventListener('keydown', (event: KeyboardEvent) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
+    // Held keys repeat; Space would otherwise keep synthesizing clicks.
+    if (event.repeat) return;
     const target = event.target as HTMLElement | null;
     const el = target?.closest<HTMLElement>(selector);
     if (!el || !root.contains(el)) return;

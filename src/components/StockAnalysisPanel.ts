@@ -172,8 +172,9 @@ export class StockAnalysisPanel extends Panel {
     // Keep the intro in sync with current item count + skipped-symbol
     // note even as the table view persists across refreshes.
     this.tableView.updateIntro(this.buildIntro(this.lastItems.length));
-    this.setSafeContent(unsafeRawHtml(this.tableView.render(), 'legacy Panel.setContent() migration'));
-    this.tableView.bind(this.content, () => this.rerender());
+    this.setSafeContent(unsafeRawHtml(this.tableView.render(), 'legacy Panel.setContent() migration'), () => {
+      this.tableView?.bind(this.content, () => this.rerender());
+    });
   }
 
   private buildIntro(itemCount: number): string {
