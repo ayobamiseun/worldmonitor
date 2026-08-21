@@ -75,6 +75,14 @@ export class TechHubsPanel extends Panel {
         lowColor: getCSSColor('--text-dim'),
       }),
     });
+    // Delegated click survives Panel.setSafeContent's 150ms debounce; per-row
+    // binds after render target the stale (often empty) DOM.
+    this.content.addEventListener('click', (e) => {
+      const item = (e.target as HTMLElement | null)?.closest<HTMLElement>('.tech-hub-item');
+      if (!item || !this.content.contains(item)) return;
+      const hub = this.activities.find(a => a.hubId === item.dataset.hubId);
+      if (hub && this.onHubClick) this.onHubClick(hub);
+    });
     bindActivationKeys(this.content, '.tech-hub-item');
   }
 
@@ -130,19 +138,5 @@ export class TechHubsPanel extends Panel {
     }).join('');
 
     this.setSafeContent(unsafeRawHtml(html, 'legacy Panel.setContent() migration'));
-    this.bindEvents();
-  }
-
-  private bindEvents(): void {
-    const items = this.content.querySelectorAll<HTMLDivElement>('.tech-hub-item');
-    items.forEach((item) => {
-      item.addEventListener('click', () => {
-        const hubId = item.dataset.hubId;
-        const hub = this.activities.find(a => a.hubId === hubId);
-        if (hub && this.onHubClick) {
-          this.onHubClick(hub);
-        }
-      });
-    });
   }
 }

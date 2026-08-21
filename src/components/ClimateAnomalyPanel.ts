@@ -18,6 +18,17 @@ export class ClimateAnomalyPanel extends Panel {
       infoTooltip: t('components.climate.infoTooltip'),
     });
     this.showLoading(t('common.loadingClimateData'));
+    // Delegated click on the stable content node: setSafeContent debounces the
+    // DOM write by 150ms, so querySelectorAll after render would bind the
+    // loading placeholder and miss the flushed rows. bindActivationKeys'
+    // synthesized click then reaches this same handler.
+    this.content.addEventListener('click', (e) => {
+      const row = (e.target as HTMLElement | null)?.closest<HTMLElement>('.climate-row');
+      if (!row || !this.content.contains(row)) return;
+      const lat = Number(row.dataset.lat);
+      const lon = Number(row.dataset.lon);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) this.onZoneClick?.(lat, lon);
+    });
     bindActivationKeys(this.content, '.climate-row');
   }
 
@@ -77,13 +88,5 @@ export class ClimateAnomalyPanel extends Panel {
         </table>
       </div>
     `);
-
-    this.content.querySelectorAll('.climate-row').forEach(el => {
-      el.addEventListener('click', () => {
-        const lat = Number((el as HTMLElement).dataset.lat);
-        const lon = Number((el as HTMLElement).dataset.lon);
-        if (Number.isFinite(lat) && Number.isFinite(lon)) this.onZoneClick?.(lat, lon);
-      });
-    });
   }
 }
