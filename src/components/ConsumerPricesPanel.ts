@@ -577,7 +577,7 @@ export class ConsumerPricesPanel extends Panel {
               <td><strong>${escapeHtml(c.name)}</strong></td>
               <td>${pctBadge(c.wowPct, true)}</td>
               <td>${pctBadge(c.momPct, true)}</td>
-              <td>${c.sparkline?.length ? sparkline(c.sparkline, 'var(--accent)', 48, 18) : '—'}</td>
+              <td>${c.sparkline?.length ? sparkline(c.sparkline, 'var(--accent)', 48, 18, '', { label: `${c.name} price trend` }) : '—'}</td>
               <td>${c.coveragePct > 0 ? `${c.coveragePct.toFixed(0)}%` : '—'}</td>
             </tr>
           `).join('')}
