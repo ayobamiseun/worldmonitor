@@ -23,7 +23,7 @@ const settingsMain = read('src', 'settings-main.ts');
 describe('CountryDeepDivePanel DOM headers get column scope', () => {
   it('el() assigns scope="col" on th nodes', () => {
     const elFn = cdp.match(
-      /private el<K extends keyof HTMLElementTagNameMap>[\s\S]*?return node;\n  }/,
+      /private el<K extends keyof HTMLElementTagNameMap>[\s\S]*?return node;\n {2}}/,
     );
     assert.ok(elFn, 'expected CountryDeepDivePanel.el() helper');
     assert.match(elFn[0], /if \(tag === 'th'\)/);
