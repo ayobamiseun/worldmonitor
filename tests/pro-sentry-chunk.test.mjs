@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { guardProBuiltOutput, shouldSkipProBuiltOutput } from './_lib/pro-built-output.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PRO_DIR = resolve(__dirname, '..', 'public', 'pro');
@@ -31,7 +32,14 @@ function entryChunksFor(html) {
     .filter((name) => !/^sentry-/.test(name));
 }
 
-describe('pro Sentry chunk split contract (#5019)', () => {
+// Dist-gated via the shared /pro guard (#7143): public/pro/ is gitignored and
+// produced by `npm run build:pro`, so on an unbuilt tree this suite SKIPS
+// instead of ENOENT-ing during suite construction — unless
+// WM_EXPECT_BUILT_OUTPUT=1 (CI builds /pro immediately before test:data),
+// which turns absence into a named failure so CI can never silently skip it.
+// Same idiom as the 16 other suites on tests/_lib/pro-built-output.mjs.
+describe('pro Sentry chunk split contract (#5019)', { skip: shouldSkipProBuiltOutput() }, () => {
+  guardProBuiltOutput();
   const sentryChunks = readdirSync(ASSETS_DIR).filter((f) => /^sentry-[A-Za-z0-9_-]+\.js$/.test(f));
   const indexHtml = readFileSync(resolve(PRO_DIR, 'index.html'), 'utf8');
   const welcomeHtml = readFileSync(resolve(PRO_DIR, 'welcome.html'), 'utf8');
