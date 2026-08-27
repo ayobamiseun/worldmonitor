@@ -1,23 +1,21 @@
 /**
- * #6679 — GdeltIntelPanel must not reset the retry backoff on renders that are
- * not proven recoveries.
+ * #6679 — GdeltIntelPanel must distinguish authoritative renders from cached
+ * topic replays when it clears retry state.
  *
  * #6587 routed the panel's success writes through the full error-state clear,
  * and #6678's setContent* migration entrenched it: every content write resets
- * `retryAttempt` to 0. Two of the panel's renders prove no recovery:
+ * `retryAttempt` to 0. A cached topic replay does not prove recovery:
  *
- *   A. Switching to a CACHED topic. The topic tabs are siblings of
+ *   Switching to a CACHED topic. The topic tabs are siblings of
  *      `this.content`, so they stay clickable while a topic is erroring;
  *      replaying another topic's cache says nothing about the failing fetch.
- *   B. The empty-articles render. `fetchGdeltArticles` reports RPC failure as
- *      a resolved `[]` (circuit breaker + empty fallback), so an outage
- *      arrives looking like a successful empty list.
  *
- * Both must clear the chip/countdown (the visible error UI) while leaving the
- * exponential-backoff rung alone; a real recovery (fresh fetch, non-empty
- * articles) must still reset it. LATENT today — the panel's own error path is
- * currently unreachable (see the issue) — pinned now so making it reachable
- * cannot silently ship a 15s-floor retry hammer.
+ * An empty-articles render, however, is authoritative content. It must clear
+ * the chip, countdown, and backoff just as a non-empty recovery does.
+ *
+ * The cached replay still clears the chip/countdown but leaves the exponential
+ * backoff rung alone. Authoritative renders reset it and cancel any stale
+ * retry callback.
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -40,10 +38,13 @@ import { getIntelTopics } from '@/services/gdelt-intel';
 
 interface PanelInternals {
   element: HTMLElement;
+  header: HTMLElement;
   content: HTMLElement;
   retryAttempt: number;
+  retryCountdownTimer: ReturnType<typeof setInterval> | null;
   topicData: Map<string, { articles: unknown[]; fetchedAt: Date }>;
   timelineData: Map<string, unknown>;
+  showError(message?: string, onRetry?: () => void, autoRetrySeconds?: number): void;
   renderArticles(articles: unknown[]): void;
   selectTopic(topic: unknown): void;
 }
@@ -54,6 +55,31 @@ function internals(panel: GdeltIntelPanel): PanelInternals {
 
 function article(url: string) {
   return { url, title: 'Story', source: 'example.com', date: new Date().toISOString(), tone: 0 };
+}
+
+function hasErrorChip(state: PanelInternals): boolean {
+  return state.header.classList.contains('panel-header-error');
+}
+
+function establishErrorState(state: PanelInternals) {
+  const retry = vi.fn();
+  state.retryAttempt = 3;
+  state.showError('boom', retry, 2);
+
+  expect(hasErrorChip(state), 'non-vacuity: the error chip is visible').toBe(true);
+  expect(state.content.querySelector('.panel-error-countdown')?.textContent).toMatch(/\(2s\)/);
+  expect(state.retryCountdownTimer, 'non-vacuity: the error retry timer is armed').not.toBeNull();
+
+  return { retry, retryRung: state.retryAttempt };
+}
+
+async function expectErrorUiCleared(state: PanelInternals, retry: ReturnType<typeof vi.fn>): Promise<void> {
+  expect(hasErrorChip(state)).toBe(false);
+  expect(state.content.querySelector('.panel-error-countdown')).toBeNull();
+  expect(state.retryCountdownTimer).toBeNull();
+
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(retry, 'the cleared countdown must not fire its stale callback').not.toHaveBeenCalled();
 }
 
 beforeAll(async () => {
@@ -80,26 +106,28 @@ async function newPanel(): Promise<GdeltIntelPanel> {
 }
 
 describe('GdeltIntelPanel retry backoff (#6679)', () => {
-  it('instance B: the swallowed-failure empty render keeps the rung and still clears the error chip', async () => {
+  it('an authoritative empty render clears the error state and resets the rung', async () => {
     const panel = await newPanel();
     const state = internals(panel);
-    state.retryAttempt = 3;
+    const { retry } = establishErrorState(state);
 
     state.renderArticles([]);
 
     expect(state.content.querySelector('.empty-state'), 'non-vacuity: the empty state painted').not.toBeNull();
-    expect(state.retryAttempt, 'an empty payload proves no recovery; the rung must survive').toBe(3);
+    await expectErrorUiCleared(state, retry);
+    expect(state.retryAttempt, 'an authoritative empty result resets the rung').toBe(0);
     panel.destroy();
   });
 
   it('a non-empty render is a proven recovery and resets the rung', async () => {
     const panel = await newPanel();
     const state = internals(panel);
-    state.retryAttempt = 3;
+    const { retry } = establishErrorState(state);
 
     state.renderArticles([article('https://example.com/a')]);
 
     expect(state.content.querySelector('.gdelt-intel-articles')).not.toBeNull();
+    await expectErrorUiCleared(state, retry);
     expect(state.retryAttempt, 'fresh articles ARE a recovery; the reset must not regress').toBe(0);
     panel.destroy();
   });
@@ -112,12 +140,13 @@ describe('GdeltIntelPanel retry backoff (#6679)', () => {
       articles: [article('https://example.com/cached')],
       fetchedAt: new Date(),
     });
-    state.retryAttempt = 3;
+    const { retry, retryRung } = establishErrorState(state);
 
     state.selectTopic(otherTopic);
 
     expect(state.content.querySelector('.gdelt-intel-articles'), 'non-vacuity: the cached articles painted').not.toBeNull();
-    expect(state.retryAttempt, 'a cache replay proves nothing about the failing fetch').toBe(3);
+    await expectErrorUiCleared(state, retry);
+    expect(state.retryAttempt, 'a cache replay preserves the prior rung').toBe(retryRung);
     panel.destroy();
   });
 
@@ -129,12 +158,13 @@ describe('GdeltIntelPanel retry backoff (#6679)', () => {
     const panel = await newPanel();
     const state = internals(panel);
     const otherTopic = getIntelTopics()[1]!;
-    state.retryAttempt = 3;
+    const { retry } = establishErrorState(state);
 
     state.selectTopic(otherTopic);
     await vi.advanceTimersByTimeAsync(0);
 
     expect(state.content.querySelector('.gdelt-intel-articles')).not.toBeNull();
+    await expectErrorUiCleared(state, retry);
     expect(state.retryAttempt, 'a fresh successful fetch resets the ladder').toBe(0);
     panel.destroy();
   });

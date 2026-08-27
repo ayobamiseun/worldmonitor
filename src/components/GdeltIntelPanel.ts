@@ -148,13 +148,10 @@ export class GdeltIntelPanel extends Panel {
 
   private renderArticles(articles: GdeltArticle[]): void {
     if (articles.length === 0) {
-      // fetchGdeltArticles reports RPC failure as a resolved [] (breaker +
-      // emptyGdeltFallback), so an empty list may be a swallowed outage
-      // (#6679 instance B) — render the empty state without crediting the
-      // upstream with a recovery it never proved.
-      this.withRetryBackoffPreserved(() => {
-        this.setContentNodes(h('div', { className: 'empty-state' }, t('components.gdelt.empty')));
-      });
+      // An empty article response is an authoritative settled state. It must
+      // clear any visible error and its pending retry just like a non-empty
+      // response does.
+      this.setContentNodes(h('div', { className: 'empty-state' }, t('components.gdelt.empty')));
       return;
     }
 
