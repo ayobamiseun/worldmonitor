@@ -1027,12 +1027,12 @@ export class Panel {
    * Run a content write WITHOUT crediting the upstream with a recovery
    * (#6679). The setContent* helpers clear the whole error state — chip,
    * countdown, AND the exponential-backoff rung — because a success render
-   * normally proves the upstream recovered. Two kinds of render prove no such
-   * thing: replaying a cache while the live fetch still fails, and rendering
-   * a swallowed failure (an upstream that reports outages as an empty
-   * payload). Wrapping those writes here keeps the visible clears while a
-   * still-failing upstream keeps its rung instead of dropping back to the
-   * 15s floor. Safe to nest; the setContent* clear is synchronous, so the
+   * normally proves the upstream recovered. Replaying a cache while the live
+   * fetch still fails proves no such thing. Wrapping that write here keeps the
+   * visible clears while the still-failing upstream keeps its rung instead of
+   * dropping back to the 15s floor. Callers must know from the result's
+   * provenance that the write is non-authoritative; an empty payload alone is
+   * not enough. Safe to nest; the setContent* clear is synchronous, so the
    * restore cannot race a debounced write.
    */
   protected withRetryBackoffPreserved(write: () => void): void {
