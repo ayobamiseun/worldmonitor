@@ -493,15 +493,16 @@ describe('pre-push wiring: the hook must consume these decisions', () => {
 
 describe('base-guard fetches lazily and only to disprove a violation (#6764)', () => {
   // The old hook fetched origin on EVERY push (2s warm, 72s cold) to protect
-  // a guard that almost never fires. base-guard counts against the cached
-  // remote-tracking ref and fetches only when that cached count already looks
-  // like a violation (or the ref is missing) — sound because a fetch can only
-  // move origin/<base> forward, so the ahead-count can only shrink.
+  // a guard that almost never fires. base-guard keeps the zero-fetch shortcut
+  // for protected main, but refreshes mutable stacked bases before accepting a
+  // cached pass. A suspected violation (or missing ref) is fetched and
+  // recounted as well.
   //
   // Every case runs the real script with a stub `git` first on PATH that logs
   // fetch invocations before delegating to the real binary, so "no fetch
   // happened" is an executed fact, not a source grep.
   const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  const REAL_NODE = process.execPath;
 
   function makeCloneWithOrigin({ aheadCommits = 1 } = {}) {
     const root = mkdtempSync(join(tmpdir(), 'wm-base-guard-'));
@@ -531,16 +532,16 @@ describe('base-guard fetches lazily and only to disprove a violation (#6764)', (
       `#!/bin/sh\nif [ "$1" = fetch ]; then echo fetch >> "${fetchLog}"; fi\nexec "${REAL_GIT}" "$@"\n`,
       { mode: 0o755 },
     );
-    return { clone, stubDir, fetchLog };
+    return { root, clone, stubDir, fetchLog };
   }
 
-  function baseGuard({ clone, stubDir }, args) {
+  function baseGuard({ clone, stubDir }, args, { path = `${stubDir}:${process.env.PATH}`, ...extraEnv } = {}) {
     let status = 0;
     let stdout = '';
     try {
       stdout = execFileSync('bash', [SCRIPT, 'base-guard', ...args], {
         cwd: clone,
-        env: isolatedGitEnv({ PATH: `${stubDir}:${process.env.PATH}` }),
+        env: isolatedGitEnv({ PATH: path, ...extraEnv }),
         encoding: 'utf8',
       });
     } catch (err) {
@@ -559,6 +560,24 @@ describe('base-guard fetches lazily and only to disprove a violation (#6764)', (
     }
   }
 
+  function makeTimeoutlessPath({ root, fetchLog }) {
+    const stubDir = join(root, 'timeoutless-bin');
+    mkdirSync(stubDir, { recursive: true });
+    writeFileSync(
+      join(stubDir, 'git'),
+      `#!/bin/sh\n` +
+        `if [ "$1" = fetch ]; then echo fetch >> "${fetchLog}"; exec /bin/sleep 1000; fi\n` +
+        `exec "${REAL_GIT}" "$@"\n`,
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      join(stubDir, 'node'),
+      `#!/bin/sh\nexec "${REAL_NODE}" "$@"\n`,
+      { mode: 0o755 },
+    );
+    return stubDir;
+  }
+
   test('a cached ahead-count within the limit performs NO fetch', () => {
     const fixture = makeCloneWithOrigin({ aheadCommits: 1 });
     const result = baseGuard(fixture, ['main', '20']);
@@ -566,6 +585,22 @@ describe('base-guard fetches lazily and only to disprove a violation (#6764)', (
     assert.equal(result.base, 'main');
     assert.equal(result.count, 1);
     assert.equal(fetchCount(fixture), 0, 'the common path must pay no network');
+  });
+
+  test('a force-rewritten stacked base refreshes a cached pass before accepting it', () => {
+    const fixture = makeCloneWithOrigin({ aheadCommits: 25 });
+    const { clone } = fixture;
+    git(clone, ['push', '--quiet', 'origin', 'feature:stacked']);
+    const cachedBase = git(clone, ['rev-parse', 'feature~1']).trim();
+    git(clone, ['update-ref', 'refs/remotes/origin/stacked', cachedBase]);
+
+    const rewrittenBase = git(clone, ['rev-parse', 'feature~25']).trim();
+    git(clone, ['push', '--quiet', '--force', 'origin', `${rewrittenBase}:stacked`]);
+
+    const result = baseGuard(fixture, ['stacked', '20']);
+    assert.equal(result.status, 3, 'a mutable base must be checked against its live ref');
+    assert.equal(result.count, 25);
+    assert.ok(fetchCount(fixture) >= 1, 'stacked bases must refresh even when the cached count passes');
   });
 
   test('a genuine violation still fails, after a corrective fetch confirmed it', () => {
@@ -602,6 +637,33 @@ describe('base-guard fetches lazily and only to disprove a violation (#6764)', (
     assert.equal(result.status, 0);
     assert.equal(result.count, 1);
     assert.ok(fetchCount(fixture) >= 1);
+  });
+
+  test('fetches stay bounded when neither timeout nor gtimeout is on PATH', () => {
+    for (const [label, aheadCommits, removeRef] of [
+      ['cached violation', 25, false],
+      ['missing remote-tracking ref', 1, true],
+    ]) {
+      const fixture = makeCloneWithOrigin({ aheadCommits });
+      if (removeRef) git(fixture.clone, ['update-ref', '-d', 'refs/remotes/origin/main']);
+      const path = makeTimeoutlessPath(fixture);
+      const started = Date.now();
+      const result = baseGuard(fixture, ['main', '20'], {
+        path: `${path}:/bin`,
+        WM_PREPUSH_FETCH_TIMEOUT_MS: '200',
+      });
+
+      const elapsed = Date.now() - started;
+      assert.ok(elapsed < 3000, `${label} must return after the portable deadline`);
+      assert.ok(fetchCount(fixture) >= 1, `${label} must exercise the corrective fetch (result=${JSON.stringify(result)})`);
+      if (removeRef) {
+        assert.equal(result.status, 0);
+        assert.equal(result.base, 'main');
+      } else {
+        assert.equal(result.status, 3);
+        assert.equal(result.count, 25);
+      }
+    }
   });
 
   test('an unresolvable base falls back to origin/main, like the hook always did', () => {

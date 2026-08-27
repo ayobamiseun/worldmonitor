@@ -86,11 +86,29 @@ if [ -n "$BRANCH" ] && [ "$BRANCH" != "main" ] && [ "$BRANCH" != "master" ]; the
   # is a real pass. Decision + fixtures live in scripts/prepush-attest.sh
   # (`base-guard`), where tests/prepush-attest.test.mjs executes them against
   # real git fixtures instead of grepping this hook.
-  GUARD_OUT=$(bash scripts/prepush-attest.sh base-guard "$BASE_REF" 20) || true
+  GUARD_STATUS=0
+  GUARD_OUT=$(bash scripts/prepush-attest.sh base-guard "$BASE_REF" 20) || GUARD_STATUS=$?
+  case "$GUARD_STATUS" in
+    0 | 3) ;;
+    *)
+      echo "ERROR: branch-contamination guard failed (status $GUARD_STATUS); refusing to push."
+      exit 1
+      ;;
+  esac
+  if ! printf '%s' "$GUARD_OUT" | awk -F '\t' '
+    NR != 1 { exit 1 }
+    NF != 2 || $1 == "" || $2 !~ /^[0-9]+$/ { exit 1 }
+    END { if (NR != 1) exit 1 }
+  ' >/dev/null; then
+    echo "ERROR: branch-contamination guard returned malformed output; refusing to push."
+    exit 1
+  fi
   BASE_REF=$(printf '%s' "$GUARD_OUT" | cut -f1)
-  BASE_REF="${BASE_REF:-main}"
   COMMIT_COUNT=$(printf '%s' "$GUARD_OUT" | cut -f2)
-  COMMIT_COUNT="${COMMIT_COUNT:-0}"
+  if [ "$GUARD_STATUS" -eq 3 ] && ! [ "$COMMIT_COUNT" -gt 20 ] 2>/dev/null; then
+    echo "ERROR: branch-contamination guard returned an inconsistent result; refusing to push."
+    exit 1
+  fi
   if [ "$COMMIT_COUNT" -gt 20 ]; then
     echo ""
     echo "============================================================"
