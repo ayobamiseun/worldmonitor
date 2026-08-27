@@ -539,7 +539,7 @@ describe('base-guard fetches lazily and only to disprove a violation (#6764)', (
     let status = 0;
     let stdout = '';
     try {
-      stdout = execFileSync('bash', [SCRIPT, 'base-guard', ...args], {
+      stdout = execFileSync('/bin/bash', [SCRIPT, 'base-guard', ...args], {
         cwd: clone,
         env: isolatedGitEnv({ PATH: path, ...extraEnv }),
         encoding: 'utf8',
@@ -649,7 +649,7 @@ describe('base-guard fetches lazily and only to disprove a violation (#6764)', (
       const path = makeTimeoutlessPath(fixture);
       const started = Date.now();
       const result = baseGuard(fixture, ['main', '20'], {
-        path: `${path}:/bin`,
+        path,
         WM_PREPUSH_FETCH_TIMEOUT_MS: '200',
       });
 
