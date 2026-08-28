@@ -50,6 +50,10 @@ interface UserPrefsDeps {
     convexUrl: string,
     options: ConstructorParameters<typeof ConvexHttpClient>[1],
   ) => UserPrefsConvexClient;
+  // In the seam so tests can assert on the CAPTURE itself (#7140): the
+  // tolerance skip's console.warn is a weaker proxy — deleting the early
+  // return while keeping the log would still pass a log-based test.
+  captureSilentError: typeof captureSilentError;
 }
 
 function createDefaultUserPrefsDeps(): UserPrefsDeps {
@@ -58,10 +62,28 @@ function createDefaultUserPrefsDeps(): UserPrefsDeps {
     checkScopedRateLimit,
     createConvexClient: (convexUrl, options) =>
       new ConvexHttpClient(convexUrl, options) as UserPrefsConvexClient,
+    captureSilentError,
   };
 }
 
 let userPrefsDeps: UserPrefsDeps = createDefaultUserPrefsDeps();
+
+/**
+ * The Two-Verifier Seam invariant (#7097, CONCEPTS.md): a token the edge
+ * accepted only inside its bounded clockTolerance can age past Convex's own
+ * leeway and be refused there. That 401 is expected near-expiry traffic, not
+ * Clerk-vs-Convex auth drift, and it is deliberately kept OUT of the
+ * WORLDMONITOR-QK (convex_auth_drift) capture by this predicate rather than
+ * by any edge 401 — the `warning`-level downgrade on that bucket only holds
+ * while QK contains genuine drift. One predicate for both the GET and POST
+ * branches so the two halves of the invariant cannot drift apart (#7140).
+ */
+function isExpectedNearExpiry401(
+  kind: string,
+  session: { acceptedWithinClockTolerance?: true },
+): boolean {
+  return kind === 'UNAUTHENTICATED' && session.acceptedWithinClockTolerance === true;
+}
 
 export function __setUserPrefsDepsForTests(overrides: Partial<UserPrefsDeps> | null): void {
   userPrefsDeps = overrides
@@ -258,14 +280,14 @@ export default async function handler(
       // Re-archiving as anything that cannot reopen silently deletes the
       // only escalation path this `warning` level leaves.
       if (kind === 'UNAUTHENTICATED') {
-        if (session.acceptedWithinClockTolerance) {
+        if (isExpectedNearExpiry401(kind, session)) {
           console.warn(
             '[user-prefs] GET 401 for token accepted within edge clock tolerance (expected near-expiry, not drift)',
           );
           return jsonResponse({ error: 'UNAUTHENTICATED' }, 401, cors);
         }
         console.warn('[user-prefs] GET convex auth drift:', err);
-        captureSilentError(err, buildSentryContext(err, msg, {
+        userPrefsDeps.captureSilentError(err, buildSentryContext(err, msg, {
           method: 'GET', convexFn: 'userPreferences:getPreferences',
           userId: session.userId, variant, ctx,
           level: 'warning',
@@ -280,7 +302,7 @@ export default async function handler(
         // transient external-system event doesn't drown the error
         // dashboard or page on-call (WORLDMONITOR-QA).
         console.warn('[user-prefs] GET convex service unavailable:', msg);
-        captureSilentError(err, buildSentryContext(err, msg, {
+        userPrefsDeps.captureSilentError(err, buildSentryContext(err, msg, {
           method: 'GET', convexFn: 'userPreferences:getPreferences',
           userId: session.userId, variant, ctx,
           level: 'warning',
@@ -288,7 +310,7 @@ export default async function handler(
         return jsonResponse({ error: 'SERVICE_UNAVAILABLE' }, 503, { ...cors, 'Retry-After': '5' });
       }
       console.error('[user-prefs] GET error:', err);
-      captureSilentError(err, buildSentryContext(err, msg, {
+      userPrefsDeps.captureSilentError(err, buildSentryContext(err, msg, {
         method: 'GET', convexFn: 'userPreferences:getPreferences',
         userId: session.userId, variant, ctx,
       }));
@@ -392,14 +414,14 @@ export default async function handler(
       // bucket with no auth regression at all. That is what the May–July 2026
       // 13.6x ramp was; see
       // docs/solutions/integration-issues/convex-auth-drift-ramp-was-stacked-clerk-token-cache.md.
-      if (session.acceptedWithinClockTolerance) {
+      if (isExpectedNearExpiry401(kind, session)) {
         console.warn(
           '[user-prefs] POST 401 for token accepted within edge clock tolerance (expected near-expiry, not drift)',
         );
         return finish(jsonResponse({ error: 'UNAUTHENTICATED' }, 401, cors));
       }
       console.warn('[user-prefs] POST convex auth drift:', err);
-      captureSilentError(err, buildSentryContext(err, msg, {
+      userPrefsDeps.captureSilentError(err, buildSentryContext(err, msg, {
         method: 'POST', convexFn: 'userPreferences:setPreferences',
         userId: session.userId, variant: body.variant, ctx,
         schemaVersion: typeof body.schemaVersion === 'number' ? body.schemaVersion : null,
@@ -415,7 +437,7 @@ export default async function handler(
       // `level: 'warning'` so the expected transient external-system
       // event stays queryable but doesn't page on-call (WORLDMONITOR-QA).
       console.warn('[user-prefs] POST convex service unavailable:', msg);
-      captureSilentError(err, buildSentryContext(err, msg, {
+      userPrefsDeps.captureSilentError(err, buildSentryContext(err, msg, {
         method: 'POST', convexFn: 'userPreferences:setPreferences',
         userId: session.userId, variant: body.variant, ctx,
         schemaVersion: typeof body.schemaVersion === 'number' ? body.schemaVersion : null,
@@ -426,7 +448,7 @@ export default async function handler(
       return finish(jsonResponse({ error: 'SERVICE_UNAVAILABLE' }, 503, { ...cors, 'Retry-After': '5' }));
     }
     console.error('[user-prefs] POST error:', err);
-    captureSilentError(err, buildSentryContext(err, msg, {
+    userPrefsDeps.captureSilentError(err, buildSentryContext(err, msg, {
       method: 'POST', convexFn: 'userPreferences:setPreferences',
       userId: session.userId, variant: body.variant, ctx,
       schemaVersion: typeof body.schemaVersion === 'number' ? body.schemaVersion : null,
@@ -481,7 +503,7 @@ function handleConflictResponse(
   // 316 events / 59 users at 18 distinct actualSyncVersions). At
   // level=error it drowned real bugs; level=warning keeps it queryable
   // in Sentry but drops it out of error totals and alerting.
-  captureSilentError(err, buildSentryContext(err, msg, {
+  userPrefsDeps.captureSilentError(err, buildSentryContext(err, msg, {
     method: 'POST',
     convexFn: 'userPreferences:setPreferences',
     userId: opts.userId,
