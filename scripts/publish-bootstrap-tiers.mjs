@@ -6,6 +6,11 @@ import {
   BOOTSTRAP_CACHE_KEYS,
   bootstrapTierKeyNames,
 } from '../shared/bootstrap-tier-keys.js';
+import {
+  canadaAlertsCutoverFallbackValue,
+  extraCanadaAlertsCutoverReadKeys,
+} from '../shared/canada-alerts-cutover.js';
+import { buildBootstrapTierEnvelope } from '../shared/bootstrap-tier-envelope.js';
 import { unwrapEnvelope } from './_seed-envelope-source.mjs';
 import { evaluatePublishedBootstrapVolume } from './_bootstrap-payload-budget.mjs';
 import { compactNaturalEventsDashboardPayload } from './_natural-events-dashboard.mjs';
@@ -75,10 +80,35 @@ function redisCredentials(env) {
   return { url, token };
 }
 
+function parseBootstrapPipelineEntry(entry, index) {
+  if (!entry || typeof entry !== 'object' || !Object.hasOwn(entry, 'result') || entry.error != null) {
+    throw new Error(`Bootstrap Redis pipeline command failed at index ${index}`);
+  }
+
+  if (!entry.result) return { present: false, value: undefined };
+  try {
+    const parsed = JSON.parse(entry.result);
+    if (parsed !== NEG_SENTINEL) {
+      // Presence is independent of the unwrapped value. A well-formed envelope
+      // can unwrap to `data === undefined`; origin still records Map.has(key)
+      // and reports that field missing instead of applying a sibling fallback.
+      return { present: true, value: unwrapEnvelope(parsed).data };
+    }
+  } catch {
+    // Malformed values match /api/bootstrap: omit from data and report missing.
+  }
+  return { present: false, value: undefined };
+}
+
 /**
  * Assemble the exact public `{ data, missing }` payload for an ordered registry.
  * Infrastructure or command-shape failures reject the whole operation; missing,
  * malformed, negative-sentinel values remain per-key misses.
+ *
+ * When `canadaAlerts` is in the registry, the #6659 cutover fallback keys are
+ * also read so a missing `alerts:canada:v1` still hydrates the field — the same
+ * contract `/api/bootstrap` applies on the origin path. KV serving must not
+ * bypass that fallback (#7291).
  */
 export async function assembleBootstrapTierPayload(registry, options = {}) {
   const env = options.env ?? process.env;
@@ -87,6 +117,8 @@ export async function assembleBootstrapTierPayload(registry, options = {}) {
   const { url, token } = redisCredentials(env);
   const names = Object.keys(registry);
   const keys = Object.values(registry);
+  const extraKeys = extraCanadaAlertsCutoverReadKeys(keys, BOOTSTRAP_CACHE_KEYS.canadaAlerts);
+  const readKeys = extraKeys.length > 0 ? [...keys, ...extraKeys] : keys;
   const response = await fetchFn(`${url}/pipeline`, {
     method: 'POST',
     headers: {
@@ -94,7 +126,7 @@ export async function assembleBootstrapTierPayload(registry, options = {}) {
       'Content-Type': 'application/json',
       'User-Agent': 'WorldMonitor Bootstrap Publisher/1.0',
     },
-    body: JSON.stringify(keys.map(key => ['GET', key])),
+    body: JSON.stringify(readKeys.map(key => ['GET', key])),
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
@@ -102,27 +134,23 @@ export async function assembleBootstrapTierPayload(registry, options = {}) {
   }
 
   const results = await response.json();
-  if (!Array.isArray(results) || results.length !== keys.length) {
+  if (!Array.isArray(results) || results.length !== readKeys.length) {
     throw new Error('Bootstrap Redis pipeline returned the wrong result count');
+  }
+
+  const valuesByKey = new Map();
+  for (let index = 0; index < readKeys.length; index += 1) {
+    const parsed = parseBootstrapPipelineEntry(results[index], index);
+    if (parsed.present) valuesByKey.set(readKeys[index], parsed.value);
   }
 
   const data = {};
   const missing = [];
   for (let index = 0; index < names.length; index += 1) {
-    const entry = results[index];
-    if (!entry || typeof entry !== 'object' || !Object.hasOwn(entry, 'result') || entry.error != null) {
-      throw new Error(`Bootstrap Redis pipeline command failed at index ${index}`);
-    }
-
-    let value;
-    if (entry.result) {
-      try {
-        const parsed = JSON.parse(entry.result);
-        if (parsed !== NEG_SENTINEL) value = unwrapEnvelope(parsed).data;
-      } catch {
-        // Malformed values match /api/bootstrap: omit from data and report missing.
-      }
-    }
+    let value = keys[index] === BOOTSTRAP_CACHE_KEYS.canadaAlerts
+      && !valuesByKey.has(BOOTSTRAP_CACHE_KEYS.canadaAlerts)
+      ? canadaAlertsCutoverFallbackValue(valuesByKey)
+      : valuesByKey.get(keys[index]);
 
     if (value === undefined) {
       missing.push(names[index]);
@@ -238,7 +266,7 @@ export async function publishBootstrapTier(tier, options = {}) {
   if (!storage) throw new Error('Bootstrap publisher R2 credentials are missing');
 
   const generatedAt = (options.now ?? Date.now)();
-  const envelope = { generatedAt, tier, payload };
+  const envelope = buildBootstrapTierEnvelope({ generatedAt, tier, payload });
   const putObject = options.putObject ?? putR2JsonObject;
   const write = await putObject(storage, `${tier}.json`, envelope, {
     tier,
