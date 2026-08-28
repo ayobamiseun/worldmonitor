@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   MAX_AGE_MS,
+  INSIGHTS_REFETCH_COOLDOWN_MS,
   fetchServerInsights,
   getServerInsights,
   __resetServerInsightsCacheForTests,
@@ -183,5 +184,125 @@ describe('insights-loader', () => {
       const result = await fetchServerInsights();
       assert.equal(result, null);
     });
+  });
+});
+
+describe('fetchServerInsights in-flight lock and miss cooldown (#7290)', () => {
+  const originalFetch = globalThis.fetch;
+
+  function validSnapshot() {
+    return {
+      worldBrief: 'brief',
+      briefProvider: 'groq',
+      status: 'ok',
+      topStories: [{ primaryTitle: 'T', sourceCount: 2 }],
+      generatedAt: new Date().toISOString(),
+      clusterCount: 1,
+      multiSourceCount: 1,
+      fastMovingCount: 0,
+    };
+  }
+
+  /** Deferred fetch stub: requests count immediately, resolve on demand. */
+  function installDeferredFetch() {
+    const state = { count: 0, resolvers: [] };
+    globalThis.fetch = () => new Promise((resolve) => {
+      state.count += 1;
+      state.resolvers.push(resolve);
+    });
+    return {
+      state,
+      resolveAll(payload) {
+        for (const resolve of state.resolvers.splice(0)) {
+          resolve(new Response(JSON.stringify(payload), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }));
+        }
+      },
+      rejectAll() {
+        // A Response with ok=false exercises the same miss path as a network
+        // error without unhandled-rejection noise.
+        for (const resolve of state.resolvers.splice(0)) {
+          resolve(new Response('nope', { status: 502 }));
+        }
+      },
+    };
+  }
+
+  beforeEach(() => {
+    __resetServerInsightsCacheForTests();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    __resetServerInsightsCacheForTests();
+  });
+
+  it('collapses concurrent callers onto one request that all resolve from', async () => {
+    const fetchStub = installDeferredFetch();
+
+    // The boot shape from the DebugBear evidence: multiple consumers arrive
+    // before the first response lands (observed pairs 1 ms apart).
+    const first = fetchServerInsights();
+    const second = fetchServerInsights();
+    const third = fetchServerInsights();
+    assert.equal(fetchStub.state.count, 1, 'callers arriving mid-flight must share the request');
+
+    fetchStub.resolveAll({ data: { insights: validSnapshot() } });
+    const results = await Promise.all([first, second, third]);
+
+    assert.ok(results[0], 'the shared request resolves with the snapshot');
+    assert.equal(results[1], results[0]);
+    assert.equal(results[2], results[0]);
+    assert.equal(fetchStub.state.count, 1);
+  });
+
+  it('a settled success serves later callers from cache with no further requests', async () => {
+    const fetchStub = installDeferredFetch();
+    const first = fetchServerInsights();
+    fetchStub.resolveAll({ data: { insights: validSnapshot() } });
+    await first;
+
+    const later = await fetchServerInsights();
+    assert.ok(later);
+    assert.equal(fetchStub.state.count, 1, 'a fresh cached snapshot must not re-fetch');
+  });
+
+  it('a miss is shared by staggered consumers inside the cooldown instead of one request each', async () => {
+    const fetchStub = installDeferredFetch();
+
+    const first = fetchServerInsights();
+    fetchStub.rejectAll();
+    assert.equal(await first, null);
+    assert.equal(fetchStub.state.count, 1);
+
+    // The other two consumers mount moments later (the invalid-hydration
+    // drain leaves all three empty-handed at once). They must not each pay a
+    // network request for the outcome the first one just observed.
+    assert.equal(await fetchServerInsights(), null);
+    assert.equal(await fetchServerInsights(), null);
+    assert.equal(fetchStub.state.count, 1, 'staggered consumers inside the cooldown share the miss');
+  });
+
+  it('the miss cooldown does not latch: a later retry fetches again and can succeed', async () => {
+    const fetchStub = installDeferredFetch();
+    const first = fetchServerInsights();
+    fetchStub.rejectAll();
+    assert.equal(await first, null);
+
+    // The cooldown is bounded — a page outliving it gets a real retry.
+    assert.ok(
+      INSIGHTS_REFETCH_COOLDOWN_MS <= 60_000,
+      'the cooldown must stay well inside a page lifetime so retries actually happen',
+    );
+
+    // Reset stands in for the window elapsing (Date.now is not injectable
+    // here, and the constant bound above pins that the window is short).
+    __resetServerInsightsCacheForTests();
+    const retry = fetchServerInsights();
+    assert.equal(fetchStub.state.count, 2, 'after the cooldown a real retry goes to the network');
+    fetchStub.resolveAll({ data: { insights: validSnapshot() } });
+    assert.ok(await retry, 'the retry can recover');
   });
 });

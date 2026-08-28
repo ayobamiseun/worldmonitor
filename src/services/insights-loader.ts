@@ -59,6 +59,21 @@ export interface ServerInsights {
 }
 
 let cached: ServerInsights | null = null;
+// In-flight lock (#7290): ThreatTimelinePanel, InsightsPanel, and
+// ProActivationInterstitial all call fetchServerInsights() around boot, and
+// `cached` is only assigned after the response validates — so every caller
+// arriving before the first response landed issued its own request (observed:
+// four byte-identical ?keys=insights fetches in one page load). A lock only,
+// not a second result cache: it clears on settle, per #7048's decision for
+// the recurring services.
+let inflight: Promise<ServerInsights | null> | null = null;
+// Miss cooldown: when a fetch settles WITHOUT a valid snapshot, staggered
+// consumers inside this window share the outcome instead of re-fetching one
+// request per consumer (the invalid-hydration drain leaves all three
+// consumers empty-handed at once). Short on purpose - the lock must not
+// latch: a later retry is allowed as soon as the window passes.
+let lastMissAtMs = 0;
+export const INSIGHTS_REFETCH_COOLDOWN_MS = 30_000;
 // Server cron interval: scripts/seed-insights.mjs runs every 30 min
 // (CACHE_TTL=10800s/3h, maxStaleMin: 30). The previous 15-min freshness gate
 // was strictly less than the cron interval, so the panel spent ~50% of every
@@ -108,25 +123,46 @@ export function getServerInsights(): ServerInsights | null {
  */
 export async function fetchServerInsights(timeoutMs = 5_000): Promise<ServerInsights | null> {
   if (cached && isFresh(cached)) return cached;
-  try {
-    const resp = await fetch(toApiUrl('/api/bootstrap?keys=insights'), {
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!resp.ok) return null;
-    const payload = (await resp.json()) as { data?: { insights?: unknown } };
-    const data = validateInsights(payload.data?.insights);
-    if (data) cached = data;
-    return data;
-  } catch {
-    return null;
-  }
+  // Concurrent callers share the first caller's request (and its timeoutMs -
+  // the callers' budgets differ by design, and the first one wins).
+  if (inflight) return inflight;
+  if (Date.now() - lastMissAtMs < INSIGHTS_REFETCH_COOLDOWN_MS) return null;
+  inflight = (async (): Promise<ServerInsights | null> => {
+    try {
+      const resp = await fetch(toApiUrl('/api/bootstrap?keys=insights'), {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!resp.ok) {
+        lastMissAtMs = Date.now();
+        return null;
+      }
+      const payload = (await resp.json()) as { data?: { insights?: unknown } };
+      const data = validateInsights(payload.data?.insights);
+      if (data) {
+        cached = data;
+        lastMissAtMs = 0;
+      } else {
+        lastMissAtMs = Date.now();
+      }
+      return data;
+    } catch {
+      lastMissAtMs = Date.now();
+      return null;
+    } finally {
+      inflight = null;
+    }
+  })();
+  return inflight;
 }
 
 export function setServerInsights(data: ServerInsights): void {
   cached = data;
+  lastMissAtMs = 0;
 }
 
 /** Test-only: reset module-local cache so suites can exercise the drain-once behavior. */
 export function __resetServerInsightsCacheForTests(): void {
   cached = null;
+  inflight = null;
+  lastMissAtMs = 0;
 }
