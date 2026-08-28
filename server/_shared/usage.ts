@@ -107,7 +107,12 @@ export type RequestReason =
   // entitlement resolution on /mcp: the caller was told 503 + Retry-After.
   // Distinct from auth_401 so a backend outage never reads as a wave of
   // invalid credentials.
-  | 'auth_unavailable';
+  | 'auth_unavailable'
+  // #7277 — server-side misconfiguration surfaced as a 500 CONFIGURATION
+  // response (e.g. an internal-MCP signature presented while
+  // MCP_INTERNAL_HMAC_SECRET is unset). Distinct from auth_401 so a
+  // deployment/configuration incident cannot hide inside caller-auth noise.
+  | 'configuration_error';
 
 export interface RequestEvent {
   _time: string;

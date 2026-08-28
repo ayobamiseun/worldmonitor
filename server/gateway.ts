@@ -1033,8 +1033,11 @@ export function createDomainGateway(
         // Server misconfiguration on the HMAC-attempt path. Surface as 500
         // CONFIGURATION so operators see it; legacy wm_ key path is
         // unaffected because we only enter this branch when the caller
-        // explicitly tried to use the internal-MCP route.
-        emitRequest(500, 'auth_401', null);
+        // explicitly tried to use the internal-MCP route. Telemetry reason is
+        // configuration_error, NOT auth_401 (#7277): recording a missing
+        // server secret as caller authentication failure hides a deployment
+        // incident inside auth-noise dashboards.
+        emitRequest(500, 'configuration_error', null);
         return new Response(
           JSON.stringify({ error: 'CONFIGURATION', detail: 'MCP_INTERNAL_HMAC_SECRET not configured' }),
           { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } },
