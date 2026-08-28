@@ -1648,6 +1648,13 @@ export function createDomainGateway(
       if (isPostToGetCompatibleBodySize(request.headers)) {
         const url = new URL(request.url);
         let oversizedKey: string | null = null;
+        // Key whose value has no query-parameter representation (object, null,
+        // or an array with a non-scalar member) — or '' when the body parses
+        // but is not a JSON object at all. Such a body is rejected whole:
+        // converting the representable subset and dropping the rest would let
+        // a stale client believe a discarded filter was applied (#7276), so a
+        // mixed body is never partially applied.
+        let unsupportedKey: string | null = null;
         try {
           const bodyText = await request.clone().text();
           if (new TextEncoder().encode(bodyText).byteLength >= POST_TO_GET_MAX_BODY_BYTES) {
@@ -1660,16 +1667,51 @@ export function createDomainGateway(
           const body = JSON.parse(bodyText);
           const isScalar = (x: unknown): x is string | number | boolean =>
             typeof x === 'string' || typeof x === 'number' || typeof x === 'boolean';
-          for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
-            if (Array.isArray(v)) {
-              if (v.length > POST_TO_GET_MAX_ARRAY_VALUES_PER_KEY) {
-                oversizedKey = k;
+          if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+            unsupportedKey = '';
+          } else {
+            // Validate everything before applying anything, so url stays
+            // untouched unless the entire body converts.
+            const entries = Object.entries(body as Record<string, unknown>);
+            for (const [k, v] of entries) {
+              if (Array.isArray(v)) {
+                if (v.length > POST_TO_GET_MAX_ARRAY_VALUES_PER_KEY) {
+                  oversizedKey = k;
+                  break;
+                }
+                if (!v.every(isScalar)) {
+                  unsupportedKey = k;
+                  break;
+                }
+              } else if (!isScalar(v)) {
+                unsupportedKey = k;
                 break;
               }
-              v.forEach((item) => { if (isScalar(item)) url.searchParams.append(k, String(item)); });
-            } else if (isScalar(v)) url.searchParams.set(k, String(v));
+            }
+            if (oversizedKey === null && unsupportedKey === null) {
+              for (const [k, v] of entries) {
+                if (Array.isArray(v)) v.forEach((item) => url.searchParams.append(k, String(item)));
+                else url.searchParams.set(k, String(v));
+              }
+            }
           }
-        } catch { /* non-JSON body — preserve legacy POST→GET fallback */ }
+        } catch {
+          // Malformed/non-JSON (including empty) bodies keep the legacy
+          // fallback: the POST converts to a parameterless GET. Stale clients
+          // POST empty bodies to GET-only RPC routes, and since JSON.parse
+          // threw, nothing was applied — all-or-nothing still holds.
+        }
+        if (unsupportedKey !== null) {
+          emitRequest(400, 'malformed_request', null);
+          return new Response(JSON.stringify({
+            error: 'Unsupported value for POST compatibility parameter',
+            ...(unsupportedKey === '' ? {} : { parameter: unsupportedKey }),
+            supported: 'a JSON object whose values are scalars or arrays of scalars',
+          }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
         if (oversizedKey !== null) {
           emitRequest(400, 'malformed_request', null);
           return new Response(JSON.stringify({
