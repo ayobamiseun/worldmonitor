@@ -763,6 +763,27 @@ export function createDomainGateway(
       return buildMarkdownTwinResponse(originalRequest, originalPathname);
     }
 
+    // HEAD = GET semantics with the body omitted (#7275). allowedMethods()
+    // has always ADVERTISED HEAD for every GET route, but nothing could match
+    // one — the gateway answered a self-contradictory `405 Allow: GET, HEAD`.
+    // Re-enter with a GET twin so the ENTIRE pipeline (auth, rate limits,
+    // CORS, cache-tier headers, ETag) runs identically, then drop the body at
+    // the boundary. A HEAD whose path has no GET route falls through the same
+    // 405/404 logic the twin does, with an Allow header that no longer lists
+    // HEAD (allowedMethods only appends it alongside GET).
+    if (originalRequest.method === 'HEAD') {
+      const getTwin = new Request(originalRequest.url, {
+        method: 'GET',
+        headers: originalRequest.headers,
+      });
+      const twinResponse = await handler(getTwin, ctx);
+      return new Response(null, {
+        status: twinResponse.status,
+        statusText: twinResponse.statusText,
+        headers: twinResponse.headers,
+      });
+    }
+
     let request = stripClientUserIdHeader(originalRequest);
     const rawPathname = new URL(request.url).pathname;
     const pathname = rawPathname.length > 1 ? rawPathname.replace(/\/+$/, '') : rawPathname;
