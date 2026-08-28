@@ -50,10 +50,6 @@ interface UserPrefsDeps {
     convexUrl: string,
     options: ConstructorParameters<typeof ConvexHttpClient>[1],
   ) => UserPrefsConvexClient;
-  // In the seam so tests can assert on the CAPTURE itself (#7140): the
-  // tolerance skip's console.warn is a weaker proxy — deleting the early
-  // return while keeping the log would still pass a log-based test.
-  captureSilentError: typeof captureSilentError;
 }
 
 function createDefaultUserPrefsDeps(): UserPrefsDeps {
@@ -62,7 +58,6 @@ function createDefaultUserPrefsDeps(): UserPrefsDeps {
     checkScopedRateLimit,
     createConvexClient: (convexUrl, options) =>
       new ConvexHttpClient(convexUrl, options) as UserPrefsConvexClient,
-    captureSilentError,
   };
 }
 
@@ -287,7 +282,7 @@ export default async function handler(
           return jsonResponse({ error: 'UNAUTHENTICATED' }, 401, cors);
         }
         console.warn('[user-prefs] GET convex auth drift:', err);
-        userPrefsDeps.captureSilentError(err, buildSentryContext(err, msg, {
+        captureSilentError(err, buildSentryContext(err, msg, {
           method: 'GET', convexFn: 'userPreferences:getPreferences',
           userId: session.userId, variant, ctx,
           level: 'warning',
@@ -302,7 +297,7 @@ export default async function handler(
         // transient external-system event doesn't drown the error
         // dashboard or page on-call (WORLDMONITOR-QA).
         console.warn('[user-prefs] GET convex service unavailable:', msg);
-        userPrefsDeps.captureSilentError(err, buildSentryContext(err, msg, {
+        captureSilentError(err, buildSentryContext(err, msg, {
           method: 'GET', convexFn: 'userPreferences:getPreferences',
           userId: session.userId, variant, ctx,
           level: 'warning',
@@ -310,7 +305,7 @@ export default async function handler(
         return jsonResponse({ error: 'SERVICE_UNAVAILABLE' }, 503, { ...cors, 'Retry-After': '5' });
       }
       console.error('[user-prefs] GET error:', err);
-      userPrefsDeps.captureSilentError(err, buildSentryContext(err, msg, {
+      captureSilentError(err, buildSentryContext(err, msg, {
         method: 'GET', convexFn: 'userPreferences:getPreferences',
         userId: session.userId, variant, ctx,
       }));
@@ -421,7 +416,7 @@ export default async function handler(
         return finish(jsonResponse({ error: 'UNAUTHENTICATED' }, 401, cors));
       }
       console.warn('[user-prefs] POST convex auth drift:', err);
-      userPrefsDeps.captureSilentError(err, buildSentryContext(err, msg, {
+      captureSilentError(err, buildSentryContext(err, msg, {
         method: 'POST', convexFn: 'userPreferences:setPreferences',
         userId: session.userId, variant: body.variant, ctx,
         schemaVersion: typeof body.schemaVersion === 'number' ? body.schemaVersion : null,
@@ -437,7 +432,7 @@ export default async function handler(
       // `level: 'warning'` so the expected transient external-system
       // event stays queryable but doesn't page on-call (WORLDMONITOR-QA).
       console.warn('[user-prefs] POST convex service unavailable:', msg);
-      userPrefsDeps.captureSilentError(err, buildSentryContext(err, msg, {
+      captureSilentError(err, buildSentryContext(err, msg, {
         method: 'POST', convexFn: 'userPreferences:setPreferences',
         userId: session.userId, variant: body.variant, ctx,
         schemaVersion: typeof body.schemaVersion === 'number' ? body.schemaVersion : null,
@@ -448,7 +443,7 @@ export default async function handler(
       return finish(jsonResponse({ error: 'SERVICE_UNAVAILABLE' }, 503, { ...cors, 'Retry-After': '5' }));
     }
     console.error('[user-prefs] POST error:', err);
-    userPrefsDeps.captureSilentError(err, buildSentryContext(err, msg, {
+    captureSilentError(err, buildSentryContext(err, msg, {
       method: 'POST', convexFn: 'userPreferences:setPreferences',
       userId: session.userId, variant: body.variant, ctx,
       schemaVersion: typeof body.schemaVersion === 'number' ? body.schemaVersion : null,
@@ -503,7 +498,7 @@ function handleConflictResponse(
   // 316 events / 59 users at 18 distinct actualSyncVersions). At
   // level=error it drowned real bugs; level=warning keeps it queryable
   // in Sentry but drops it out of error totals and alerting.
-  userPrefsDeps.captureSilentError(err, buildSentryContext(err, msg, {
+  captureSilentError(err, buildSentryContext(err, msg, {
     method: 'POST',
     convexFn: 'userPreferences:setPreferences',
     userId: opts.userId,
