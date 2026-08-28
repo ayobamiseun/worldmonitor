@@ -4,8 +4,9 @@
  * The gateway answers the HMAC-attempt path correctly (500 CONFIGURATION),
  * but telemetry classified the server-side configuration failure as caller
  * authentication failure — hiding a deployment incident inside auth-noise
- * dashboards. The reason is now `configuration_error`; a malformed signature
- * with the secret CONFIGURED keeps the authentication reason.
+ * dashboards. The reason is now `hmac_secret_unconfigured` (#7281); a
+ * malformed signature with the secret CONFIGURED keeps the authentication
+ * reason.
  *
  * Asserted at the transport: USAGE_TELEMETRY=1 + a stubbed Axiom ingest
  * capture the exact event the gateway emits, via the ctx.waitUntil promises.
@@ -75,7 +76,7 @@ function makeSignedShapeRequest(): Request {
 }
 
 describe('gateway HMAC configuration telemetry (#7277)', () => {
-  it('a missing MCP_INTERNAL_HMAC_SECRET emits configuration_error, not auth_401', async () => {
+  it('a missing MCP_INTERNAL_HMAC_SECRET emits hmac_secret_unconfigured, not auth_401', async () => {
     delete process.env.MCP_INTERNAL_HMAC_SECRET;
     delete process.env.MCP_PRO_GRANT_HMAC_SECRET;
     const events = installTelemetryCapture();
@@ -96,7 +97,7 @@ describe('gateway HMAC configuration telemetry (#7277)', () => {
     assert.equal(event.status, 500);
     assert.equal(
       event.reason,
-      'configuration_error',
+      'hmac_secret_unconfigured',
       'a server-side config failure must not be classified as caller auth failure',
     );
   });
