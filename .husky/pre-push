@@ -386,11 +386,11 @@ TYPECHECK_INPUTS=(src shared tests e2e types scripts middleware.ts index.html vi
 TYPECHECK_API_INPUTS=(api server shared src/generated scripts middleware.ts 'tsconfig*.json' package.json package-lock.json)
 LINT_MD_INPUTS=(':(glob)**/*.md' '.markdownlint*' package.json)
 # `make generate` also runs every OpenAPI injector, and those injectors
-# read shared generation contracts. Listing only
+# read shared and gateway-adjacent generation contracts. Listing only
 # scripts/generate-request-validation.mjs made an injector-only amend
-# keep the previous key and skip regeneration (#7236). `scripts` and
-# `shared` are sound supersets (worst case a spurious re-run).
-PROTO_INPUTS=(proto Makefile scripts src/generated docs/api shared)
+# keep the previous key and skip regeneration (#7236). These are sound
+# supersets of the generator inputs (worst case a spurious re-run).
+PROTO_INPUTS=(proto Makefile scripts src/generated docs/api shared server src/shared)
 PRO_TEST_INPUTS=(pro-test convex/config/productCatalog.ts scripts/generate-product-config.mjs src/config/products.generated.ts src/config/product-ids.generated.ts)
 
 # A fresh worktree's install is part of the expensive phase too. Keep it under

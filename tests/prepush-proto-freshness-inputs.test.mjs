@@ -1,10 +1,10 @@
 // Regression for the proto-freshness per-gate cache (#7236 P1).
 //
 // `make generate` is not just `buf generate` + request-validation. It also
-// runs every OpenAPI injector, and those injectors read shared generation
-// contracts. If PROTO_INPUTS or the proto trigger omit those files, a green
-// proto run can be amended with an injector/contract edit and the hook will
-// skip `make generate`, pushing stale docs/api.
+// runs every OpenAPI injector, and those injectors read shared and
+// gateway-adjacent generation contracts. If PROTO_INPUTS or the proto trigger
+// omit those files, a green proto run can be amended with an injector/contract
+// edit and the hook will skip `make generate`, pushing stale docs/api.
 //
 // This suite scrapes the Makefile recipe and the hook. It does not run
 // `make generate`. Coverage is checked with the same `git ls-files` pathspec
@@ -43,7 +43,7 @@ function walkScriptReads(absPath, inputs, seen = new Set()) {
   if (seen.has(absPath) || !existsSync(absPath)) return;
   seen.add(absPath);
   const source = readFileSync(absPath, 'utf8');
-  for (const match of source.matchAll(/['"]((?:shared|scripts)\/[^'"]+)['"]/g)) {
+  for (const match of source.matchAll(/['"]((?:shared|scripts|server|src\/shared)\/[^'"]+)['"]/g)) {
     const rel = match[1];
     const abs = join(ROOT, rel);
     if (!existsSync(abs)) continue;
@@ -55,7 +55,12 @@ function walkScriptReads(absPath, inputs, seen = new Set()) {
     for (const candidate of [resolved, `${resolved}.mjs`, `${resolved}.js`, `${resolved}.ts`]) {
       if (!existsSync(candidate) || !candidate.startsWith(`${ROOT}/`)) continue;
       const rel = relative(ROOT, candidate);
-      if (!rel.startsWith('scripts/') && !rel.startsWith('shared/')) continue;
+      if (
+        !rel.startsWith('scripts/')
+        && !rel.startsWith('shared/')
+        && !rel.startsWith('server/')
+        && !rel.startsWith('src/shared/')
+      ) continue;
       inputs.add(rel);
       walkScriptReads(candidate, inputs, seen);
     }
@@ -109,6 +114,10 @@ function makeProtoInputRepo() {
   write('src/generated/client.ts', 'export {}\n');
   write('docs/api/worldmonitor.openapi.yaml', 'openapi: 3.1.0\n');
   write('shared/openapi-filter-param-contracts.json', '{}\n');
+  write('server/gateway.ts', 'export const PUBLIC_NO_AUTH_RPC_PATHS = new Set<string>();\n');
+  write('server/_shared/entitlement-check.ts', 'export const ENDPOINT_ENTITLEMENTS = new Map<string, number>();\n');
+  write('server/_shared/idempotency.ts', 'export const IDEMPOTENCY_EXEMPT_RPC_PATHS = new Set<string>();\n');
+  write('src/shared/premium-paths.ts', 'export const PREMIUM_RPC_PATHS = new Set<string>();\n');
   git(['add', '-A']);
   git(['commit', '--quiet', '-m', 'base']);
   const cache = join(root, '.git', 'wm-prepush-gate-cache');
@@ -127,7 +136,7 @@ function makeProtoInputRepo() {
   return { root, write, attest };
 }
 
-describe('proto-freshness inputs cover every make generate script and shared contract', () => {
+describe('proto-freshness inputs cover every make generate script and generation contract', () => {
   const protoInputs = extractBashArray(HOOK, 'PROTO_INPUTS');
   const consumed = generateConsumedPaths();
   const covered = filesCoveredByPathspecs(protoInputs);
@@ -141,9 +150,13 @@ describe('proto-freshness inputs cover every make generate script and shared con
       consumed.some((path) => path.startsWith('shared/') || path.startsWith('scripts/lib/')),
       'at least one injector must still read a shared generation contract',
     );
+    assert.ok(
+      consumed.some((path) => path.startsWith('server/') || path.startsWith('src/shared/')),
+      'at least one injector helper must still read a gateway-adjacent generation contract',
+    );
   });
 
-  test('PROTO_INPUTS pathspecs cover every generate script and shared contract it reads', () => {
+  test('PROTO_INPUTS pathspecs cover every generate script and generation contract it reads', () => {
     const missing = consumed.filter((path) => !covered.has(path));
     assert.deepEqual(
       missing,
@@ -183,5 +196,13 @@ describe('proto-freshness inputs cover every make generate script and shared con
     assert.equal(fx.attest('gate-write'), 0);
     fx.write('shared/openapi-filter-param-contracts.json', '{"changed":true}\n');
     assert.equal(fx.attest('gate-read'), 3, 'a shared-contract amend must miss so make generate runs again');
+  });
+
+  test('editing a gateway-adjacent generation contract invalidates a previously green proto-freshness key', () => {
+    const fx = makeProtoInputRepo();
+    fixtures.push(fx.root);
+    assert.equal(fx.attest('gate-write'), 0);
+    fx.write('server/gateway.ts', 'export const PUBLIC_NO_AUTH_RPC_PATHS = new Set<string>(["/api/probe"]);\n');
+    assert.equal(fx.attest('gate-read'), 3, 'a gateway-contract amend must miss so make generate runs again');
   });
 });
