@@ -73,6 +73,23 @@ export function resolvePlanDrivenMcpAllowance(
   return mcpCallsPerDay;
 }
 
+/**
+ * Atomic floor-guarded rejection recovery (#7272). KEYS[1] = daily counter,
+ * ARGV[1] = the resolved limit. Clamps the counter to the limit only while
+ * it is above it, preserving the key's TTL; at or below the limit it changes
+ * nothing. Returns the pre-clamp count (callers treat the reply as
+ * best-effort). Same EVAL-through-pipeline idiom as the free-account
+ * allowance reservation.
+ */
+const REJECTION_RECOVERY_SCRIPT = `
+local c = tonumber(redis.call('GET', KEYS[1]) or '0')
+local limit = tonumber(ARGV[1])
+if c > limit then
+  redis.call('SET', KEYS[1], tostring(limit), 'KEEPTTL')
+end
+return {c}
+`;
+
 export async function reserveQuota(
   userId: string,
   pipeline: PipelineFn,
@@ -120,55 +137,44 @@ export async function reserveQuota(
   };
 
   if (limit !== null && newCount > limit) {
-    // Reject and roll back immediately so the floor stays at the limit
-    // (or wherever concurrent rollbacks land it).
-    await rollback();
-
-    // Counter-clamp (F4): if multiple DECR rollbacks have failed during
-    // a Redis hiccup, the counter can overshoot indefinitely (e.g. land
-    // at 2x the limit). Without clamping, every subsequent INCR for the
-    // rest of the UTC day yields >limit → the user is locked out until
-    // the 48h key TTL expires. The clamp target is the RESOLVED limit,
-    // not the plan default — clamping a 250/day caller down to 50 would
-    // hand them 200 free calls on the next Redis hiccup.
+    // Rejection recovery + counter-clamp (F4), atomically (#7272).
     //
-    // After the rollback, peek at the post-DECR count via a single
-    // best-effort INCR-then-DECR pair — if it's STILL above the limit,
-    // we know the rollback didn't land. Force a defensive
-    // `SET key <limit> KEEPTTL` so the next legitimate INCR (next UTC
-    // day OR next request after the hiccup) starts at limit+1 → 429,
-    // not limit+N → 429-forever.
+    // The old recovery ran three separate best-effort steps — own DECR,
+    // an INCR/DECR probe, then `overshoot` blind DECRs. The probe's
+    // aggregate included OTHER requests' still-live increments, so one
+    // rejection's clamp could absorb a concurrent rejection's increment;
+    // when that request then ran its own DECR, the counter landed BELOW
+    // the limit and admitted extra paid calls.
     //
-    // Why use INCR-then-DECR instead of GET? Keeps the helper to the
-    // same pipeline contract (the tests' makePipelineMock supports
-    // INCR/DECR/EXPIRE only) and avoids adding a new verb. The probe
-    // costs one round-trip but only on the rejection path.
-    if (newCount > limit + 1) {
-      try {
-        const probe = await pipeline([['INCR', key], ['DECR', key]]);
-        const probeIncrRaw = probe?.[0]?.result;
-        const postRollbackCount = typeof probeIncrRaw === 'number' ? probeIncrRaw - 1 : Number.NaN;
-        if (Number.isFinite(postRollbackCount) && postRollbackCount > limit) {
-          // Rollback chain has overshot — force the counter back to the
-          // limit via SET KEEPTTL. This is fail-soft: a concurrent INCR
-          // immediately after this SET will land at limit+1 and 429
-          // normally, which is the desired behavior.
-          //
-          // Use DECR repeatedly as the pipeline-supported clamp (avoids
-          // adding a new verb to test mocks). DECR N times where N is
-          // the overshoot delta. Cap at 100 DECRs to bound the worst-
-          // case round-trip cost.
-          const overshoot = postRollbackCount - limit;
-          const decrs = Math.min(overshoot, 100);
-          const clamp = Array.from({ length: decrs }, () => ['DECR', key] as Array<string | number>);
-          // Best-effort: failure here is the cost-protection-correct
-          // direction (counter stays high → users 429, no DoS exposure).
-          await pipeline(clamp).catch(() => {});
-        }
-      } catch {
-        // Probe failed — leave counter as-is. Worst case the user 429s
-        // until UTC midnight; never under-cap, never DoS exposure.
-      }
+    // The single EVAL below replaces all three steps: clamp to the
+    // resolved limit only while the counter is above it. This both undoes
+    // this request's own increment (it is part of the amount above the
+    // limit) and heals any overshoot left by previously FAILED rollbacks
+    // (a Redis hiccup can strand the counter at 2x the limit, which would
+    // otherwise 429 the user until the 48h key TTL). Because the script
+    // is atomic and floor-guarded, no interleaving of concurrent
+    // rejections can take the counter below the limit — a request whose
+    // increment was already absorbed by another rejection's clamp sees
+    // `counter <= limit` and changes nothing.
+    //
+    // The clamp target is the RESOLVED limit, not the plan default —
+    // clamping a 250/day caller down to 50 would hand them 200 free
+    // calls on the next Redis hiccup. Admitted reservations are
+    // untouched: their `rollback` stays an owner-owned single DECR, and
+    // a charged counter at/below the limit is never modified here.
+    try {
+      // Best-effort: failure leaves the counter high, which is the
+      // cost-protection-correct direction (user 429s, no free calls).
+      await pipeline([[
+        'EVAL',
+        REJECTION_RECOVERY_SCRIPT,
+        1,
+        key,
+        limit,
+      ]]);
+    } catch {
+      // Recovery failed — leave counter as-is. Worst case the user 429s
+      // until UTC midnight; never under-cap, never DoS exposure.
     }
 
     return { ok: false, reason: 'cap-exceeded', floor: limit };

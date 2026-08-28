@@ -12,13 +12,12 @@
 // Case 2 — F4 overshoot recovery. With the counter pre-seeded ABOVE the
 // cap (a Redis-hiccup scenario where a prior burst's DECR rollbacks
 // failed and left the counter stuck high), a single over-cap call must
-// drive the counter back DOWN to the cap via the F4 INCR-DECR probe +
-// clamp loop in `reserveQuota`. Without the clamp the user would be
-// 429-locked until the 48 h key TTL. Single-call by design: the F4
-// clamp is sized per-rejection (`Math.min(overshoot, 100)` DECRs), so
-// stacking concurrent rejections each issue their own full clamp pass
-// and over-correct the counter below the cap. That stacked-clamp
-// behaviour is a separate concern and isn't asserted here.
+// drive the counter back DOWN to the cap via the atomic floor-guarded
+// recovery EVAL in `reserveQuota` (#7272). Without the clamp the user
+// would be 429-locked until the 48 h key TTL. Since #7272 stacked
+// concurrent rejections are safe too (the clamp never moves a counter
+// at/below the cap); that cell is asserted by
+// mcp-quota-rejection-clamp.test.mjs.
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import { strict as assert } from 'node:assert';
@@ -120,13 +119,11 @@ describe('api/mcp.ts — concurrent quota reservation (strict clamp)', () => {
   // cap to simulate the scenario the clamp loop is designed for: a prior
   // burst's DECR rollbacks failed and left the counter stuck high.
   // One over-cap tools/call must trigger:
-  //   (1) INCR → newCount = overshoot+1 (above cap+1, so probe runs)
-  //   (2) rollback DECR → counter back to seed
-  //   (3) probe INCR+DECR → reads postRollbackCount = seed
-  //   (4) clamp `seed - cap` DECRs → counter ends at cap exactly
+  //   (1) INCR → newCount = seed+1 (above cap, so recovery runs)
+  //   (2) recovery EVAL sees counter > cap → clamps to cap atomically
   // The discriminating signal is `pipe.count === QUOTA_LIMIT`. Removing
-  // the clamp loop leaves the counter at the seed value (e.g. 80) and
-  // fails this assertion by exact diff.
+  // the clamp leaves the counter at the seed value (e.g. 80) and fails
+  // this assertion by exact diff.
   const PRESEED_OVERSHOOT = 30;
 
   it(`with counter pre-seeded at ${QUOTA_LIMIT + PRESEED_OVERSHOOT} (above cap), a single tools/call drives the F4 clamp; counter converges to exactly ${QUOTA_LIMIT}`, async () => {

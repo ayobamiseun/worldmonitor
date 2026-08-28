@@ -76,6 +76,13 @@ export function makePipelineMock({ initialCount = 0, throwOnIncr = false, throwO
               : Math.max(0, freeLastActivityExpiresAt - Date.now()),
           ],
         });
+      } else if (cmd[0] === 'EVAL' && Number(cmd[2]) === 1) {
+        // #7272 rejection recovery: atomic floor-guarded clamp. ARGV[1] is
+        // the resolved limit; the counter only moves while it is above it.
+        const limit = Number(cmd[4]);
+        const before = counter;
+        if (Number.isFinite(limit) && counter > limit) counter = limit;
+        out.push({ result: [before] });
       } else if (cmd[0] === 'INCR') {
         counter += 1;
         out.push({ result: counter });
