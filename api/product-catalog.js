@@ -36,7 +36,7 @@ const DODO_API_KEY = process.env.DODO_API_KEY ?? '';
 const DODO_ENV = process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test_mode';
 const RELAY_SECRET = process.env.RELAY_SHARED_SECRET ?? '';
 
-const CACHE_KEY = 'product-catalog:v2';
+const CACHE_KEY = 'product-catalog:v3';
 const CACHE_TTL = 3600; // 1 hour
 
 function json(body, status, cors, cacheControl, source) {
@@ -73,7 +73,7 @@ async function getFromCache() {
     if (!res.ok) return null;
     const { result } = await res.json();
     if (!result) return null;
-    // Envelope-aware: ais-relay now writes `product-catalog:v2` as {_seed, data}
+    // Envelope-aware: ais-relay writes `product-catalog:v3` as {_seed, data}
     // (PR #3097). Return the bare payload so clients see the legacy
     // {tiers, fetchedAt, cachedUntil, priceSource} shape. Pre-contract bare
     // values pass through unchanged.
@@ -81,7 +81,7 @@ async function getFromCache() {
   } catch { return null; }
 }
 
-// This handler is READ-ONLY on `product-catalog:v2` on purpose — no setCache
+// This handler is READ-ONLY on `product-catalog:v3` on purpose — no setCache
 // here. The Railway ais-relay seed loop owns the key (envelope shape, longer
 // TTL; PR #3097), and the Dodo fallback path below says so explicitly:
 // "Don't write to Redis — let the Railway seed own that key". A writer here
