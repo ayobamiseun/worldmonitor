@@ -67,11 +67,16 @@ let cached: ServerInsights | null = null;
 // not a second result cache: it clears on settle, per #7048's decision for
 // the recurring services.
 let inflight: Promise<ServerInsights | null> | null = null;
-// Miss cooldown: when a fetch settles WITHOUT a valid snapshot, staggered
-// consumers inside this window share the outcome instead of re-fetching one
-// request per consumer (the invalid-hydration drain leaves all three
-// consumers empty-handed at once). Short on purpose - the lock must not
-// latch: a later retry is allowed as soon as the window passes.
+// Miss cooldown: when the server ANSWERS without a valid snapshot (non-2xx,
+// or 2xx with an invalid/stale payload), staggered consumers inside this
+// window share the outcome instead of re-fetching one request per consumer
+// (the invalid-hydration drain leaves all three consumers empty-handed at
+// once, and the CDN would serve the same body again). Short on purpose - the
+// lock must not latch: a later retry is allowed as soon as the window
+// passes. A THROWN fetch (offline, abort/timeout) deliberately does NOT arm
+// the cooldown: that class is transient, and the panels' refresh contract
+// (threat-timeline-panel.test.mts) is that the next explicit refresh after a
+// network failure recovers immediately.
 let lastMissAtMs = 0;
 export const INSIGHTS_REFETCH_COOLDOWN_MS = 30_000;
 // Server cron interval: scripts/seed-insights.mjs runs every 30 min
@@ -146,7 +151,8 @@ export async function fetchServerInsights(timeoutMs = 5_000): Promise<ServerInsi
       }
       return data;
     } catch {
-      lastMissAtMs = Date.now();
+      // Transient failure (offline, abort/timeout): no cooldown — the next
+      // explicit refresh must be free to retry and recover immediately.
       return null;
     } finally {
       inflight = null;

@@ -285,6 +285,27 @@ describe('fetchServerInsights in-flight lock and miss cooldown (#7290)', () => {
     assert.equal(fetchStub.state.count, 1, 'staggered consumers inside the cooldown share the miss');
   });
 
+  it('a THROWN fetch does not arm the cooldown: the next refresh retries and recovers immediately', async () => {
+    // Pins the panels' refresh contract (threat-timeline-panel.test.mts):
+    // after a transient network failure, the very next explicit refresh must
+    // reach the network and can recover — only answered misses (non-2xx or
+    // invalid payload) arm the cooldown.
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('bootstrap unavailable');
+      return new Response(JSON.stringify({ data: { insights: validSnapshot() } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+
+    assert.equal(await fetchServerInsights(), null, 'the thrown fetch settles as a miss');
+    const recovered = await fetchServerInsights();
+    assert.equal(calls, 2, 'the immediate retry must reach the network');
+    assert.ok(recovered, 'the retry recovers');
+  });
+
   it('the miss cooldown does not latch: a later retry fetches again and can succeed', async () => {
     const fetchStub = installDeferredFetch();
     const first = fetchServerInsights();
