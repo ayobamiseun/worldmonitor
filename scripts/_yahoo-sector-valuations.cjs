@@ -46,8 +46,9 @@ const METRICS_REFRESH_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 // is metered and whose exhaustion has taken the seeder fleet down before.
 const DEFAULT_MAX_EXIT_ATTEMPTS = 4;
 // Where the BATCH TIER should start next: either the exit with the best full-set
-// coverage or the first exit after a fully exhausted search window. This does
-// not change the per-symbol tier above it, which still uses the configured exit.
+// coverage or the first exit after a fully exhausted search window. The batch
+// is the ONLY proxy path when it is available — the per-symbol tier defers its
+// proxy leg to it (#6279).
 const PREFERRED_EXIT_KEY = 'market:sectors:valuations:proxy-exit';
 const PREFERRED_EXIT_TTL = 24 * 3600;
 // Redis carries the preference across processes and restarts. This process-local
@@ -464,6 +465,18 @@ async function collectV7Valuations(
   const diagnostics = [];
   const valuationSources = new Set();
   let winningExitAttempt = null;
+  // With a batch fallback available, the per-symbol tier skips its proxy leg
+  // (#6279): the truncation it would be retrying is a property of the exit
+  // IP, and the per-symbol leg only ever reaches the CONFIGURED exit — so on
+  // a cycle whose pinned exit truncates, those requests are metered Decodo
+  // spend and BATCH_BUDGET_MS the rotating batch no longer has, for symbols
+  // they cannot recover. Uncovered symbols fall through to the batch below,
+  // the single proxy path with one exit policy — which is also the path that
+  // records and renews the remembered exit, so the recorder runs strictly
+  // more often than before. A narrower injected client with no batch method
+  // keeps the leg: dropping it would remove that client's only proxy path.
+  const deferProxyToBatch = typeof client?.fetchV7BatchAcrossExits === 'function'
+    || typeof client?.fetchV7BatchDetailed === 'function';
   for (const s of symbols) {
     let result;
     if (deadlineAt != null && now() >= deadlineAt) {
@@ -473,7 +486,7 @@ async function collectV7Valuations(
         diagnostics: [{ route: 'v7Quote', attempts: 0, responseClass: 'deadline_exceeded', failure: 'valuation_budget_exceeded' }],
       };
     } else if (client?.fetchV7Detailed) {
-      result = await client.fetchV7Detailed(s, { deadlineAt });
+      result = await client.fetchV7Detailed(s, { deadlineAt, skipProxy: deferProxyToBatch });
     } else {
       const direct = await fetchYahooV7QuoteDirect(s, { userAgent });
       const routeDiagnostics = [{
@@ -519,14 +532,9 @@ async function collectV7Valuations(
   // degrades to a single attempt on its own when no rotator is wired. It exists
   // for callers that inject a narrower client object (today: test doubles), so
   // that supplying only the older method still works.
-  // KNOWN GAP: the per-symbol loop above still reaches the proxy on the
-  // CONFIGURED exit, not the remembered one, so on a cycle whose pinned exit is
-  // truncating it spends a handful of proxy requests that cannot recover those
-  // symbols before this batch runs. Routing that leg through the remembered exit
-  // (or dropping it and letting everything uncovered fall to this batch) would
-  // remove the waste, but it would also stop the batch running on healthy
-  // cycles -- and the batch is what refreshes the remembered exit. That is a
-  // design change with its own failure modes, deliberately not bundled here.
+  // The per-symbol loop above deliberately never reaches the proxy when this
+  // batch exists (#6279) — this is the single proxy path, so the exit policy
+  // and the remembered-exit recording live in exactly one place.
   const batchSymbols = symbols.filter((symbol) => !freshVals[symbol]);
   const rotatingBatch = typeof client?.fetchV7BatchAcrossExits === 'function';
   if (
@@ -1201,6 +1209,11 @@ class YahooQuoteSummaryClient {
     // repeating it would re-read the same Railway IP that already came back
     // truncated, for no new information and one wasted request per exit.
     skipDirect = false,
+    // When set, stop after the direct leg: the caller has a batch fallback
+    // whose exit rotation is the only proxy path that can recover an
+    // exit-truncated response, so a proxy request here on the configured exit
+    // would be spent on symbols it cannot recover (#6279).
+    skipProxy = false,
   }) {
     const diagnostics = [];
     const direct = skipDirect
@@ -1225,6 +1238,14 @@ class YahooQuoteSummaryClient {
       }
     }
 
+    if (skipProxy) {
+      return {
+        ...attributedDirect,
+        diagnostics,
+        proxyAttempted: false,
+        proxyKind: 'skipped_for_batch',
+      };
+    }
     const proxy = proxyOverride == null ? this.resolveProxyString() : proxyOverride;
     if (!proxy) {
       return {
@@ -1317,7 +1338,7 @@ class YahooQuoteSummaryClient {
     return result.kind === 'success' ? result.value : null;
   }
 
-  async fetchV7Detailed(symbol, { deadlineAt = null } = {}) {
+  async fetchV7Detailed(symbol, { deadlineAt = null, skipProxy = false } = {}) {
     return this._fetchRoute('v7Quote', symbol, {
       buildUrl: (ticker, crumb) => {
         const query = new URLSearchParams({ symbols: ticker, crumb });
@@ -1326,6 +1347,7 @@ class YahooQuoteSummaryClient {
       parseResponse: parseV7Quote,
       source: 'yahoo_v7_quote_authenticated',
       deadlineAt,
+      skipProxy,
     });
   }
 
@@ -1760,9 +1782,8 @@ async function collectSectorValuations({
   // The BATCH TIER's next starting exit may be either the best full-set coverage
   // winner or the continuation after an exhausted window. A coverage winner
   // collapses the ~3.3-exit blind search to 1; a continuation ensures the next
-  // cycle explores new exits. This does not change the per-symbol tier below,
-  // which still uses the configured exit -- see the follow-up noted on that
-  // loop.
+  // cycle explores new exits. The per-symbol tier below defers its proxy leg
+  // to this batch whenever the client carries one (#6279).
   //
   // Only read it when something can act on it: a client without exit rotation
   // would spend a Redis round-trip per cycle on a value it cannot use.
