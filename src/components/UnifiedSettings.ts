@@ -44,7 +44,7 @@ import {
 import { hasPremiumAccess } from '@/services/panel-gating';
 import { getSubscription, isSubscriptionLoaded, onSubscriptionChange, openBillingPortal, prereserveBillingPortalTab } from '@/services/billing';
 import { BusinessSeatsSection } from '@/components/BusinessSeatsSection';
-import { deriveBillingUxState, getReactivationHref } from '@/services/billing-state';
+import { deriveBillingUxState, derivePlanStatusTone, getReactivationHref } from '@/services/billing-state';
 import { createApiKey, listApiKeys, revokeApiKey, type ApiKeyInfo } from '@/services/api-keys';
 import { listMcpClients, revokeMcpClient, fetchMcpQuota, type McpClientInfo, type McpQuota } from '@/services/mcp-clients';
 import {
@@ -1013,15 +1013,13 @@ export class UnifiedSettings {
         return this.renderPlanCheckingState();
       }
       const planName = sub?.displayName ?? 'Pro';
-      // A Business Pro grant invitee has no own subscription row (sub === null)
-      // but IS entitled (we're inside the isEntitled() branch) — treat that as
-      // 'active' rather than falling through to the red "problem" color, which
-      // the ternaries below would otherwise do for every status value that
-      // isn't literally 'active'/'on_hold'.
-      const effectiveStatus = sub?.status ?? 'active';
-      const statusColor = effectiveStatus === 'active' ? '#22c55e' : effectiveStatus === 'on_hold' ? '#eab308' : '#ef4444';
-      const statusBorderColor = effectiveStatus === 'active' ? '#22c55e33' : effectiveStatus === 'on_hold' ? '#eab30833' : '#ef444433';
-      const statusBgColor = effectiveStatus === 'active' ? '#22c55e0a' : effectiveStatus === 'on_hold' ? '#eab3080a' : '#ef44440a';
+      // Colour keys on coverage, not the raw status string (#7315): a
+      // cancelled-but-paid-through subscriber derives the ok tone, matching
+      // the "access until" copy below instead of contradicting it in red.
+      const statusTone = derivePlanStatusTone(sub, getEntitlementState(), Date.now());
+      const statusColor = statusTone === 'ok' ? '#22c55e' : statusTone === 'attention' ? '#eab308' : '#ef4444';
+      const statusBorderColor = `${statusColor}33`;
+      const statusBgColor = `${statusColor}0a`;
 
       let statusLine = '';
       if (sub?.currentPeriodEnd) {

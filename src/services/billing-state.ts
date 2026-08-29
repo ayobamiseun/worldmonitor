@@ -77,6 +77,39 @@ export function deriveBillingUxState(
   return 'lapsed';
 }
 
+/** Tone of the settings billing card's status indicator (#7315). */
+export type PlanStatusTone = 'ok' | 'attention' | 'problem';
+
+/**
+ * Derive the settings billing card's indicator tone.
+ *
+ * Keyed on COVERAGE, not the raw status string (#7315): the old raw-status
+ * ternary painted every status that wasn't literally 'active'/'on_hold' in
+ * the expired red — so a cancelled-but-paid-through subscriber saw a red
+ * card directly above copy saying "access until <date>", a documented
+ * refund-request generator.
+ *
+ *  - 'active' (and a missing row — a Business invitee inside an entitled
+ *    session) → 'ok', unchanged.
+ *  - 'on_hold' → 'attention', unchanged.
+ *  - 'expired' → 'problem': provider-confirmed end of coverage, unchanged.
+ *  - 'cancelled' and any unrecognised status → deriveBillingUxState decides.
+ *    That is the SAME predicate the banners and panel gating use
+ *    (cancelled-but-paid-through derives 'active'), so the card cannot
+ *    drift from the copy beside it, and an unknown status is handled
+ *    explicitly instead of silently falling to red.
+ */
+export function derivePlanStatusTone(
+  sub: BillingSubscriptionSnapshot | null,
+  ent: BillingEntitlementSnapshot | null,
+  now: number,
+): PlanStatusTone {
+  if (sub === null || sub.status === 'active') return 'ok';
+  if (sub.status === 'on_hold') return 'attention';
+  if (sub.status === 'expired') return 'problem';
+  return deriveBillingUxState(sub, ent, now) === 'active' ? 'ok' : 'problem';
+}
+
 // Per-state sessionStorage dismissal keys. Distinct keys so dismissing the
 // pending banner never suppresses a later failed banner. The bare
 // 'pf-banner-dismissed' value predates #4771 and must stay unchanged so
