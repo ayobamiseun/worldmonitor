@@ -811,6 +811,34 @@ export class CachedFetchTimeoutError extends Error {
   }
 }
 
+/**
+ * A fetcher throws this when its own CALLER cancelled the work (deadline,
+ * user abort) — as opposed to the upstream failing (#6475). The cache layer
+ * must not arm the local unavailable backoff for it: an upstream that was
+ * never allowed to answer has not been shown to be unavailable, and arming
+ * would make the NEXT caller's miss read as the provider's failure.
+ */
+export class CachedFetchCancelledError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CachedFetchCancelledError';
+  }
+}
+
+/**
+ * Identifies the local unavailable-backoff short-circuit without matching
+ * text (#6475): the fetcher was NOT run because a recent fetcher failure for
+ * this key armed the 3s backoff. Callers that classify failure provenance
+ * can attribute this to the earlier failure instead of falling through to a
+ * generic reason.
+ */
+export class CachedFetchUnavailableBackoffError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CachedFetchUnavailableBackoffError';
+  }
+}
+
 // Test-only: override the DEFAULT inflight timeout so unit tests can exercise
 // the timeout branch without sleeping for 30s. Per-call `opts.timeoutMs` still
 // wins. No production caller should ever invoke this.
@@ -996,7 +1024,7 @@ async function cachedFetchJsonCore<T extends object>(
     if (hasLocalNegativeCooldown(key)) return { data: null, source: 'cache', leader: false };
   }
   if (hasLocalUnavailableBackoff(key)) {
-    throw new Error(`${callerName} unavailable backoff active for "${key}"`);
+    throw new CachedFetchUnavailableBackoffError(`${callerName} unavailable backoff active for "${key}"`);
   }
 
   const inflightKey = opts?.inflightKey ?? key;
@@ -1074,7 +1102,10 @@ async function cachedFetchJsonCore<T extends object>(
         armLocalNegativeCooldown(key, errorTtlSeconds);
         await setCachedJson(key, NEG_SENTINEL, errorTtlSeconds);
         console.warn(`[redis] ${callerName} fetcher failed for "${key}":`, errMsg(err));
-      } else {
+      } else if (!(err instanceof CachedFetchCancelledError)) {
+        // A cancellation is the CALLER giving up, not the upstream failing —
+        // arming here would bill the next request's miss to a provider that
+        // was never allowed to answer (#6475).
         armLocalUnavailableBackoff(key, FETCH_ERROR_UNAVAILABLE_BACKOFF_SECONDS);
       }
       throw err;
