@@ -20,7 +20,7 @@ import { getVesselSnapshot } from '../../maritime/v1/get-vessel-snapshot';
 import { computeDisruptionScore, scoreToStatus, SEVERITY_SCORE, THREAT_LEVEL } from './_scoring.mjs';
 import { type ThreatLevel, threatLevelToWarRiskTier } from './_insurance-tier';
 import { CHOKEPOINT_STATUS_KEY as REDIS_CACHE_KEY } from '../../../_shared/cache-keys';
-import { FLOW_SOURCES } from '../../../_shared/flow-source';
+import { narrowFlowSource } from '../../../_shared/flow-source';
 const TRANSIT_SUMMARIES_KEY = 'supply_chain:transit-summaries:v1';
 const FLOWS_KEY = 'energy:chokepoint-flows:v1';
 // NOTE: historical fallback via supply_chain:portwatch:v1 / corridorrisk / chokepoint_transits
@@ -350,7 +350,12 @@ interface FlowEstimateEntry { currentMbd: number; baselineMbd: number; flowRatio
 const warnedFlowSources = new Set<string>();
 
 function toFlowSource(value: unknown): FlowSource {
-  if (typeof value === 'string' && FLOW_SOURCES.has(value)) return value as FlowSource;
+  // Delegate the DECISION, not just the member set: a second copy of the
+  // predicate here would let REST and the MCP cache tool answer differently for
+  // the same Redis blob the moment either side learned to trim or case-fold.
+  // This wrapper adds only the REST-side warn (#6113).
+  const narrowed = narrowFlowSource(value);
+  if (narrowed !== 'FLOW_SOURCE_UNSPECIFIED') return narrowed;
   if (value !== undefined && value !== null && value !== '') {
     const seen = String(value);
     if (!warnedFlowSources.has(seen)) {

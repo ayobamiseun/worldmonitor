@@ -15,7 +15,7 @@
  * compile error in each consumer rather than silent drift.
  */
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 
 import { CACHE_TOOLS } from '../api/mcp/registry/cache-tools.ts';
 
@@ -41,34 +41,63 @@ function flowsData() {
         currentMbd: 1.1, baselineMbd: 1.2, flowRatio: 0.917, disrupted: false,
         source: null, hazardAlertLevel: null, hazardAlertName: null,
       },
+      korea_strait: {
+        // `source` key absent ENTIRELY — the case the REST twin pins as
+        // `korea_strait: flow(undefined)` in chokepoint-flow-source-taxonomy
+        // .test.mts. REST emits FLOW_SOURCE_UNSPECIFIED for it, so MCP must
+        // too; a presence guard here would serve the field missing instead.
+        currentMbd: 0.4, baselineMbd: 0.4, flowRatio: 1, disrupted: false,
+        hazardAlertLevel: null, hazardAlertName: null,
+      },
     },
   };
 }
 
 describe('get_chokepoint_status FlowSource taxonomy (#6113)', () => {
+  // Every assertion below reads the RETURNED object, never the argument that
+  // was passed in. api/mcp/dispatch.ts serves `_postFilter`'s return value
+  // (`result = tool._postFilter(structuredClone(data), params)`), so asserting
+  // on the caller's own reference would keep passing if a future refactor
+  // rebuilt entries instead of mutating them — and would keep passing while
+  // un-narrowed sources went out on the wire.
   it('narrows an out-of-taxonomy source to FLOW_SOURCE_UNSPECIFIED and keeps declared values verbatim', () => {
     assert.ok(tool, 'tool must exist in CACHE_TOOLS');
-    const data = flowsData();
 
-    tool._postFilter(data, {});
+    const served = tool._postFilter(flowsData(), {});
 
-    const flows = data['chokepoint-flows'];
+    const flows = served['chokepoint-flows'];
     assert.equal(flows.hormuz_strait.source, 'portwatch-dwt', 'a declared basis passes through untouched');
     assert.equal(
       flows.suez.source, 'FLOW_SOURCE_UNSPECIFIED',
       'an undeclared seeder value must be narrowed, not served verbatim — the schema promise must be kept by the code',
     );
-    assert.equal(flows.panama.source, 'FLOW_SOURCE_UNSPECIFIED', 'a missing basis narrows too');
+    assert.equal(flows.panama.source, 'FLOW_SOURCE_UNSPECIFIED', 'an explicit null basis narrows too');
+    assert.equal(
+      flows.korea_strait.source, 'FLOW_SOURCE_UNSPECIFIED',
+      'an entry that omits `source` entirely must be narrowed, not served with the field missing — REST emits UNSPECIFIED for the same blob',
+    );
     assert.equal(flows.hormuz_strait.currentMbd, 2.6, 'narrowing must not disturb the numeric fields');
   });
 
   it('narrows on the filtered path too (chokepoint param applied)', () => {
-    const data = flowsData();
+    const served = tool._postFilter(flowsData(), { chokepoint: 'suez' });
 
-    tool._postFilter(data, { chokepoint: 'suez' });
+    assert.deepEqual(Object.keys(served['chokepoint-flows']), ['suez']);
+    assert.equal(served['chokepoint-flows'].suez.source, 'FLOW_SOURCE_UNSPECIFIED');
+  });
 
-    assert.deepEqual(Object.keys(data['chokepoint-flows']), ['suez']);
-    assert.equal(data['chokepoint-flows'].suez.source, 'FLOW_SOURCE_UNSPECIFIED');
+  // `dataset` is the one argument shape where selectDatasets (api/mcp/filters
+  // .ts:187-192) builds a genuinely NEW top-level object rather than returning
+  // the input reference — the branch where "assert on input" and "assert on
+  // return" could diverge. Nothing else in this file exercises it.
+  it('narrows on the dataset-selected path, where the returned object is not the input object', () => {
+    const input = flowsData();
+    const served = tool._postFilter(input, { dataset: ['chokepoint-flows'] });
+
+    assert.notEqual(served, input, 'selectDatasets must have built a new top-level object for this case');
+    assert.deepEqual(Object.keys(served), ['chokepoint-flows'], 'only the requested dataset is served');
+    assert.equal(served['chokepoint-flows'].suez.source, 'FLOW_SOURCE_UNSPECIFIED');
+    assert.equal(served['chokepoint-flows'].korea_strait.source, 'FLOW_SOURCE_UNSPECIFIED');
   });
 
   it('leaves an absent or null chokepoint-flows dataset alone', () => {
@@ -78,6 +107,30 @@ describe('get_chokepoint_status FlowSource taxonomy (#6113)', () => {
 
     const missing = {};
     assert.doesNotThrow(() => tool._postFilter(missing, {}));
+  });
+
+  // The guard is `entry && typeof entry === 'object'`; the test above only
+  // covers the dataset itself being null/absent. These are the per-ENTRY
+  // branches — a filter throw is not loud, it is silent: dispatch.ts catches it
+  // and falls back to the RAW un-narrowed blob, so a crash here would quietly
+  // undo the enum guarantee rather than fail the call.
+  it('tolerates null and non-object entries inside a populated map', () => {
+    const data = {
+      'chokepoint-flows': {
+        suez: null,
+        panama: 'not-an-object',
+        hormuz_strait: { currentMbd: 2.6, source: 'satellite-blend' },
+      },
+    };
+
+    const served = tool._postFilter(data, {});
+
+    assert.equal(served['chokepoint-flows'].suez, null, 'a null entry is left alone, not crashed on');
+    assert.equal(served['chokepoint-flows'].panama, 'not-an-object', 'a non-object entry is left alone');
+    assert.equal(
+      served['chokepoint-flows'].hormuz_strait.source, 'FLOW_SOURCE_UNSPECIFIED',
+      'a malformed sibling must not stop the good entry from being narrowed',
+    );
   });
 
   it('declares the closed taxonomy in the output schema an agent discovers', () => {
@@ -92,6 +145,84 @@ describe('get_chokepoint_status FlowSource taxonomy (#6113)', () => {
     // object — the coverage fixture stops passing trivially.
     for (const field of ['currentMbd', 'baselineMbd', 'flowRatio', 'disrupted', 'hazardAlertLevel']) {
       assert.ok(valueSchema.properties[field], `schema must declare ${field}`);
+    }
+  });
+});
+
+/**
+ * #6113's acceptance asks for a test that "drives the MCP tool ... and asserts
+ * the SERVED value is narrowed — not just that the schema validates". The block
+ * above calls `_postFilter` directly, which does not cross the dispatcher: it
+ * misses `structuredClone`, the fail-open try/catch, and JSON serialization.
+ * This drives a real `tools/call` through api/mcp.ts and reads the bytes a
+ * client actually receives, matching the bar the REST twin's own gate sets in
+ * tests/chokepoint-flow-source-taxonomy.test.mts.
+ */
+describe('get_chokepoint_status narrows source end-to-end through tools/call (#6113)', () => {
+  const VALID_KEY = 'wm_test_key_flow_source';
+  const originalFetch = globalThis.fetch;
+  const originalEnv = { ...process.env };
+
+  // An undeclared basis, an explicit null, and a missing key — the three
+  // classes that must all reach the client as FLOW_SOURCE_UNSPECIFIED.
+  const FLOWS = {
+    suez: { currentMbd: 7.6, baselineMbd: 7.6, flowRatio: 1.001, disrupted: false, source: 'satellite-blend' },
+    panama: { currentMbd: 1.1, baselineMbd: 1.2, flowRatio: 0.917, disrupted: false, source: null },
+    korea_strait: { currentMbd: 0.4, baselineMbd: 0.4, flowRatio: 1, disrupted: false },
+    hormuz_strait: { currentMbd: 2.6, baselineMbd: 21, flowRatio: 0.123, disrupted: true, source: 'portwatch-dwt' },
+  };
+
+  beforeEach(() => {
+    process.env.WORLDMONITOR_VALID_KEYS = VALID_KEY;
+    process.env.UPSTASH_REDIS_REST_URL = 'https://fake.upstash.io';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'fake_token';
+
+    globalThis.fetch = async (url, init) => {
+      const u = url.toString();
+      if (u.endsWith('/pipeline')) {
+        const commands = JSON.parse(init.body);
+        return Response.json(commands.map(() => ({ result: 0 })));
+      }
+      if (u.includes(`/get/${encodeURIComponent('energy:chokepoint-flows:v1')}`)) {
+        return Response.json({ result: JSON.stringify(FLOWS) });
+      }
+      // Every other key (the five sibling datasets and all seed-meta reads)
+      // answers empty: this test is about the flows dataset only, and a stale
+      // aggregate does not suppress the payload.
+      return Response.json({ result: null });
+    };
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    for (const k of Object.keys(process.env)) if (!(k in originalEnv)) delete process.env[k];
+    Object.assign(process.env, originalEnv);
+  });
+
+  it('serves no source value outside the declared enum', async () => {
+    const mod = await import(`../api/mcp.ts?t=${Date.now()}-${Math.random()}`);
+
+    const res = await mod.default(new Request('https://worldmonitor.app/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-WorldMonitor-Key': VALID_KEY },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'get_chokepoint_status', arguments: {} },
+      }),
+    }));
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.ok(body.result?.content, 'tools/call must return content');
+    const served = JSON.parse(body.result.content[0].text).data['chokepoint-flows'];
+
+    assert.equal(served.hormuz_strait.source, 'portwatch-dwt', 'a declared basis survives the round trip verbatim');
+    for (const id of ['suez', 'panama', 'korea_strait']) {
+      assert.ok(
+        WIRE_TAXONOMY.includes(served[id].source),
+        `${id} reached the client as "${served[id].source}", outside the enum the outputSchema advertises`,
+      );
+      assert.equal(served[id].source, 'FLOW_SOURCE_UNSPECIFIED');
     }
   });
 });

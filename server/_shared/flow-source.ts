@@ -16,7 +16,15 @@ export const FLOW_SOURCE_MEMBERS: Record<Exclude<FlowSource, 'FLOW_SOURCE_UNSPEC
   'portwatch-counts': true,
 };
 
-export const FLOW_SOURCES: ReadonlySet<string> = new Set(Object.keys(FLOW_SOURCE_MEMBERS));
+/**
+ * Deliberately module-private: `narrowFlowSource` below is the ONLY narrowing
+ * entry point any surface should use. Exporting the raw set invites a second
+ * hand-rolled `FLOW_SOURCES.has(...)` predicate elsewhere, and the axis that
+ * drifts in practice is the predicate (case-folding, trimming, a legacy alias),
+ * not the member list — so sharing the set without sharing the decision would
+ * leave exactly the REST/MCP divergence #6113 exists to close.
+ */
+const FLOW_SOURCES: ReadonlySet<string> = new Set(Object.keys(FLOW_SOURCE_MEMBERS));
 
 /**
  * Every wire value the taxonomy admits, UNSPECIFIED first — the `enum:` list
@@ -33,6 +41,10 @@ export const FLOW_SOURCE_WIRE_VALUES: readonly string[] = [
  * is written by a seeder that deploys independently of any consumer, so a
  * served `source` is not guaranteed to be a declared member — and a closed
  * taxonomy is only honest if the boundary that declares it also enforces it.
+ *
+ * Total over every input, including `undefined` (an entry that omits `source`
+ * entirely): both surfaces must answer FLOW_SOURCE_UNSPECIFIED for that, so no
+ * caller should guard on key presence before calling this.
  */
 export function narrowFlowSource(value: unknown): FlowSource {
   if (typeof value === 'string' && FLOW_SOURCES.has(value)) return value as FlowSource;
