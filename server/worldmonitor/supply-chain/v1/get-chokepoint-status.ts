@@ -20,6 +20,7 @@ import { getVesselSnapshot } from '../../maritime/v1/get-vessel-snapshot';
 import { computeDisruptionScore, scoreToStatus, SEVERITY_SCORE, THREAT_LEVEL } from './_scoring.mjs';
 import { type ThreatLevel, threatLevelToWarRiskTier } from './_insurance-tier';
 import { CHOKEPOINT_STATUS_KEY as REDIS_CACHE_KEY } from '../../../_shared/cache-keys';
+import { FLOW_SOURCES } from '../../../_shared/flow-source';
 const TRANSIT_SUMMARIES_KEY = 'supply_chain:transit-summaries:v1';
 const FLOWS_KEY = 'energy:chokepoint-flows:v1';
 // NOTE: historical fallback via supply_chain:portwatch:v1 / corridorrisk / chokepoint_transits
@@ -323,20 +324,9 @@ interface ChokepointFetchResult {
 
 interface FlowEstimateEntry { currentMbd: number; baselineMbd: number; flowRatio: number; disrupted: boolean; source: string; hazardAlertLevel: string | null; hazardAlertName: string | null }
 
-/**
- * The coverage bases seed-chokepoint-flows.mjs can emit. Declared as an
- * EXHAUSTIVE record over the non-UNSPECIFIED FlowSource members so that adding
- * a member to the proto is a compile error here. A plain `Set<FlowSource>`
- * caught a typo but not an omission — the new member would simply be absent,
- * and this handler would silently strip the very value the proto had just
- * declared legal.
- */
-const FLOW_SOURCE_MEMBERS: Record<Exclude<FlowSource, 'FLOW_SOURCE_UNSPECIFIED'>, true> = {
-  'portwatch-dwt': true,
-  'portwatch-counts': true,
-};
-
-const FLOW_SOURCES: ReadonlySet<string> = new Set(Object.keys(FLOW_SOURCE_MEMBERS));
+// The taxonomy record lives in server/_shared/flow-source.ts (#6113) so this
+// handler and the MCP cache tool narrow and declare from one source of truth;
+// the exhaustive-record compile check moved with it.
 
 /**
  * Narrow the seeder's `source` onto the FlowSource taxonomy the proto declares

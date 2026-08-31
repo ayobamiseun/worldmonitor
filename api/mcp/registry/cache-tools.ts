@@ -14,6 +14,7 @@ import {
   computeCredibilityScore,
 } from '../../../shared/news-credibility.js';
 import { getSourceTier } from '../../../server/_shared/source-tiers';
+import { FLOW_SOURCE_WIRE_VALUES, narrowFlowSource } from '../../../server/_shared/flow-source';
 import { hasRedistributableProviderAttribution } from '../../../shared/provider-redistribution';
 import { CII_RISK_SCORE_CACHE_KEYS } from '../../_cii-risk-cache-keys.js';
 // @ts-expect-error — generated Edge-safe JS mirror; authored types live in shared/bootstrap-tier-keys.d.ts
@@ -2508,11 +2509,38 @@ export const CACHE_TOOLS: ToolDef[] = [
       },
       'chokepoint-flows': {
         type: ['object', 'null'],
-        additionalProperties: { type: 'object' },
+        additionalProperties: { type: 'object', properties: {
+          currentMbd: { type: ['number', 'null'] },
+          baselineMbd: { type: ['number', 'null'] },
+          flowRatio: { type: ['number', 'null'] },
+          disrupted: { type: 'boolean' },
+          // The closed taxonomy #6101 promoted on the REST path; served
+          // values are narrowed onto it in _postFilter below, so this enum
+          // is enforced, not aspirational (#6113).
+          source: { type: 'string', enum: [...FLOW_SOURCE_WIRE_VALUES] },
+          // Raw seeder value, NOT the closed hazard enum — that half is
+          // blocked on sebuf codegen for the REST twin (#6106) and the two
+          // surfaces should adopt it together.
+          hazardAlertLevel: { type: ['string', 'null'] },
+          hazardAlertName: { type: ['string', 'null'] },
+        } },
       },
     }),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     _postFilter: (data, params) => {
+      // Narrow BEFORE any filtering so the declared source enum above is a
+      // property of every served response, exactly as the REST boundary's
+      // narrowServedSources makes it (#6113). The blob is written by a seeder
+      // that deploys independently; an undeclared basis must read as
+      // FLOW_SOURCE_UNSPECIFIED, never leak verbatim.
+      const flows = data['chokepoint-flows'];
+      if (flows && typeof flows === 'object') {
+        for (const entry of Object.values(flows)) {
+          if (entry && typeof entry === 'object' && 'source' in entry) {
+            (entry as { source: unknown }).source = narrowFlowSource((entry as { source: unknown }).source);
+          }
+        }
+      }
       const cp = argStr(params.chokepoint);
       if (cp) {
         mapNested(data, 'transit-summaries', 'summaries', (m) => pickMapKeysLike(m, cp));
