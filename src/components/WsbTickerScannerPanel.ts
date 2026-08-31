@@ -1,4 +1,5 @@
 import { Panel } from './Panel';
+import { bindActivationKeys } from '@/utils/activation';
 import { t } from '@/services/i18n';
 import { ensureHydrated, getHydratedData } from '@/services/bootstrap';
 import { escapeHtml, unsafeRawHtml } from '@/utils/sanitize';
@@ -57,6 +58,10 @@ export class WsbTickerScannerPanel extends Panel {
       }
       this._render();
     });
+    // Keyboard path for the sortable headers (#7023): Enter/Space synthesizes
+    // a click through the delegation above, so sort behavior cannot drift
+    // between mouse and keyboard.
+    bindActivationKeys(this.content, '[data-sort]');
   }
 
   public async fetchData(): Promise<boolean> {
@@ -87,6 +92,12 @@ export class WsbTickerScannerPanel extends Panel {
   private _sorted(): WsbTicker[] {
     const dir = this._sortAsc ? 1 : -1;
     return [...this._tickers].sort((a, b) => dir * (a[this._sortField] - b[this._sortField]));
+  }
+
+  /** aria-sort for a header cell — present only on the active column. */
+  private _ariaSort(field: SortField): string {
+    if (field !== this._sortField) return '';
+    return ` aria-sort="${this._sortAsc ? 'ascending' : 'descending'}"`;
   }
 
   private _sortIndicator(field: SortField): string {
@@ -132,9 +143,9 @@ export class WsbTickerScannerPanel extends Panel {
             <tr style="border-bottom:1px solid var(--border)">
               <th scope="col" style="${headerStyle};text-align:right">#</th>
               <th scope="col" style="${headerStyle};text-align:left">Ticker</th>
-              <th scope="col" style="${headerStyle};text-align:right" data-sort="mentionCount">Mentions${this._sortIndicator('mentionCount')}</th>
-              <th scope="col" style="${headerStyle};text-align:right" data-sort="totalScore">Score${this._sortIndicator('totalScore')}</th>
-              <th scope="col" style="${headerStyle};text-align:left" data-sort="velocityScore">Velocity${this._sortIndicator('velocityScore')}</th>
+              <th scope="col" style="${headerStyle};text-align:right" data-sort="mentionCount" tabindex="0"${this._ariaSort('mentionCount')}>Mentions${this._sortIndicator('mentionCount')}</th>
+              <th scope="col" style="${headerStyle};text-align:right" data-sort="totalScore" tabindex="0"${this._ariaSort('totalScore')}>Score${this._sortIndicator('totalScore')}</th>
+              <th scope="col" style="${headerStyle};text-align:left" data-sort="velocityScore" tabindex="0"${this._ariaSort('velocityScore')}>Velocity${this._sortIndicator('velocityScore')}</th>
               <th scope="col" style="${headerStyle};text-align:left">Source</th>
             </tr>
           </thead>

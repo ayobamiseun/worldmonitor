@@ -1,4 +1,5 @@
 import type { CountryBriefSignals } from '@/types';
+import { bindActivationKeys } from '@/utils/activation';
 import {
   describePropagandaBadge,
   getSourcePropagandaRisk,
@@ -1943,6 +1944,11 @@ export class CountryDeepDivePanel implements CountryBriefPanel {
         const tr = this.el('tr');
         tr.className = `cdp-sector-row${isSelected ? ' cdp-sector-row--selected' : ''}`;
         tr.dataset.hs2 = s.hs2;
+        // Keyboard drill-in (#7023): focusable row + expanded state. No role
+        // — it would override row semantics and break the table for AT (the
+        // #6964 call, same as RouteExplorer's rows).
+        tr.tabIndex = 0;
+        tr.setAttribute('aria-expanded', String(isSelected));
         const sectorCell = this.el('td', 'cdp-sector-label');
         sectorCell.textContent = s.label;
         const flag = DEPENDENCY_FLAG_LABELS[s.dependencyFlag];
@@ -1975,6 +1981,8 @@ export class CountryDeepDivePanel implements CountryBriefPanel {
         if (!row?.dataset.hs2) return;
         this.handleSectorRowClick(row.dataset.hs2);
       });
+      bindActivationKeys(tbody, 'tr.cdp-sector-row');
+
 
       this.tradeExposureBody.append(table);
     } else {
