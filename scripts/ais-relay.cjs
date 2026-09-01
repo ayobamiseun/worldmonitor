@@ -83,7 +83,7 @@ const {
 } = require('./_ingestion-coverage.cjs');
 const { maintainClosedMarketEquityKeys: maintainClosedMarketEquityKeysWithDeps } = require('./shared/closed-market-equity-maintenance.cjs');
 const { getUsEquitySession, isMultiMarketEquityTradingDay } = require('./shared/market-hours.cjs');
-const { mergeLastGoodQuotes, planYahooRefresh } = require('./shared/market-quote-refresh.cjs');
+const { mergeLastGoodQuotes, planYahooRefresh, resolveMergedQuotesAsOf } = require('./shared/market-quote-refresh.cjs');
 // ESM module loaded via require(esm) (Node >= 22.12; relay image is node:24).
 // Same implementation the RPC handler scores with — see the module header for
 // why it lives in shared/ rather than beside the other scoring helpers.
@@ -3103,9 +3103,12 @@ const MARKET_YAHOO_REFRESH_INTERVAL_MS = Math.max(
     : 900_000,
 );
 
+const { loadMarketSeedUniverse } = require('./shared/market-seed-universe.cjs');
 const _stockCfg = requireShared('stocks.json');
-const MARKET_SYMBOLS = _stockCfg.symbols.map((s) => s.symbol);
-const MARKET_META = new Map(_stockCfg.symbols.map((s) => [s.symbol, { name: s.name, display: s.display }]));
+const _stockUniverse = loadMarketSeedUniverse(_stockCfg);
+const MARKET_SYMBOLS = _stockUniverse.allSymbols;
+const MARKET_AUXILIARY_SYMBOLS = _stockUniverse.auxiliarySymbols;
+const MARKET_META = _stockUniverse.metaBySymbol;
 
 const _commodityCfg = requireShared('commodities.json');
 const COMMODITY_SYMBOLS = _commodityCfg.commodities.map(c => c.symbol);
@@ -3333,6 +3336,7 @@ async function seedMarketQuotes() {
     : finnhubSymbols;
   const yahooPlan = planYahooRefresh({
     mandatoryYahooSymbols: yahooSymbols,
+    everyCycleSymbols: MARKET_AUXILIARY_SYMBOLS.filter((s) => YAHOO_ONLY.has(s)),
     missedPrimarySymbols: missedFinnhub,
     nowMs: Date.now(),
     lastRefreshAt: _lastYahooMarketRefreshAt,
@@ -3362,12 +3366,18 @@ async function seedMarketQuotes() {
   const yahooSuccessCount = freshQuotes.length - freshCountBeforeYahoo;
   const coveredByYahoo = finnhubSymbols.every((s) => quotes.some((q) => q.symbol === s));
   const skipped = !FINNHUB_API_KEY && !coveredByYahoo;
-  const payload = { quotes, finnhubSkipped: skipped, skipReason: skipped ? 'FINNHUB_API_KEY not configured' : '', rateLimited: false };
   const redisKey = `market:quotes:v1:${[...MARKET_SYMBOLS].sort().join(',')}`;
   // Compute once and thread through every write below so the envelopes'
   // _seed.fetchedAt and seed-meta.fetchedAt agree for this one publish,
   // instead of each awaited round-trip sampling Date.now() independently.
   const fetchedAt = Date.now();
+  const payload = {
+    quotes,
+    finnhubSkipped: skipped,
+    skipReason: skipped ? 'FINNHUB_API_KEY not configured' : '',
+    rateLimited: false,
+    asOf: resolveMergedQuotesAsOf(freshQuotes, quotes, previousPayload?.asOf, fetchedAt),
+  };
   const ok = await envelopeWrite(redisKey, payload, MARKET_SEED_TTL, { fetchedAt, recordCount: quotes.length, sourceVersion: 'market-stocks' });
   // Bootstrap-friendly fixed key — frontend hydrates from /api/bootstrap without RPC
   const ok2 = await envelopeWrite('market:stocks-bootstrap:v1', payload, MARKET_SEED_TTL, { fetchedAt, recordCount: quotes.length, sourceVersion: 'market-stocks' });
@@ -9417,11 +9427,19 @@ async function seedChokepointTransits() {
     const crossings = chokepointCrossings.get(cp.name) || [];
     const recent = crossings.filter(c => now - c.ts < TRANSIT_WINDOW_MS);
     chokepointCrossings.set(cp.name, recent);
+    // `available` is the same signal seedTransitSummaries encodes by leaving
+    // todayTotal null. Both writers read this one in-memory map and both ship
+    // in a single get-chokepoint-status bundle, so without it one response
+    // carried summaries.suez.todayTotal === null next to
+    // transits["Suez Canal"].total === 0 and an agent's answer depended on
+    // which half it read. The counts stay numeric here because the documented
+    // shape of this key is {tanker, cargo, other, total}.
     transits[cp.name] = {
       tanker: recent.filter(c => c.type === 'tanker').length,
       cargo: recent.filter(c => c.type === 'cargo').length,
       other: recent.filter(c => c.type === 'other').length,
       total: recent.length,
+      available: recent.length > 0,
     };
   }
   const payload = { transits, fetchedAt: now };
@@ -9526,15 +9544,15 @@ async function seedTransitSummaries() {
 
     // Compact summary: no history field. Consumed by get-chokepoint-status on
     // every request, so keep it small.
-    // dataAvailable distinguishes genuine zero-traffic (cpData present, 0
-    // crossings) from zero-state fill (upstream missing this cycle). False
-    // here makes the RPC response explicit and lets the client render a
-    // "data unavailable" indicator instead of silently-empty stat rows.
+    // dataAvailable is PortWatch history presence, not AIS today-counts.
+    // todayTotal comes from the in-memory 24h AIS window; an empty window is
+    // unsupplied, not a published zero-traffic measurement (#7457). Leave the
+    // count absent so PortWatch WoW cannot sit next to a fake 0.
     summaries[cpId] = {
-      todayTotal: relayTransit?.total ?? 0,
-      todayTanker: relayTransit?.tanker ?? 0,
-      todayCargo: relayTransit?.cargo ?? 0,
-      todayOther: relayTransit?.other ?? 0,
+      todayTotal: relayTransit?.total ?? null,
+      todayTanker: relayTransit?.tanker ?? null,
+      todayCargo: relayTransit?.cargo ?? null,
+      todayOther: relayTransit?.other ?? null,
       wowChangePct: cpData?.wowChangePct ?? 0,
       riskLevel: cr?.riskLevel ?? '',
       incidentCount7d: cr?.incidentCount7d ?? 0,

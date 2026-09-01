@@ -37,6 +37,23 @@ import {
   CHANGELOG_PAGINATION_ROBOTS_CONTENT,
   INDEXABLE_ROBOTS_CONTENT,
 } from '../shared/seo-robots.mjs';
+import { getSovereignStatus } from './shared/rankable-universe.mjs';
+// Single source with the browser copy: crawlable-live-tools.mjs is what gets
+// written verbatim to public/tools/live-tools.js, and importing it here is
+// side-effect-free in Node (its only module-scope statement is a
+// `typeof document !== 'undefined'` guard). A mirrored copy could not fail.
+import {
+  publishedTransitCountLabel,
+  withheldTransitCountSentence,
+} from './crawlable-live-tools.mjs';
+import {
+  CHOKEPOINT_CONTENT,
+  CHOKEPOINT_PAGE_CONTENT_PATH,
+  CHOKEPOINT_REGISTRY_OBSERVED_AT,
+  EIA_OIL_TRANSIT_BASELINES,
+  TRADE_ROUTES_OBSERVED_AT,
+} from './chokepoint-page-content.mjs';
+import { EIA_OIL_TRANSIT_BASELINES_PATH } from './chokepoint-eia-baselines.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -75,19 +92,45 @@ export const SOURCE_CATALOG_LASTMOD_PATHS = Object.freeze([
   'shared/publisher-families.js',
   ...FEED_DECLARATION_FILES,
 ]);
+export const CHOKEPOINT_PAGE_LASTMOD_PATHS = Object.freeze([
+  CHOKEPOINT_REGISTRY_PATH,
+  TRADE_ROUTES_PATH,
+  CHOKEPOINT_PAGE_CONTENT_PATH,
+  EIA_OIL_TRANSIT_BASELINES_PATH,
+]);
 // Last substantive change to the shared HTML template/content language. Data
 // families take the later of this version and their own committed source date,
 // so template changes are reflected without pretending every deploy is fresh.
-export const CORPUS_GENERATOR_CONTENT_VERSION = '2026-08-30';
-const COUNTRY_PAGE_CONTENT_VERSION = '2026-08-30';
-const CHOKEPOINT_PAGE_CONTENT_VERSION = '2026-08-30';
+export const CORPUS_GENERATOR_CONTENT_VERSION = '2026-08-31';
+const COUNTRY_PAGE_CONTENT_VERSION = '2026-08-31';
+// Public ranking / confidence gates. Keep aligned with
+// server/worldmonitor/resilience/v1/_shared.ts and
+// docs/methodology/country-resilience-index.mdx.
+export const HEADLINE_RANKING_MIN_COVERAGE = 0.65;
+export const HEADLINE_RANKING_MIN_POPULATION = 200_000;
+export const HEADLINE_RANKING_HIGH_COVERAGE = 0.85;
+export const LOW_CONFIDENCE_MIN_COVERAGE = 0.55;
+export const LOW_CONFIDENCE_MAX_IMPUTATION = 0.40;
+export const RANKING_ELIGIBILITY_CLAUSE = `Ranking requires coverage of at least ${Math.round(HEADLINE_RANKING_MIN_COVERAGE * 100)}%, no low-confidence flag, and either a population of at least ${HEADLINE_RANKING_MIN_POPULATION.toLocaleString('en-US')} or coverage of at least ${Math.round(HEADLINE_RANKING_HIGH_COVERAGE * 100)}%. Low confidence means coverage falls below ${Math.round(LOW_CONFIDENCE_MIN_COVERAGE * 100)}% or imputation share exceeds ${Math.round(LOW_CONFIDENCE_MAX_IMPUTATION * 100)}%.`;
+const RETIRED_DIMENSION_IDS = new Set(['fuelStockDays', 'reserveAdequacy']);
+const UNRANKED_INVENTORY_LIMIT = 12;
+const AVAILABLE_EVIDENCE_LIMIT = 6;
+const CHOKEPOINT_PAGE_CONTENT_VERSION = '2026-09-01';
 const SOURCES_PAGE_CONTENT_VERSION = '2026-08-20';
-// Dataset schema version stamps Dataset JSON-LD shape changes. It must NOT
-// fold into every family's sitemap/page lastmod — that made ~90% of main
-// sitemap entries share one schema-bump date (#7382). Keep it for Dataset
-// dateModified only where a schema change actually lands in the payload.
-const DATASET_SCHEMA_CONTENT_VERSION = '2026-08-30';
-const CRISIS_PAGE_CONTENT_VERSION = '2026-08-30';
+// Dataset schema versions stamp Dataset JSON-LD shape changes, per family. They
+// must NOT fold into every family's sitemap/page lastmod — that made ~90% of main
+// sitemap entries share one schema-bump date (#7382). A family's stamp advances
+// only when a schema change lands in ITS payload, so one shared constant cannot
+// serve them: bumping it for a crisis-only change advertises every untouched
+// chokepoint dataset as modified. Country pages are absent by design — their
+// dateModified is pinned to the snapshot capturedAt as a truthful freshness
+// contract (#7391), so their recrawl signal is COUNTRY_PAGE_CONTENT_VERSION.
+const DATASET_SCHEMA_CONTENT_VERSION = {
+  chokepoint: '2026-08-31',
+  crisis: '2026-08-31',
+  tools: '2026-08-31',
+};
+const CRISIS_PAGE_CONTENT_VERSION = '2026-08-31';
 const TOOLS_PAGE_CONTENT_VERSION = '2026-08-30';
 const DATASET_LICENSE = {
   '@type': 'CreativeWork',
@@ -99,11 +142,37 @@ const CHOKEPOINT_DATASET_DOWNLOAD = 'reference.json';
 const CRISIS_DATASET_DOWNLOAD = 'tracker.json';
 const CONVERGENCE_DATASET_DOWNLOAD = 'reference.json';
 const DATA_CATALOG_FRAGMENT = '#data-catalog';
-const WORLD_MONITOR_ORG = Object.freeze({
+// Role filler for Dataset.creator / DataCatalog.publisher. The `@id` folds every
+// occurrence into the canonical Organization declared on welcome.html (#7459b),
+// but the `@type` + `name` must stay: structured-data parsers resolve `@id` within
+// ONE document, and no generated corpus page declares that node. A bare `@id` here
+// is an unresolvable stub for exactly the naive extractors #7459b set out to serve.
+// This is the same typed-stub-plus-@id shape blog-site/src/layouts/BlogPost.astro
+// already uses for the canonical Person.
+export const WORLD_MONITOR_ORG = Object.freeze({
+  '@id': 'https://www.worldmonitor.app/#organization',
   '@type': 'Organization',
   name: 'World Monitor',
   url: 'https://www.worldmonitor.app/',
 });
+export const WEBSITE_ID = 'https://www.worldmonitor.app/#website';
+const DEFAULT_SPEAKABLE = Object.freeze({
+  '@type': 'SpeakableSpecification',
+  cssSelector: ['h1', '.lede'],
+});
+const PAGE_TYPES_WITH_SPEAKABLE = new Set([
+  'WebPage',
+  'CollectionPage',
+  'ItemPage',
+  'Article',
+  'Report',
+  'BlogPosting',
+]);
+const PAGE_TYPES_WITH_WEBPAGE_ID = new Set([
+  'WebPage',
+  'CollectionPage',
+  'ItemPage',
+]);
 // Approximate monitoring footprint around each registry centroid (degrees).
 // Registry entries are points; GeoShape.box lets crawlers treat the waterway as
 // a corridor envelope rather than a zero-area pin.
@@ -113,83 +182,6 @@ const MAX_TOOL_LATITUDE_SPAN = 45;
 const MAX_TOOL_LONGITUDE_SPAN = 60;
 const META_DESCRIPTION_MIN = 155;
 const META_DESCRIPTION_MAX = 160;
-
-// Hand-authored, human-readable context for each canonical chokepoint, keyed by
-// the registry `id`. `region` describes what the waterway connects (used as the
-// index card subtitle and the "Connects" tile); `blurb` is a factual 2-sentence
-// summary used as the page lede; `glossarySlug` cross-links
-// to the matching /blog/glossary/ term where one exists. Keeping this beside the
-// registry (rather than in it) keeps the app bundle free of prose it never uses.
-const CHOKEPOINT_CONTENT = {
-  suez: {
-    region: 'Mediterranean ↔ Red Sea',
-    glossarySlug: 'suez-canal',
-    blurb:
-      'The Suez Canal is the artificial waterway linking the Mediterranean and the Red Sea, giving shipping the shortest route between Europe and Asia without rounding Africa. Its southern approach runs through Bab el-Mandeb, so a blockage or a Red Sea security threat that reroutes traffic around the Cape of Good Hope adds days of transit and materially raises freight costs.',
-  },
-  malacca_strait: {
-    region: 'Indian Ocean ↔ South China Sea',
-    glossarySlug: 'strait-of-malacca',
-    blurb:
-      'The Strait of Malacca runs between the Malay Peninsula and Sumatra, linking the Indian Ocean to the South China Sea and the Pacific. It is one of the busiest shipping lanes in the world and the main artery for energy and container flows into East Asia, where the alternatives are longer and lower-capacity.',
-  },
-  hormuz_strait: {
-    region: 'Persian Gulf ↔ Gulf of Oman',
-    glossarySlug: 'strait-of-hormuz',
-    blurb:
-      'The Strait of Hormuz is the narrow waterway connecting the Persian Gulf to the Gulf of Oman and the open ocean. It is the single most closely watched energy chokepoint on Earth: about 20% of the world’s seaborne crude oil — and a large share of LNG — has no alternative route out of the Gulf.',
-  },
-  bab_el_mandeb: {
-    region: 'Red Sea ↔ Gulf of Aden',
-    blurb:
-      'Bab el-Mandeb is the strait between the Horn of Africa and the Arabian Peninsula that connects the Red Sea to the Gulf of Aden and the Indian Ocean. Every ship using the Suez Canal route also transits Bab el-Mandeb, so attacks or instability here push traffic onto the far longer Cape of Good Hope route.',
-  },
-  panama: {
-    region: 'Atlantic ↔ Pacific',
-    blurb:
-      'The Panama Canal cuts across the Isthmus of Panama to link the Atlantic and Pacific oceans, saving vessels the long voyage around South America. Its lock system depends on freshwater from Gatún Lake, so drought can throttle daily transits and reshape Asia–US East Coast routing.',
-  },
-  taiwan_strait: {
-    region: 'East China Sea ↔ South China Sea',
-    blurb:
-      'The Taiwan Strait separates Taiwan from mainland China and carries a large share of the container traffic moving between North Asia and the rest of the world. Its strategic sensitivity makes any military tension here a first-order risk to global shipping and the semiconductor supply chain.',
-  },
-  cape_of_good_hope: {
-    region: 'Atlantic ↔ Indian Ocean',
-    blurb:
-      'The Cape of Good Hope is the deep-water route around the southern tip of Africa. It has no canal tolls and no width limits, which makes it the default fallback when the Suez–Bab el-Mandeb corridor is disrupted — at the cost of thousands of extra nautical miles and days of transit.',
-  },
-  gibraltar: {
-    region: 'Atlantic ↔ Mediterranean',
-    blurb:
-      'The Strait of Gibraltar is the roughly 14-km-wide gateway between the Atlantic Ocean and the Mediterranean Sea. Every cargo moving between the Mediterranean and the wider ocean — including Suez-bound Europe–Asia traffic — passes through it.',
-  },
-  bosphorus: {
-    region: 'Black Sea ↔ Sea of Marmara',
-    blurb:
-      'The Bosporus Strait runs through Istanbul to connect the Black Sea to the Sea of Marmara and, via the Dardanelles, the Mediterranean. It is the sole maritime outlet for Black Sea grain and Russian oil exports, and passage through it is governed by the Montreux Convention.',
-  },
-  korea_strait: {
-    region: 'East China Sea ↔ Sea of Japan',
-    blurb:
-      'The Korea Strait lies between the Korean Peninsula and the Japanese islands, linking the East China Sea to the Sea of Japan. It is a key passage for North Asian container and energy traffic and a closely watched naval corridor.',
-  },
-  dover_strait: {
-    region: 'English Channel ↔ North Sea',
-    blurb:
-      'The Strait of Dover is the narrowest point of the English Channel, connecting it to the North Sea. It is one of the busiest shipping lanes in the world, funnelling North Sea and Baltic traffic past the coasts of England and France.',
-  },
-  kerch_strait: {
-    region: 'Black Sea ↔ Sea of Azov',
-    blurb:
-      'The Kerch Strait connects the Black Sea to the Sea of Azov and is the only sea route to the Azov ports of Ukraine and Russia. It has been a repeated flashpoint in the Russia–Ukraine conflict, where control of the strait directly gates Azov-basin trade.',
-  },
-  lombok_strait: {
-    region: 'Indian Ocean ↔ Java Sea',
-    blurb:
-      'The Lombok Strait, between Bali and Lombok, is a deep-water alternative to the Malacca–Singapore route. It is favoured by the largest, deepest-draft bulk carriers and serves as a relief valve when Malacca is congested or disrupted.',
-  },
-};
 
 // Search-friendly common names for ISO2 codes whose source identities use a
 // formal long form, truncated token ("Uk", "Korea Rep", "Lao Pdr"), or code.
@@ -364,6 +356,27 @@ function laterDate(...values) {
     .at(-1) ?? null;
 }
 
+/** Observation window for chokepoint Dataset temporalCoverage and table stamps.
+ *  Git lastmod wins when history is present; committed dates keep Docker
+ *  corpus builds (no `.git`) from publishing capturedAt: null. */
+export function resolveChokepointObservation({
+  registryGitLastmod = null,
+  tradeRoutesGitLastmod = null,
+} = {}) {
+  return {
+    capturedAt: laterDate(
+      registryGitLastmod,
+      tradeRoutesGitLastmod,
+      CHOKEPOINT_REGISTRY_OBSERVED_AT,
+      TRADE_ROUTES_OBSERVED_AT,
+    ),
+    volumeObservedAt: laterDate(
+      tradeRoutesGitLastmod,
+      TRADE_ROUTES_OBSERVED_AT,
+    ),
+  };
+}
+
 export function sourcePageLastmod({
   manifestLastmod,
   rendererLastmod,
@@ -487,7 +500,11 @@ function countryDatasetDownload(country, {
   });
 }
 
-function chokepointDatasetDownload(chokepoint, { tradeRoutesById }) {
+function chokepointDatasetDownload(chokepoint, {
+  tradeRoutesById,
+  capturedAt = null,
+  volumeObservedAt = null,
+}) {
   const content = CHOKEPOINT_CONTENT[chokepoint.id] || {};
   const modelledTradeRoutes = chokepoint.routeIds
     .map((id) => tradeRoutesById.get(id))
@@ -508,6 +525,8 @@ function chokepointDatasetDownload(chokepoint, { tradeRoutesById }) {
     region: content.region || null,
     shockModelSupported: chokepoint.shockModelSupported,
     modelledTradeRoutes,
+    capturedAt: capturedAt || null,
+    volumeObservedAt: volumeObservedAt || capturedAt || null,
     source: [CHOKEPOINT_REGISTRY_PATH, TRADE_ROUTES_PATH],
     license: DATASET_LICENSE.url,
   });
@@ -570,9 +589,11 @@ function chokepointGeoShape(lat, lon, halfSpan = CHOKEPOINT_GEO_HALF_SPAN_DEG) {
   return geoShapeBox(lat - halfSpan, lon - halfSpan, lat + halfSpan, lon + halfSpan);
 }
 
+// Google's Dataset parser accepts only Text or a literal Place here — the Country
+// subtype is rejected as "Invalid object type for field spatialCoverage".
 function countrySpatialCoverage(country, bbox) {
   const place = {
-    '@type': 'Country',
+    '@type': 'Place',
     name: country.name,
     identifier: country.code,
   };
@@ -661,6 +682,13 @@ function prettyDate(isoDate) {
   return `${MONTHS[Number(month) - 1]} ${Number(day)}, ${year}`;
 }
 
+function timeMarkup(isoDate, label = prettyDate(isoDate)) {
+  if (typeof isoDate !== 'string' || !/^\d{4}(-\d{2}(-\d{2})?)?$/.test(isoDate)) {
+    return escapeHtml(label);
+  }
+  return `<time datetime="${escapeHtml(isoDate)}">${escapeHtml(label)}</time>`;
+}
+
 function formatPercent(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 'not available';
@@ -738,13 +766,13 @@ function selectMetaDescription(candidates, fallbackCandidates) {
   );
 }
 
-export function countryMetaDescription({ name, rank, rankedCount }) {
+export function countryMetaDescription({ name, rank, rankedCount, lowConfidence = false }) {
   const subjects = [
     `${name} country risk and resilience`,
     `${name} country risk`,
     `${name} risk and resilience`,
   ];
-  const standings = rank == null
+  const unpublishedStandings = lowConfidence
     ? [
       `a low-confidence listing in World Monitor's Country Resilience Index`,
       `a low-confidence listing in World Monitor's resilience index`,
@@ -752,6 +780,15 @@ export function countryMetaDescription({ name, rank, rankedCount }) {
       `a low-confidence World Monitor index listing`,
       `a low-confidence index listing`,
     ]
+    : [
+      `an unpublished listing in World Monitor's Country Resilience Index`,
+      `an unpublished listing in World Monitor's resilience index`,
+      `an unpublished listing in World Monitor's index`,
+      `an unpublished World Monitor index listing`,
+      `an unpublished index listing`,
+    ];
+  const standings = rank == null
+    ? unpublishedStandings
     : [
       `ranked #${rank} of ${rankedCount} in World Monitor's Country Resilience Index`,
       `ranked #${rank} of ${rankedCount} in World Monitor's resilience index`,
@@ -899,8 +936,11 @@ function normalizeCountry(item, sourceStatus, seen, reverseNames) {
     baselineScore: item.baselineScore ?? null,
     stressScore: item.stressScore ?? null,
     stressFactor: item.stressFactor ?? null,
-    level: item.level || (sourceStatus === 'ranked' ? 'unclassified' : 'low-confidence'),
-    lowConfidence: sourceStatus === 'ranked' ? Boolean(item.lowConfidence) : true,
+    level: item.level || (sourceStatus === 'ranked' ? 'unclassified' : 'unpublished'),
+    // Greyed-out rows include covered-ineligible countries. Preserve the
+    // snapshot flag so unpublished copy can name the population/85% rule
+    // instead of calling every unpublished page low-confidence.
+    lowConfidence: Boolean(item.lowConfidence),
     dimensionCoverage: item.dimensionCoverage ?? item.overallCoverage ?? null,
     headlineEligible: item.headlineEligible === true,
     trend: item.trend || 'unknown',
@@ -922,7 +962,12 @@ function normalizeCountries(snapshot, reverseNames) {
   const rankedCodes = new Set(ranked.map((country) => country.code));
   const greyedOut = (snapshot.greyedOut || [])
     .filter((item) => !rankedCodes.has(String(item.countryCode || '').toUpperCase()))
-    .map((item) => normalizeCountry(item, 'low-confidence', seen, reverseNames));
+    .map((item) => normalizeCountry(
+      item,
+      item.lowConfidence ? 'low-confidence' : 'unpublished',
+      seen,
+      reverseNames,
+    ));
 
   return [...ranked, ...greyedOut].sort((a, b) => {
     if (a.rank == null && b.rank == null) return a.name.localeCompare(b.name);
@@ -1019,20 +1064,33 @@ const REGION_LABELS = {
   'east-asia': 'East Asia and the Pacific',
 };
 
+export function compareUnpublishedRankedPeers(left, right, country, regionId, regionsByCode) {
+  const regionDifference = Number(regionsByCode[right.code] === regionId)
+    - Number(regionsByCode[left.code] === regionId);
+  const countryScore = Number(country.overallScore);
+  const leftScore = Number(left.overallScore);
+  const rightScore = Number(right.overallScore);
+  const scoreDistance = Number.isFinite(countryScore)
+    && Number.isFinite(leftScore)
+    && Number.isFinite(rightScore)
+    ? Math.abs(leftScore - countryScore) - Math.abs(rightScore - countryScore)
+    : 0;
+  return regionDifference
+    || scoreDistance
+    || left.rank - right.rank
+    || left.name.localeCompare(right.name);
+}
+
 function addCountryContext(countries, regionsByCode, crises) {
   const ranked = countries.filter((country) => country.rank != null);
   return countries.map((country) => {
     const regionId = regionsByCode[country.code] || 'global';
-    const peerCandidates = country.rank == null
-      ? countries.filter((candidate) => candidate.code !== country.code)
-      : ranked.filter((candidate) => candidate.code !== country.code);
-    const peers = peerCandidates
-      .filter((candidate) => country.rank == null || Number.isFinite(candidate.overallScore))
+    const unpublished = country.rank == null;
+    const peers = ranked
+      .filter((candidate) => candidate.code !== country.code)
       .sort((left, right) => {
-        if (country.rank == null) {
-          const regionDifference = Number(regionsByCode[right.code] === regionId)
-            - Number(regionsByCode[left.code] === regionId);
-          return regionDifference || left.name.localeCompare(right.name);
+        if (unpublished) {
+          return compareUnpublishedRankedPeers(left, right, country, regionId, regionsByCode);
         }
         const distanceDifference = Math.abs(left.rank - country.rank)
           - Math.abs(right.rank - country.rank);
@@ -1041,14 +1099,14 @@ function addCountryContext(countries, regionsByCode, crises) {
           || left.name.localeCompare(right.name);
       })
       .slice(0, 4);
-    const regionalPeers = countries
+    const regionalPeers = (unpublished ? ranked : countries)
       .filter((candidate) => (
         candidate.code !== country.code
         && regionsByCode[candidate.code] === regionId
-        && (country.rank == null || Number.isFinite(candidate.overallScore))
+        && (unpublished || Number.isFinite(candidate.overallScore))
       ))
-      .sort((left, right) => country.rank == null
-        ? left.name.localeCompare(right.name)
+      .sort((left, right) => unpublished
+        ? compareUnpublishedRankedPeers(left, right, country, regionId, regionsByCode)
         : Math.abs(left.overallScore - country.overallScore)
           - Math.abs(right.overallScore - country.overallScore)
           || left.name.localeCompare(right.name))
@@ -1233,43 +1291,43 @@ export async function loadCorpusData({ rootDir = DEFAULT_ROOT } = {}) {
   );
   const glossaryTerms = normalizeGlossaryTerms(GLOSSARY_TERMS);
   const changelog = parseChangelog(readText(rootDir, CHANGELOG_PATH));
+  // Family lastmods are change-dates, not build-dates (#7463). Do not fold
+  // CORPUS_GENERATOR_CONTENT_VERSION into any family. Country and chokepoint
+  // pages include the published pulse, so their lastmod includes its date.
   const countriesLastmod = laterDate(
     resilience.capturedAt,
     livePulse.capturedAt,
     gitFileLastmod(rootDir, COUNTRY_REGIONS_PATH),
-    CORPUS_GENERATOR_CONTENT_VERSION,
     COUNTRY_PAGE_CONTENT_VERSION,
   );
   const changelogLastmod = laterDate(
     gitFileLastmod(rootDir, CHANGELOG_PATH),
     latestDatedChangelogRelease(changelog),
-    CORPUS_GENERATOR_CONTENT_VERSION,
   );
+  const { capturedAt: chokepointCapturedAt, volumeObservedAt: chokepointVolumeObservedAt } =
+    resolveChokepointObservation({
+      registryGitLastmod: gitFileLastmod(rootDir, CHOKEPOINT_REGISTRY_PATH),
+      tradeRoutesGitLastmod: gitFileLastmod(rootDir, TRADE_ROUTES_PATH),
+    });
   const chokepointsLastmod = laterDate(
-    gitFileLastmod(rootDir, CHOKEPOINT_REGISTRY_PATH),
+    ...CHOKEPOINT_PAGE_LASTMOD_PATHS.map((path) => gitFileLastmod(rootDir, path)),
     livePulse.capturedAt,
-    CORPUS_GENERATOR_CONTENT_VERSION,
     CHOKEPOINT_PAGE_CONTENT_VERSION,
   );
   const toolsLastmod = laterDate(
     gitFileLastmod(rootDir, LIVE_TOOLS_SCRIPT_PATH),
-    livePulse.capturedAt,
-    CORPUS_GENERATOR_CONTENT_VERSION,
     TOOLS_PAGE_CONTENT_VERSION,
   );
   const crisesLastmod = laterDate(
     gitFileLastmod(rootDir, CRISIS_REGISTRY_PATH),
     livePulse.capturedAt,
-    CORPUS_GENERATOR_CONTENT_VERSION,
     CRISIS_PAGE_CONTENT_VERSION,
   );
   const researchLastmod = laterDate(
     ...researchReports.map(({ report }) => report.dateModified),
-    CORPUS_GENERATOR_CONTENT_VERSION,
   );
   const useCasesLastmod = laterDate(
     USE_CASES_CONTENT_VERSION,
-    CORPUS_GENERATOR_CONTENT_VERSION,
     gitFileLastmod(rootDir, 'scripts/build-use-cases.mjs'),
   );
   const attributionManifest = readJson(rootDir, SOURCE_ATTRIBUTION_MANIFEST_PATH);
@@ -1338,6 +1396,10 @@ export async function loadCorpusData({ rootDir = DEFAULT_ROOT } = {}) {
     countryBboxByCode,
     crises,
     chokepoints,
+    chokepointObservation: {
+      capturedAt: chokepointCapturedAt,
+      volumeObservedAt: chokepointVolumeObservedAt,
+    },
     tradeRoutesById,
     glossaryTerms,
     changelog,
@@ -1346,9 +1408,11 @@ export async function loadCorpusData({ rootDir = DEFAULT_ROOT } = {}) {
 }
 
 function breadcrumbLd(baseUrl, items) {
+  const currentPath = items[items.length - 1]?.path;
   return {
     '@context': SCHEMA_ORG_CONTEXT_URL,
     '@type': 'BreadcrumbList',
+    ...(currentPath ? { '@id': `${absoluteUrl(baseUrl, currentPath)}#breadcrumb` } : {}),
     itemListElement: items.map((item, index) => ({
       '@type': 'ListItem',
       position: index + 1,
@@ -1356,6 +1420,26 @@ function breadcrumbLd(baseUrl, items) {
       item: absoluteUrl(baseUrl, item.path),
     })),
   };
+}
+
+function jsonLdTypes(entry) {
+  const type = entry?.['@type'];
+  return Array.isArray(type) ? type : type ? [type] : [];
+}
+
+function withSpeakableAndGraph(entry, { canonical, breadcrumbId }) {
+  if (!entry || typeof entry !== 'object') return entry;
+  const types = jsonLdTypes(entry);
+  if (!types.some((type) => PAGE_TYPES_WITH_SPEAKABLE.has(type))) return entry;
+  const next = { ...entry };
+  if (!next.speakable) next.speakable = { ...DEFAULT_SPEAKABLE };
+  if (types.some((type) => PAGE_TYPES_WITH_WEBPAGE_ID.has(type))) {
+    if (!next['@id']) next['@id'] = `${canonical}#webpage`;
+    if (!next.isPartOf) next.isPartOf = { '@id': WEBSITE_ID };
+    if (!next.breadcrumb && breadcrumbId) next.breadcrumb = { '@id': breadcrumbId };
+    if (!next.publisher) next.publisher = { ...WORLD_MONITOR_ORG };
+  }
+  return next;
 }
 
 function imageObjectLd(baseUrl, ogImage, ogImageAlt) {
@@ -1418,12 +1502,14 @@ function pageDocument({
   // + FAQPage + ItemList for AI-extractable use-case workflows — #7381).
   // Attach ImageObject to page-shaped graphs so multimodal crawlers see a
   // primary image even when the HTML body is mostly text (#7382).
+  const breadcrumbId = breadcrumbs?.['@id'] || null;
   const ld = [
     ...(Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : []),
     breadcrumbs,
   ]
     .filter(Boolean)
-    .map((entry) => withPrimaryImage(entry, pageImage));
+    .map((entry) => withPrimaryImage(entry, pageImage))
+    .map((entry) => withSpeakableAndGraph(entry, { canonical, breadcrumbId }));
   const renderedNav = headerNav || `        <a href="/">World Monitor</a>
         <a href="/sources/">Sources</a>
         <a href="/countries/">Countries</a>
@@ -1560,16 +1646,54 @@ ${body}
 function renderCountriesIndex({ countries, baseUrl, capturedAt, lastmod, snapshotPath }) {
   const path = '/countries/';
   const description = `Browse ${countries.length} country risk and resilience pages from World Monitor's dated ${capturedAt} structural snapshot, with current instability signals on each page.`;
-  const itemList = countries.map((country, index) => ({
-    '@type': 'ListItem',
-    position: index + 1,
-    name: country.name,
-    url: absoluteUrl(baseUrl, `/countries/${country.slug}/`),
-  }));
+  const rankedCountries = countries
+    .filter((country) => Number.isInteger(country.rank))
+    .sort((a, b) => a.rank - b.rank);
+  const topRankedNames = rankedCountries.slice(0, 3).map((country) => country.name);
+  const rankingYear = capturedAt.slice(0, 4);
+  const hubFaqs = [
+    {
+      question: `Which countries are most resilient in ${rankingYear}?`,
+      answer: `The ${prettyDate(capturedAt)} Country Resilience Index snapshot ranks ${rankedCountries.length} of ${countries.length} countries. Its top three are ${topRankedNames.join(', ')}, with ${topRankedNames[0]} at rank 1. The index measures capacity to absorb shocks and recover; high scores reflect fiscal room, institutions, infrastructure, and supplies, while countries below the headline cutoff remain unranked instead of being guessed.`,
+    },
+    {
+      question: 'How is the Country Resilience Index calculated?',
+      answer:
+        'Seventy-two published indicators are rescaled to 0-100, blended into 21 dimensions, grouped into six domains, then three pillars. Those pillars combine at 0.40/0.35/0.25, then a min-pillar penalty drags the total toward the weakest link. Coverage ships with every score; thin evidence is flagged low-confidence and held out of the ranking.',
+    },
+  ];
+  const itemList = countries.map((country, index) => {
+    const scorePublished = country.headlineEligible !== false;
+    const url = absoluteUrl(baseUrl, `/countries/${country.slug}/`);
+    return {
+      '@type': 'ListItem',
+      position: index + 1,
+      name: country.name,
+      url,
+      item: {
+        '@type': 'Country',
+        name: country.name,
+        url,
+        ...(scorePublished
+          ? {
+            additionalProperty: {
+              '@type': 'PropertyValue',
+              name: 'Country Resilience Index score',
+              value: country.overallScore,
+              minValue: 0,
+              maxValue: 100,
+            },
+          }
+          : {}),
+      },
+    };
+  });
   const body = `      <p class="eyebrow">Country corpus</p>
       <h1>Country risk and resilience</h1>
       <p class="lede">${escapeHtml(description)}</p>
       <p>For the evergreen monitoring procedure that uses these pages as evidence, see <a href="/use-cases/monitor-country-risk/">Monitor country risk</a>.</p>
+${hubFaqs.map((faq) => `      <h2>${escapeHtml(faq.question)}</h2>
+      <p>${escapeHtml(faq.answer)}</p>`).join('\n')}
       <div class="table-scroll"><table data-country-ranking>
         <caption>${escapeHtml(prettyDate(capturedAt))} Country Resilience Index snapshot</caption>
         <thead><tr><th scope="col">Rank</th><th scope="col">Country</th><th scope="col">Score</th><th scope="col">Coverage</th><th scope="col">Confidence</th></tr></thead>
@@ -1601,6 +1725,15 @@ ${countries.map((country) => {
       },
       {
         '@context': 'https://schema.org',
+        '@type': 'FAQPage',
+        mainEntity: hubFaqs.map((faq) => ({
+          '@type': 'Question',
+          name: faq.question,
+          acceptedAnswer: { '@type': 'Answer', text: faq.answer },
+        })),
+      },
+      {
+        '@context': 'https://schema.org',
         '@type': 'ItemList',
         name: 'Country Resilience Index ranking',
         numberOfItems: countries.length,
@@ -1614,7 +1747,7 @@ ${countries.map((country) => {
         description,
         url: absoluteUrl(baseUrl, path),
         identifier: `country-resilience-ranking-${capturedAt}`,
-        creator: { '@type': 'Organization', name: 'World Monitor', url: 'https://www.worldmonitor.app/' },
+        creator: { ...WORLD_MONITOR_ORG },
         license: DATASET_LICENSE,
         datePublished: capturedAt,
         dateModified: capturedAt,
@@ -1682,11 +1815,205 @@ const DIMENSION_LABELS = {
   sovereignFiscalBuffer: 'Sovereign fiscal buffer',
 };
 
+const DIMENSION_PRIMARY_SOURCES = Object.freeze({
+  macroFiscal: ['IMF'],
+  currencyExternal: ['IMF', 'World Bank'],
+  tradePolicy: ['WTO', 'World Bank'],
+  financialSystemExposure: ['BIS', 'World Bank IDS', 'FATF'],
+  cyberDigital: ['cyber and outage monitors'],
+  logisticsSupply: ['World Bank'],
+  infrastructure: ['World Bank'],
+  energy: ['World Bank', 'IEA', 'OWID'],
+  governanceInstitutional: ['World Bank WGI'],
+  socialCohesion: ['IEP', 'UNHCR', 'UCDP'],
+  borderSecurity: ['UCDP', 'UNHCR'],
+  informationCognitive: ['Reporters Without Borders'],
+  education: ['World Bank'],
+  healthPublicService: ['WHO'],
+  foodWater: ['FAO IPC', 'World Bank'],
+  fiscalSpace: ['IMF'],
+  liquidReserveAdequacy: ['World Bank'],
+  externalDebtCoverage: ['World Bank'],
+  importConcentration: ['UN Comtrade'],
+  stateContinuity: ['World Bank WGI', 'UCDP', 'UNHCR'],
+  sovereignFiscalBuffer: ['sovereign-wealth records'],
+});
+
 function humanizeId(value) {
   return String(value || '')
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/-/g, ' ')
     .replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function formatProseList(items) {
+  const values = [...new Set(items.map((item) => String(item || '').trim()).filter(Boolean))];
+  if (values.length === 0) return '';
+  if (values.length === 1) return values[0];
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(', ')}, and ${values.at(-1)}`;
+}
+
+function dimensionLabel(dimension) {
+  return DIMENSION_LABELS[dimension.id] || humanizeId(dimension.id);
+}
+
+function activeCountryDimensions(country) {
+  return (country.domains || []).flatMap((domain) => (
+    (domain.dimensions || [])
+      .filter((dimension) => !RETIRED_DIMENSION_IDS.has(dimension.id))
+      .map((dimension) => ({
+        ...dimension,
+        domainId: domain.id,
+      }))
+  ));
+}
+
+function isCoverageGap(dimension) {
+  const imputationClass = String(dimension.imputationClass || '');
+  if (imputationClass === 'not-applicable') return false;
+  if (imputationClass === 'source-failure' || imputationClass === 'unmonitored') return true;
+  return Number(dimension.coverage) === 0;
+}
+
+function compareDimensionsByCoverageAsc(left, right) {
+  return Number(left.coverage) - Number(right.coverage) || left.id.localeCompare(right.id);
+}
+
+function compareDimensionsByCoverageDesc(left, right) {
+  return Number(right.coverage) - Number(left.coverage) || left.id.localeCompare(right.id);
+}
+
+function dimensionSources(dimension) {
+  return DIMENSION_PRIMARY_SOURCES[dimension.id] || [];
+}
+
+export function describeHeadlineIneligibilityReason(country) {
+  const coverage = Number(country.dimensionCoverage);
+  const imputation = Number(country.imputationShare);
+  const coverageText = formatPercent(country.dimensionCoverage);
+  const imputationText = formatPercent(country.imputationShare);
+  if (country.lowConfidence) {
+    const coverageMiss = Number.isFinite(coverage) && coverage < LOW_CONFIDENCE_MIN_COVERAGE;
+    const imputationMiss = Number.isFinite(imputation) && imputation > LOW_CONFIDENCE_MAX_IMPUTATION;
+    if (coverageMiss && imputationMiss) {
+      return `${country.name}'s coverage is ${coverageText} and imputation share is ${imputationText}, so the snapshot is low-confidence.`;
+    }
+    if (coverageMiss) {
+      return `${country.name}'s coverage is ${coverageText}, below the ${Math.round(LOW_CONFIDENCE_MIN_COVERAGE * 100)}% confidence gate and the ${Math.round(HEADLINE_RANKING_MIN_COVERAGE * 100)}% ranking floor.`;
+    }
+    if (imputationMiss) {
+      return `${country.name}'s imputation share is ${imputationText}, above the ${Math.round(LOW_CONFIDENCE_MAX_IMPUTATION * 100)}% confidence limit.`;
+    }
+    return `${country.name}'s snapshot is flagged low-confidence, so no rank is published.`;
+  }
+  if (Number.isFinite(coverage) && coverage < HEADLINE_RANKING_MIN_COVERAGE) {
+    return `${country.name}'s coverage is ${coverageText}, below the ${Math.round(HEADLINE_RANKING_MIN_COVERAGE * 100)}% ranking floor.`;
+  }
+  const strongest = activeCountryDimensions(country)
+    .filter((dimension) => (
+      Number(dimension.coverage) > 0
+      && String(dimension.imputationClass || '') !== 'not-applicable'
+    ))
+    .sort(compareDimensionsByCoverageDesc)
+    .slice(0, 3)
+    .map((dimension) => `${dimensionLabel(dimension)} at ${formatPercent(dimension.coverage)}`);
+  const strongestClause = strongest.length > 0
+    ? ` Strongest observed coverage is ${formatProseList(strongest)}.`
+    : '';
+  return `${country.name}'s coverage is ${coverageText}, which meets the ${Math.round(HEADLINE_RANKING_MIN_COVERAGE * 100)}% floor, but a published rank also needs a recorded population of at least ${HEADLINE_RANKING_MIN_POPULATION.toLocaleString('en-US')} or coverage of at least ${Math.round(HEADLINE_RANKING_HIGH_COVERAGE * 100)}%.${strongestClause}`;
+}
+
+export function describeHeadlineIneligibility(country) {
+  return `World Monitor does not publish a resilience score or rank for ${country.name} because it does not meet the published ranking eligibility criteria.`;
+}
+
+export function describeCoverageGaps(country) {
+  const dimensions = activeCountryDimensions(country);
+  const gaps = dimensions.filter(isCoverageGap).sort(compareDimensionsByCoverageAsc);
+  if (gaps.length === 0) {
+    const strongest = dimensions
+      .filter((dimension) => Number(dimension.coverage) > 0)
+      .sort(compareDimensionsByCoverageDesc)
+      .slice(0, 3)
+      .map((dimension) => `${dimensionLabel(dimension)} at ${formatPercent(dimension.coverage)}`);
+    const strongestClause = strongest.length > 0
+      ? `, including ${formatProseList(strongest)}`
+      : '';
+    return `The active dimensions are mostly observed${strongestClause}. The unpublished rank is an eligibility-rule outcome, not a hole in the source inventory.`;
+  }
+  const labels = formatProseList(gaps.map(dimensionLabel));
+  const uniqueSources = [...new Set(gaps.flatMap(dimensionSources))];
+  const verb = gaps.length === 1 ? 'has' : 'have';
+  const sourceClause = uniqueSources.length > 0
+    ? ` Those slots depend on ${formatProseList(uniqueSources)}, which ${uniqueSources.length === 1 ? 'does' : 'do'} not contribute observed series for those dimensions.`
+    : '';
+  const failures = gaps.filter((dimension) => dimension.imputationClass === 'source-failure');
+  const unmonitored = gaps.filter((dimension) => dimension.imputationClass === 'unmonitored');
+  const failureClause = failures.length > 0
+    ? ` ${formatProseList(failures.map(dimensionLabel))} ${failures.length === 1 ? 'is' : 'are'} marked source unavailable in this snapshot.`
+    : '';
+  const unmonitoredClause = unmonitored.length > 0
+    ? ` ${formatProseList(unmonitored.map(dimensionLabel))} ${unmonitored.length === 1 ? 'is' : 'are'} tagged unmonitored because the source does not cover ${country.name}.`
+    : '';
+  return `${labels} ${verb} no usable observed series.${sourceClause}${failureClause}${unmonitoredClause}`;
+}
+
+export function describeAvailableEvidence(country) {
+  const observed = activeCountryDimensions(country)
+    .filter((dimension) => (
+      !isCoverageGap(dimension)
+      && Number(dimension.coverage) >= 0.5
+    ))
+    .sort(compareDimensionsByCoverageDesc)
+    .slice(0, AVAILABLE_EVIDENCE_LIMIT);
+  if (observed.length === 0) {
+    return `The snapshot still records coverage and evidence state for ${country.name}, even though no dimension clears a usable observed threshold. Input coverage is ${formatPercent(country.dimensionCoverage)} and imputation share is ${formatPercent(country.imputationShare)}.`;
+  }
+  return `Observed evidence is present for ${formatProseList(observed.map((dimension) => `${dimensionLabel(dimension)} (${formatPercent(dimension.coverage)})`))}. Input coverage is ${formatPercent(country.dimensionCoverage)} and imputation share is ${formatPercent(country.imputationShare)}.`;
+}
+
+export function dimensionInventoryNote(country, dimension) {
+  const sources = dimensionSources(dimension);
+  const sourceLabel = formatProseList(sources);
+  const imputationClass = String(dimension.imputationClass || '');
+  if (imputationClass === 'not-applicable') return 'not applicable';
+  if (imputationClass === 'stable-absence') return 'stable absence in the source feed';
+  if (imputationClass === 'source-failure') {
+    return sourceLabel
+      ? `${sourceLabel} did not deliver a usable series in this snapshot`
+      : 'source unavailable in this snapshot';
+  }
+  if (imputationClass === 'unmonitored' || Number(dimension.coverage) === 0) {
+    return sourceLabel
+      ? `${sourceLabel} ${sources.length === 1 ? 'does' : 'do'} not contribute observed series for ${country.name}`
+      : `no observed series for ${country.name}`;
+  }
+  return 'observed';
+}
+
+function selectUnrankedInventory(country) {
+  const dimensions = activeCountryDimensions(country);
+  const notApplicable = dimensions
+    .filter((dimension) => String(dimension.imputationClass || '') === 'not-applicable')
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const gaps = dimensions.filter(isCoverageGap).sort(compareDimensionsByCoverageAsc);
+  const observed = dimensions
+    .filter((dimension) => (
+      !isCoverageGap(dimension)
+      && String(dimension.imputationClass || '') !== 'not-applicable'
+      && Number(dimension.coverage) < 1
+    ))
+    .sort(compareDimensionsByCoverageAsc);
+  const selected = [];
+  const seen = new Set();
+  for (const dimension of [...notApplicable, ...gaps, ...observed]) {
+    if (seen.has(dimension.id)) continue;
+    seen.add(dimension.id);
+    selected.push(dimension);
+    if (selected.length >= UNRANKED_INVENTORY_LIMIT) break;
+  }
+  return selected;
 }
 
 function formatSignedScore(value) {
@@ -1702,15 +2029,15 @@ function countryFaqs(country, capturedAt, rankedCount) {
     return [
       {
         question: `What is ${country.name}'s resilience score?`,
-        answer: `No resilience score or rank is published for ${country.name}. Input coverage is ${formatPercent(country.dimensionCoverage)}.`,
+        answer: `No resilience score or rank is published for ${country.name}. ${country.name}'s published rank would require coverage of at least ${Math.round(HEADLINE_RANKING_MIN_COVERAGE * 100)}%, no low-confidence flag, and either a population of at least ${HEADLINE_RANKING_MIN_POPULATION.toLocaleString('en-US')} or coverage of at least ${Math.round(HEADLINE_RANKING_HIGH_COVERAGE * 100)}%. Low confidence for ${country.name} means coverage falls below ${Math.round(LOW_CONFIDENCE_MIN_COVERAGE * 100)}% or imputation share exceeds ${Math.round(LOW_CONFIDENCE_MAX_IMPUTATION * 100)}%.`,
       },
       {
         question: `What evidence is available for ${country.name}?`,
-        answer: `The ${prettyDate(capturedAt)} ${country.code} snapshot lists coverage and evidence state for three pillars, six domains, and their dimensions.`,
+        answer: describeAvailableEvidence(country),
       },
       {
         question: `How should readers use ${country.name}'s page?`,
-        answer: `Use the evidence inventory with the live monitor. A missing score does not mean risk is absent.`,
+        answer: `Use the evidence inventory and nearest ranked comparators with the live monitor. A missing score does not mean risk is absent.`,
       },
     ];
   }
@@ -1738,39 +2065,9 @@ function countryFaqs(country, capturedAt, rankedCount) {
 
 function renderCountryAnalysis({ country, capturedAt, methodologyFormula, rankedCount }) {
   const scorePublished = country.headlineEligible !== false;
-  const pillars = [...country.pillars].sort((left, right) => scorePublished
-    ? left.score - right.score
-    : left.id.localeCompare(right.id));
-  const domains = [...country.domains].sort((left, right) => scorePublished
-    ? left.score - right.score
-    : left.id.localeCompare(right.id));
-  if (pillars.length < 3 || domains.length < 6) {
+  if ((country.pillars?.length ?? 0) < 3 || (country.domains?.length ?? 0) < 6) {
     throw new Error(`${country.code} is missing country-analysis pillar or domain details`);
   }
-  const [weakestPillar, secondPillar] = pillars;
-  const strongestPillar = pillars.at(-1);
-  const [weakestDomain] = domains;
-  const strongestDomain = domains.at(-1);
-  const rankSentence = !scorePublished
-    ? `World Monitor does not publish a resilience score or rank for ${country.name} because it does not meet the published ranking eligibility criteria.`
-    : `${country.name} ranks #${country.rank} of ${rankedCount} countries with an overall resilience score of ${formatScore(country.overallScore)} out of 100.`;
-  const trendSentence = Number.isFinite(Number(country.change30d))
-    ? `Across the recorded 30-day window, the index is ${country.trend} at ${formatSignedScore(country.change30d)} points.`
-    : 'The committed snapshot does not contain a comparable 30-day change.';
-  const weakestPillarLabel = PILLAR_LABELS[weakestPillar.id] || humanizeId(weakestPillar.id);
-  const secondPillarLabel = PILLAR_LABELS[secondPillar.id] || humanizeId(secondPillar.id);
-  const strongestPillarLabel = PILLAR_LABELS[strongestPillar.id] || humanizeId(strongestPillar.id);
-  const weakestDomainLabel = DOMAIN_LABELS[weakestDomain.id] || humanizeId(weakestDomain.id);
-  const strongestDomainLabel = DOMAIN_LABELS[strongestDomain.id] || humanizeId(strongestDomain.id);
-  const summary = scorePublished
-    ? `${rankSentence} ${weakestPillarLabel} is the weakest pillar at ${formatScore(weakestPillar.score)}, with ${secondPillarLabel.toLowerCase()} next at ${formatScore(secondPillar.score)}. ${strongestPillarLabel} is strongest at ${formatScore(strongestPillar.score)}, while ${weakestDomainLabel} is the lowest of the six underlying domains at ${formatScore(weakestDomain.score)}. ${trendSentence} Dimension coverage is ${formatPercent(country.dimensionCoverage)}, and the page labels confidence as ${country.lowConfidence ? 'low' : 'standard'}.`
-    : `${rankSentence} Input coverage is ${formatPercent(country.dimensionCoverage)} and confidence is low. The inventory lists three pillars, six domains, dimensions, and evidence states without exposing score-derived fields.`;
-  const dimensionRows = domains.flatMap((domain) => domain.dimensions.map((dimension) => ({
-    ...dimension,
-    domainId: domain.id,
-  }))).sort((left, right) => scorePublished
-    ? left.score - right.score || left.id.localeCompare(right.id)
-    : left.id.localeCompare(right.id));
   const peerLinks = country.peers.map((peer) => (
     `<a href="/countries/${peer.slug}/">${escapeHtml(peer.name)}${scorePublished ? ` (${escapeHtml(formatScore(peer.overallScore))})` : ''}</a>`
   )).join(', ');
@@ -1781,42 +2078,97 @@ function renderCountryAnalysis({ country, capturedAt, methodologyFormula, ranked
     ? `The crisis registry links ${escapeHtml(country.name)} to ${country.crisisMemberships.map((crisis) => `<a href="/crises/${crisis.slug}/">${escapeHtml(crisis.shortTitle)}</a>`).join(', ')}. Tracker scopes are fixed and do not cover every crisis.`
     : `${escapeHtml(country.name)} is outside the fixed coverage of the ${country.crisisRegistrySize} crawlable crisis trackers. This marks a registry boundary, not an absence of risk.`;
   const faqs = countryFaqs(country, capturedAt, rankedCount);
-  const html = `      <article data-country-analysis>
+  if (!scorePublished) {
+    const inventory = selectUnrankedInventory(country);
+    const inventoryItems = inventory.length > 0
+      ? inventory.map((dimension) => `          <li><strong>${escapeHtml(dimensionLabel(dimension))}</strong>: ${escapeHtml(formatPercent(dimension.coverage))} coverage; ${escapeHtml(dimensionInventoryNote(country, dimension))}.</li>`).join('\n')
+      : `          <li>${escapeHtml(country.name)} has no active dimension inventory after retired slots are removed.</li>`;
+    const officialName = country.identity?.officialName;
+    const officialBit = officialName && officialName !== country.name
+      ? ` Officially ${officialName}.`
+      : '';
+    const status = getSovereignStatus(country.code);
+    // The internal sar bucket also includes Taiwan; describe membership only.
+    const statusBit = status === 'sar'
+      ? ` ${country.name} is included separately in the rankable universe.`
+      : status === 'un-member'
+        ? ` ${country.name} is in the rankable universe as a UN member.`
+        : '';
+    const html = `      <article data-country-analysis>
         <h2>${escapeHtml(country.name)} resilience analysis</h2>
-        <p>${escapeHtml(summary)}</p>
-        <h3>${scorePublished ? 'Pillar profile' : `${escapeHtml(country.code)} pillar profile`}</h3>
+        <p>${escapeHtml(describeHeadlineIneligibility(country))}${escapeHtml(officialBit)}${escapeHtml(statusBit)} Ranked comparisons use ${escapeHtml(country.regionName)} peers rather than other unpublished pages. The snapshot records ${escapeHtml(country.name)} as ${escapeHtml(country.code)}.</p>
+        <h3>Why ${escapeHtml(country.name)} is unpublished</h3>
+        <p>${escapeHtml(describeHeadlineIneligibilityReason(country))}</p>
+        <h3>Source inventory gaps</h3>
+        <p>${escapeHtml(describeCoverageGaps(country))}</p>
+        <h3>What the snapshot does cover</h3>
+        <p>${escapeHtml(describeAvailableEvidence(country))}</p>
+        <h3>Dimension evidence inventory</h3>
         <ul class="routes">
-${pillars.map((pillar) => `          <li><strong>${scorePublished ? '' : `${escapeHtml(country.code)} · `}${escapeHtml(PILLAR_LABELS[pillar.id] || humanizeId(pillar.id))}${scorePublished ? `: ${escapeHtml(formatScore(pillar.score))}` : ''}</strong>; coverage ${escapeHtml(formatPercent(pillar.coverage))}; domains ${pillar.domainIds.map((id) => escapeHtml(DOMAIN_LABELS[id] || humanizeId(id))).join(', ')}.</li>`).join('\n')}
+${inventoryItems}
         </ul>
-        <h3>${scorePublished ? 'Six-domain profile' : `${escapeHtml(country.code)} six-domain profile`}</h3>
-        <ul class="routes">
-${domains.map((domain) => {
-    const dimensions = [...domain.dimensions].sort((left, right) => scorePublished
-      ? left.score - right.score
-      : left.id.localeCompare(right.id));
-    const weakest = dimensions[0];
-    const strongest = dimensions.at(-1);
-    const dimensionSummary = !scorePublished
-      ? `dimensions ${dimensions.map((dimension) => DIMENSION_LABELS[dimension.id] || humanizeId(dimension.id)).join(', ')}`
-      : dimensions.length === 1
-      ? `${DIMENSION_LABELS[weakest.id] || humanizeId(weakest.id)} ${formatScore(weakest.score)}`
-      : `low ${DIMENSION_LABELS[weakest.id] || humanizeId(weakest.id)} ${formatScore(weakest.score)}; high ${DIMENSION_LABELS[strongest.id] || humanizeId(strongest.id)} ${formatScore(strongest.score)}`;
-    return `          <li><strong>${scorePublished ? '' : `${escapeHtml(country.code)} · `}${escapeHtml(DOMAIN_LABELS[domain.id] || humanizeId(domain.id))}${scorePublished ? `: ${escapeHtml(formatScore(domain.score))}` : ''}</strong>; weight ${escapeHtml(formatPercent(domain.weight))}; ${escapeHtml(dimensionSummary)}.</li>`;
-  }).join('\n')}
-        </ul>
-        <h3>${scorePublished ? 'Dimension evidence, weakest first' : `${escapeHtml(country.code)} dimension evidence inventory`}</h3>
-        <div class="table-scroll"><table>
-          <thead><tr><th scope="col">Dimension</th><th scope="col">Domain</th><th scope="col">Score</th><th scope="col">Coverage</th><th scope="col">Evidence state</th></tr></thead>
-          <tbody>
-${dimensionRows.map((dimension) => `            <tr><td>${scorePublished ? '' : `${escapeHtml(country.code)} · `}${escapeHtml(DIMENSION_LABELS[dimension.id] || humanizeId(dimension.id))}</td><td>${escapeHtml(DOMAIN_LABELS[dimension.domainId] || humanizeId(dimension.domainId))}</td><td>${scorePublished ? escapeHtml(formatScore(dimension.score)) : '—'}</td><td>${escapeHtml(formatPercent(dimension.coverage))}</td><td>${escapeHtml(humanizeId(dimension.imputationClass || dimension.freshness?.staleness || 'observed'))}</td></tr>`).join('\n')}
-          </tbody>
-        </table></div>
-        <h3>${scorePublished ? 'Comparison set' : `${escapeHtml(country.code)} comparison set`}</h3>
-        <p>${scorePublished ? 'Nearest ranked peers' : 'Reference pages'}: ${peerLinks}. Comparisons in ${escapeHtml(country.regionName)}: ${regionalLinks}. ${scorePublished ? 'Similar scores do not mean equal conditions.' : 'Links do not use unpublished scores.'}</p>
+        <h3>Nearest ranked comparators</h3>
+        <p>Nearest ranked comparators: ${peerLinks}. Ranked comparisons in ${escapeHtml(country.regionName)}: ${regionalLinks}. Links do not use unpublished scores.</p>
         <h3>Tracked crisis context</h3>
         <p>${crisisText}</p>
         <h3>Reading limits</h3>
-        <p>${escapeHtml(prettyDate(capturedAt))}; method ${escapeHtml(methodologyFormula)}. ${scorePublished ? `Top domain: ${escapeHtml(strongestDomainLabel)}, ${escapeHtml(formatScore(strongestDomain.score))}. Weak pillars reduce the result; compare with coverage and imputation visible.` : 'No score is published. Coverage and imputation show the evidence boundary.'}</p>
+        <p>${escapeHtml(prettyDate(capturedAt))}; method ${escapeHtml(methodologyFormula)}. ${escapeHtml(country.name)} coverage is ${escapeHtml(formatPercent(country.dimensionCoverage))} with imputation share ${escapeHtml(formatPercent(country.imputationShare))}. No score is published.</p>
+        <h3>Questions about ${escapeHtml(country.name)}</h3>
+${faqs.map((faq) => `        <details data-country-faq><summary>${escapeHtml(faq.question)}</summary><p>${escapeHtml(faq.answer)}</p></details>`).join('\n')}
+      </article>`;
+    return { html, faqs };
+  }
+  const pillars = [...country.pillars].sort((left, right) => left.score - right.score);
+  const domains = [...country.domains].sort((left, right) => left.score - right.score);
+  const [weakestPillar, secondPillar] = pillars;
+  const strongestPillar = pillars.at(-1);
+  const [weakestDomain] = domains;
+  const strongestDomain = domains.at(-1);
+  const trendSentence = Number.isFinite(Number(country.change30d))
+    ? `Across the recorded 30-day window, the index is ${country.trend} at ${formatSignedScore(country.change30d)} points.`
+    : 'The committed snapshot does not contain a comparable 30-day change.';
+  const weakestPillarLabel = PILLAR_LABELS[weakestPillar.id] || humanizeId(weakestPillar.id);
+  const secondPillarLabel = PILLAR_LABELS[secondPillar.id] || humanizeId(secondPillar.id);
+  const strongestPillarLabel = PILLAR_LABELS[strongestPillar.id] || humanizeId(strongestPillar.id);
+  const weakestDomainLabel = DOMAIN_LABELS[weakestDomain.id] || humanizeId(weakestDomain.id);
+  const strongestDomainLabel = DOMAIN_LABELS[strongestDomain.id] || humanizeId(strongestDomain.id);
+  const summary = `${country.name} ranks #${country.rank} of ${rankedCount} countries with an overall resilience score of ${formatScore(country.overallScore)} out of 100. ${weakestPillarLabel} is the weakest pillar at ${formatScore(weakestPillar.score)}, with ${secondPillarLabel.toLowerCase()} next at ${formatScore(secondPillar.score)}. ${strongestPillarLabel} is strongest at ${formatScore(strongestPillar.score)}, while ${weakestDomainLabel} is the lowest of the six underlying domains at ${formatScore(weakestDomain.score)}. ${trendSentence} Dimension coverage is ${formatPercent(country.dimensionCoverage)}, and the page labels confidence as ${country.lowConfidence ? 'low' : 'standard'}.`;
+  const dimensionRows = domains.flatMap((domain) => domain.dimensions.map((dimension) => ({
+    ...dimension,
+    domainId: domain.id,
+  }))).sort((left, right) => left.score - right.score || left.id.localeCompare(right.id));
+  const html = `      <article data-country-analysis>
+        <h2>${escapeHtml(country.name)} resilience analysis</h2>
+        <p>${escapeHtml(summary)}</p>
+        <h3>Pillar profile</h3>
+        <ul class="routes">
+${pillars.map((pillar) => `          <li><strong>${escapeHtml(PILLAR_LABELS[pillar.id] || humanizeId(pillar.id))}: ${escapeHtml(formatScore(pillar.score))}</strong>; coverage ${escapeHtml(formatPercent(pillar.coverage))}; domains ${pillar.domainIds.map((id) => escapeHtml(DOMAIN_LABELS[id] || humanizeId(id))).join(', ')}.</li>`).join('\n')}
+        </ul>
+        <h3>Six-domain profile</h3>
+        <ul class="routes">
+${domains.map((domain) => {
+    const dimensions = [...domain.dimensions].sort((left, right) => left.score - right.score);
+    const weakest = dimensions[0];
+    const strongest = dimensions.at(-1);
+    const dimensionSummary = dimensions.length === 1
+      ? `${DIMENSION_LABELS[weakest.id] || humanizeId(weakest.id)} ${formatScore(weakest.score)}`
+      : `low ${DIMENSION_LABELS[weakest.id] || humanizeId(weakest.id)} ${formatScore(weakest.score)}; high ${DIMENSION_LABELS[strongest.id] || humanizeId(strongest.id)} ${formatScore(strongest.score)}`;
+    return `          <li><strong>${escapeHtml(DOMAIN_LABELS[domain.id] || humanizeId(domain.id))}: ${escapeHtml(formatScore(domain.score))}</strong>; weight ${escapeHtml(formatPercent(domain.weight))}; ${escapeHtml(dimensionSummary)}.</li>`;
+  }).join('\n')}
+        </ul>
+        <h3>Dimension evidence, weakest first</h3>
+        <div class="table-scroll"><table>
+          <thead><tr><th scope="col">Dimension</th><th scope="col">Domain</th><th scope="col">Score</th><th scope="col">Coverage</th><th scope="col">Evidence state</th></tr></thead>
+          <tbody>
+${dimensionRows.map((dimension) => `            <tr><td>${escapeHtml(DIMENSION_LABELS[dimension.id] || humanizeId(dimension.id))}</td><td>${escapeHtml(DOMAIN_LABELS[dimension.domainId] || humanizeId(dimension.domainId))}</td><td>${escapeHtml(formatScore(dimension.score))}</td><td>${escapeHtml(formatPercent(dimension.coverage))}</td><td>${escapeHtml(humanizeId(dimension.imputationClass || dimension.freshness?.staleness || 'observed'))}</td></tr>`).join('\n')}
+          </tbody>
+        </table></div>
+        <h3>Comparison set</h3>
+        <p>Nearest ranked peers: ${peerLinks}. Comparisons in ${escapeHtml(country.regionName)}: ${regionalLinks}. Similar scores do not mean equal conditions.</p>
+        <h3>Tracked crisis context</h3>
+        <p>${crisisText}</p>
+        <h3>Reading limits</h3>
+        <p>${escapeHtml(prettyDate(capturedAt))}; method ${escapeHtml(methodologyFormula)}. Top domain: ${escapeHtml(strongestDomainLabel)}, ${escapeHtml(formatScore(strongestDomain.score))}. Weak pillars reduce the result; compare with coverage and imputation visible.</p>
         <h3>Questions about ${escapeHtml(country.name)}</h3>
 ${faqs.map((faq) => `        <details data-country-faq><summary>${escapeHtml(faq.question)}</summary><p>${escapeHtml(faq.answer)}</p></details>`).join('\n')}
       </article>`;
@@ -1840,6 +2192,7 @@ function renderCountryPage({
     name: country.name,
     rank: country.rank,
     rankedCount,
+    lowConfidence: country.lowConfidence === true,
   });
   const mapUrl = withUtmSource(
     absoluteUrl(baseUrl, `/?country=${encodeURIComponent(country.code)}&expanded=1`),
@@ -1855,13 +2208,12 @@ function renderCountryPage({
     ? `      <p><strong>Official name:</strong> ${escapeHtml(country.identity.officialName)}. <a href="${escapeHtml(country.identity.sameAs)}">Wikidata identity record</a>.</p>\n`
     : '';
   const scorePublished = country.headlineEligible !== false;
-  const coverageFact = `Input coverage is ${escapeHtml(formatPercent(country.dimensionCoverage))}.`;
   const scoreDisclosure = scorePublished
     ? ''
-    : `\n      <p>World Monitor does not publish a resilience score for ${escapeHtml(country.name)}. ${escapeHtml(country.name)} does not meet the published ranking eligibility criteria. ${coverageFact}</p>`;
+    : `\n      <p>World Monitor does not publish a resilience score for ${escapeHtml(country.name)} because it does not meet the published ranking eligibility criteria.</p>`;
   const datasetDescription = scorePublished
     ? `A dated World Monitor Country Resilience Index snapshot for ${country.name}, with the overall score, rank, dimension coverage, confidence classification, and scoring methodology used for this page.`
-    : `A dated World Monitor Country Resilience Index snapshot for ${country.name}, with dimension coverage, confidence classification, and scoring methodology. No overall score or rank is published because the country does not meet the published ranking eligibility criteria.`;
+    : `A dated World Monitor Country Resilience Index snapshot for ${country.name}, with dimension coverage, confidence classification, and scoring methodology. No overall score or rank is published because the country does not meet the published ranking eligibility criteria. ${RANKING_ELIGIBILITY_CLAUSE}`;
   const pulse = livePulse?.countries?.[country.code] || null;
   // Gate on presence, not truthiness: a legitimate score of 0 must still publish.
   const hasPulse = pulse != null && (pulse.partial === true || pulse.score != null);
@@ -1918,7 +2270,7 @@ ${liveGrid}
       </section>${scoreDisclosure}
 ${analysis.html}
       <h2>How to read this page</h2>
-      <p>The 0-100 index records the ${escapeHtml(prettyDate(capturedAt))} snapshot under ${escapeHtml(methodologyFormula)}. See the <a href="/docs/methodology/country-resilience-index">Country Resilience Index methodology</a> for dimensions, sources and confidence rules.</p>
+      <p>The 0-100 index records the ${escapeHtml(prettyDate(capturedAt))} snapshot under ${escapeHtml(methodologyFormula)}. See the <a href="/docs/methodology/country-resilience-index">Country Resilience Index methodology</a> for dimensions, sources and confidence rules. Published revisions that affect ${escapeHtml(country.name)} are in the <a href="/docs/corrections">corrections log</a>.</p>
       <p class="snapshot-note">${escapeHtml(snapshotNote)}</p>
       <p>Use this dated reference with the live map for active alerts, conflict, market and energy signals.</p>
       <p class="source">Download: <a href="${escapeHtml(datasetDownloadHref(path, COUNTRY_DATASET_DOWNLOAD))}">${COUNTRY_DATASET_DOWNLOAD}</a>. Source: ${escapeHtml(snapshotPath)}. Captured ${escapeHtml(capturedAt)}. Methodology: <a href="/docs/methodology/country-resilience-index">Country Resilience Index</a>.</p>`;
@@ -2054,6 +2406,92 @@ ${chokepoints.map((cp) => {
   });
 }
 
+function chokepointFaqs(chokepoint, { content, routes, capturedAt, volumeObservedAt }) {
+  const authored = Array.isArray(content.faqs) ? content.faqs.slice(0, 2) : [];
+  const datedVolume = volumeObservedAt ? prettyDate(volumeObservedAt) : 'the committed trade-route table';
+  const datedCapture = capturedAt ? prettyDate(capturedAt) : 'the committed registry snapshot';
+  const generated = routes.length
+    ? {
+      question: `Which modelled trade routes use ${chokepoint.displayName}?`,
+      answer: `${chokepoint.displayName} is a waypoint on ${routes.map((route) => `${route.name} (${route.volumeDesc})`).join('; ')}. Those corridor volumes are World Monitor modelled figures dated ${datedVolume} in ${TRADE_ROUTES_PATH}.`,
+    }
+    : {
+      question: `How should readers use the ${chokepoint.displayName} reference snapshot?`,
+      answer: `Read the ${datedCapture} registry copy with the live disruption pulse. ${chokepoint.displayName} is tracked as a strategic waterway reference; modelled corridor rows are absent until TRADE_ROUTES gains a waypoint, which is not a claim that traffic is zero.`,
+    };
+  return [...authored, generated].slice(0, 3);
+}
+
+function chokepointRouteTable({ chokepoint, routes, capturedAt, volumeObservedAt }) {
+  const datedStamp = volumeObservedAt || capturedAt;
+  const datedVolume = datedStamp ? timeMarkup(datedStamp) : 'the committed trade-route table';
+  if (!routes.length) {
+    return `<p>${escapeHtml(chokepoint.displayName)} is tracked as a strategic waterway reference. It is not currently mapped to one of World Monitor's modelled trade-route corridors, but its vessel traffic and disruption signals are still monitored on the live map.</p>
+      <div class="table-scroll"><table data-chokepoint-routes>
+        <caption>No modelled corridor is currently mapped through ${escapeHtml(chokepoint.displayName)}. Waterway reference dated ${datedVolume}.</caption>
+        <thead><tr><th scope="col">Route</th><th scope="col">Category</th><th scope="col">Modelled volume</th><th scope="col">As of</th></tr></thead>
+        <tbody>
+          <tr><td colspan="4">Strategic waterway reference — corridor book unmapped, as of ${datedVolume}</td></tr>
+        </tbody>
+      </table></div>`;
+  }
+  return `<div class="table-scroll"><table data-chokepoint-routes>
+        <caption>Modelled trade-route corridors through ${escapeHtml(chokepoint.displayName)}. Volumes are World Monitor corridor figures as of ${datedVolume}.</caption>
+        <thead><tr><th scope="col">Route</th><th scope="col">Category</th><th scope="col">Modelled volume</th><th scope="col">As of</th></tr></thead>
+        <tbody>
+${routes.map((route) => {
+    const category = route.category
+      ? route.category.charAt(0).toUpperCase() + route.category.slice(1)
+      : '—';
+    const asOf = volumeObservedAt ? timeMarkup(volumeObservedAt) : '—';
+    return `          <tr><td>${escapeHtml(route.name)}</td><td>${escapeHtml(category)}</td><td><data value="${escapeHtml(route.volumeDesc)}">${escapeHtml(route.volumeDesc)}</data></td><td>${asOf}</td></tr>`;
+  }).join('\n')}
+        </tbody>
+      </table></div>`;
+}
+
+function renderChokepointAnalysis({
+  chokepoint,
+  content,
+  routes,
+  capturedAt,
+  volumeObservedAt,
+}) {
+  const faqs = chokepointFaqs(chokepoint, { content, routes, capturedAt, volumeObservedAt });
+  const whyHeading = content.whyHeading
+    || `Why does ${chokepoint.displayName} matter for shipping?`;
+  const analysisParagraphs = Array.isArray(content.analysis) ? content.analysis : [];
+  const coords = formatCoordinates(chokepoint.lat, chokepoint.lon);
+  const region = content.region || 'its connected waters';
+  const datedCapture = capturedAt ? timeMarkup(capturedAt) : 'the committed registry snapshot';
+  const shockClause = chokepoint.shockModelSupported
+    ? 'World Monitor enables the energy shock model on this waterway.'
+    : 'World Monitor does not enable the energy shock model on this waterway.';
+  const routeClause = routes.length
+    ? `The ${datedCapture} reference maps ${routes.length} modelled trade-route corridor${routes.length === 1 ? '' : 's'} onto this waypoint.`
+    : `The ${datedCapture} reference maps no modelled trade-route corridor onto this waypoint.`;
+  const eia = EIA_OIL_TRANSIT_BASELINES.byRegistryId[chokepoint.id];
+  const eiaYear = String(EIA_OIL_TRANSIT_BASELINES.referenceYear);
+  const eiaParagraph = eia
+    ? `<p>The ${timeMarkup(eiaYear, eiaYear)} ${escapeHtml(EIA_OIL_TRANSIT_BASELINES.source)} series records ${escapeHtml(String(eia.mbd))} million barrels a day on the ${escapeHtml(eia.eiaName)} row. ${escapeHtml(shockClause)}</p>`
+    : `<p>${escapeHtml(shockClause)} This waterway has no row in the committed ${escapeHtml(String(EIA_OIL_TRANSIT_BASELINES.referenceYear))} ${escapeHtml(EIA_OIL_TRANSIT_BASELINES.source)} series.</p>`;
+  const html = `      <article data-chokepoint-analysis>
+        <h2>${escapeHtml(whyHeading)}</h2>
+        <p>${escapeHtml(chokepoint.displayName)} sits at ${escapeHtml(coords)} and connects ${escapeHtml(region)}. ${routeClause}</p>
+${analysisParagraphs.map((paragraph) => `        <p>${escapeHtml(paragraph)}</p>`).join('\n')}
+        ${eiaParagraph}
+        ${content.alternative ? `<p>${escapeHtml(content.alternative)}</p>` : ''}
+        <h3>Major trade routes through ${escapeHtml(chokepoint.displayName)}</h3>
+        ${chokepointRouteTable({ chokepoint, routes, capturedAt, volumeObservedAt })}
+        <h3>How to read this page</h3>
+        <p>The crawlable Dataset is the ${datedCapture} registry-and-route snapshot under the <a href="/docs/methodology/chokepoints">chokepoint disruption methodology</a>. Live pulse tiles are a separately frozen observation and are not copied into this Dataset. Modelled corridor volumes are dated ${volumeObservedAt ? timeMarkup(volumeObservedAt) : 'with the committed trade-route table'}.</p>
+        <p class="snapshot-note">Template revision ${escapeHtml(CHOKEPOINT_PAGE_CONTENT_VERSION)}. Reference observation ${capturedAt ? timeMarkup(capturedAt) : 'unspecified'}. This note is a methodology-revision stamp, not a live AIS clock.</p>
+        <h3>Questions about ${escapeHtml(chokepoint.displayName)}</h3>
+${faqs.map((faq) => `        <details data-chokepoint-faq><summary>${escapeHtml(faq.question)}</summary><p>${escapeHtml(faq.answer)}</p></details>`).join('\n')}
+      </article>`;
+  return { html, faqs };
+}
+
 function renderChokepointPage({
   chokepoint,
   baseUrl,
@@ -2061,6 +2499,8 @@ function renderChokepointPage({
   tradeRoutesById,
   researchReports = [],
   livePulse = null,
+  capturedAt = null,
+  volumeObservedAt = null,
 }) {
   const path = `/chokepoints/${chokepoint.slug}/`;
   const content = CHOKEPOINT_CONTENT[chokepoint.id] || {};
@@ -2075,19 +2515,18 @@ function renderChokepointPage({
   const routes = chokepoint.routeIds
     .map((id) => tradeRoutesById.get(id))
     .filter(Boolean);
-  const routesSection = routes.length
-    ? `<ul class="routes">
-${routes.map((route) => {
-    const category = route.category ? route.category.charAt(0).toUpperCase() + route.category.slice(1) : '';
-    return `        <li>${escapeHtml(route.name)} <span class="vol">&middot; ${escapeHtml(route.volumeDesc)}${category ? ` &middot; ${escapeHtml(category)}` : ''}</span></li>`;
-  }).join('\n')}
-      </ul>`
-    : `<p>${escapeHtml(chokepoint.displayName)} is tracked as a strategic waterway reference. It is not currently mapped to one of World Monitor's modelled trade-route corridors, but its vessel traffic and disruption signals are still monitored on the live map.</p>`;
+  const analysis = renderChokepointAnalysis({
+    chokepoint,
+    content,
+    routes,
+    capturedAt,
+    volumeObservedAt,
+  });
 
   const tiles = [
     content.region ? metricTile('Connects', content.region) : null,
     metricTile('Position', formatCoordinates(chokepoint.lat, chokepoint.lon)),
-    chokepoint.shockModelSupported ? metricTile('Energy shock model', 'Yes') : null,
+    metricTile('Energy shock model', chokepoint.shockModelSupported ? 'Yes' : 'No'),
   ].filter(Boolean).join('\n');
 
   const relatedItems = [];
@@ -2105,19 +2544,26 @@ ${routes.map((route) => {
   // Presence, not truthiness -- a fully calm chokepoint scores 0, which is a
   // real published value and must not fall back to the loading skeleton.
   const hasPulse = pulse != null && pulse.disruptionScore != null;
-  const liveState = hasPulse ? (pulse.partial ? 'partial' : 'ready') : 'loading';
+  const transitsLabel = publishedTransitCountLabel(pulse?.todayTransits);
+  const transitsWithheld = hasPulse && transitsLabel == null;
+  const pulsePartial = pulse?.partial === true || transitsWithheld;
+  const liveState = hasPulse ? (pulsePartial ? 'partial' : 'ready') : 'loading';
   const liveStatus = hasPulse
-    ? (pulse.partial ? 'Published partial pulse' : 'Published pulse')
+    ? (pulsePartial ? 'Published partial pulse' : 'Published pulse')
     : 'Waiting for live enhancement';
+  const transitsNote = transitsWithheld
+    ? `        <p data-chokepoint-transits-note>${escapeHtml(withheldTransitCountSentence(chokepoint.displayName))}</p>`
+    : '        <p data-chokepoint-transits-note hidden></p>';
   const liveGrid = hasPulse
     ? `        <div class="grid" data-live-grid aria-label="Current chokepoint status" aria-busy="false">
           <div class="metric"><span>Disruption score</span><strong><span data-chokepoint-score>${escapeHtml(pulse.disruptionScore)}</span><small data-chokepoint-band>${escapeHtml(pulse.status)}</small></strong></div>
           <div class="metric"><span>Congestion</span><strong data-chokepoint-congestion>${escapeHtml(pulse.congestion)}</strong></div>
           <div class="metric"><span>Warnings and AIS</span><strong data-chokepoint-warnings>${escapeHtml(pulse.warnings)}</strong></div>
-          <div class="metric"><span>Today's transits</span><strong data-chokepoint-transits>${escapeHtml(pulse.todayTransits ?? 'Unavailable')}</strong></div>
+          <div class="metric"><span>Today's transits</span><strong data-chokepoint-transits>${escapeHtml(transitsLabel ?? '—')}</strong></div>
           <div class="metric"><span>Week-over-week movement</span><strong data-chokepoint-movement>${escapeHtml(pulse.weekMovement ?? 'Unavailable')}</strong></div>
         </div>
-        <p data-chokepoint-description>${escapeHtml(pulse.description)}</p>`
+        <p data-chokepoint-description>${escapeHtml(pulse.description)}</p>
+${transitsNote}`
     : `        <p class="tool-note" data-live-fallback>Current disruption metrics load after page enhancement. The static waterway and route context below remains the dated crawlable reference.</p>
         <div class="grid" data-live-grid hidden aria-label="Current chokepoint status" aria-busy="true">
           <div class="metric"><span>Disruption score</span><strong><span data-chokepoint-score></span><small data-chokepoint-band></small></strong></div>
@@ -2126,12 +2572,13 @@ ${routes.map((route) => {
           <div class="metric"><span>Today's transits</span><strong data-chokepoint-transits></strong></div>
           <div class="metric"><span>Week-over-week movement</span><strong data-chokepoint-movement></strong></div>
         </div>
-        <p data-chokepoint-description hidden></p>`;
+        <p data-chokepoint-description hidden></p>
+        <p data-chokepoint-transits-note hidden></p>`;
 
   const body = `      <p class="eyebrow">Chokepoint</p>
       <h1>${escapeHtml(chokepoint.displayName)}</h1>
       <p class="lede">${escapeHtml(blurb)}</p>
-      <section class="live-tool" data-live-chokepoint data-chokepoint-id="${escapeHtml(chokepoint.id)}" data-state="${liveState}"${hasPulse ? ' data-published-pulse' : ''}>
+      <section class="live-tool" data-live-chokepoint data-chokepoint-id="${escapeHtml(chokepoint.id)}" data-chokepoint-name="${escapeHtml(chokepoint.displayName)}" data-state="${liveState}"${hasPulse ? ' data-published-pulse' : ''}>
         <div class="tool-head">
           <div>
             <p class="eyebrow">Current status</p>
@@ -2155,13 +2602,12 @@ ${liveGrid}
       <section class="grid" aria-label="Chokepoint overview">
 ${tiles}
       </section>
-      <h2>Major trade routes through ${escapeHtml(chokepoint.displayName)}</h2>
-      ${routesSection}
+${analysis.html}
       <h2>Related</h2>
       <ul class="related">
 ${relatedItems.map((item) => `        <li>${item}</li>`).join('\n')}
       </ul>
-      <p class="source">Download: <a href="${escapeHtml(datasetDownloadHref(path, CHOKEPOINT_DATASET_DOWNLOAD))}">${CHOKEPOINT_DATASET_DOWNLOAD}</a>. Source: ${CHOKEPOINT_REGISTRY_PATH} and ${TRADE_ROUTES_PATH}. Methodology: <a href="/docs/methodology/chokepoints">how chokepoint disruption is scored</a>.</p>`;
+      <p class="source">Download: <a href="${escapeHtml(datasetDownloadHref(path, CHOKEPOINT_DATASET_DOWNLOAD))}">${CHOKEPOINT_DATASET_DOWNLOAD}</a>. Source: ${CHOKEPOINT_REGISTRY_PATH} and ${TRADE_ROUTES_PATH}. Captured ${capturedAt ? escapeHtml(capturedAt) : 'unspecified'}. Methodology: <a href="/docs/methodology/chokepoints">how chokepoint disruption is scored</a>.</p>`;
   const hasCoordinates = Number.isFinite(chokepoint.lat) && Number.isFinite(chokepoint.lon);
   const geoCoordinates = hasCoordinates
     ? {
@@ -2181,12 +2627,52 @@ ${relatedItems.map((item) => `        <li>${item}</li>`).join('\n')}
       : null,
   ].filter(Boolean);
   const referenceDownload = absoluteUrl(baseUrl, datasetDownloadHref(path, CHOKEPOINT_DATASET_DOWNLOAD));
+  const datasetId = `${absoluteUrl(baseUrl, path)}#chokepoint-dataset`;
+  const coordinatesValue = formatCoordinates(chokepoint.lat, chokepoint.lon);
+  const variableMeasured = [
+    { '@type': 'PropertyValue', name: 'Geographic coordinates', value: coordinatesValue },
+    ...(content.region
+      ? [{ '@type': 'PropertyValue', name: 'Connected waters', value: content.region }]
+      : []),
+    { '@type': 'PropertyValue', name: 'Energy shock model support', value: chokepoint.shockModelSupported ? 'Yes' : 'No' },
+    { '@type': 'PropertyValue', name: 'Modelled trade routes', value: routes.length },
+  ];
+  const dataset = {
+    '@type': 'Dataset',
+    '@id': datasetId,
+    name: `World Monitor chokepoint reference for ${chokepoint.displayName}`,
+    description: `A World Monitor maritime reference dataset for ${chokepoint.displayName}, with its position, connected waters, energy shock model support, and modelled trade-route corridors.`,
+    url: absoluteUrl(baseUrl, path),
+    identifier: chokepoint.id,
+    creator: { ...WORLD_MONITOR_ORG },
+    license: DATASET_LICENSE,
+    datePublished: capturedAt || undefined,
+    dateModified: laterDate(lastmod, DATASET_SCHEMA_CONTENT_VERSION.chokepoint),
+    temporalCoverage: datasetTemporalCoverage(capturedAt),
+    isAccessibleForFree: true,
+    includedInDataCatalog: includedInDataCatalog(baseUrl),
+    variableMeasured,
+    spatialCoverage: {
+      '@type': 'Place',
+      name: chokepoint.displayName,
+      identifier: chokepoint.id,
+      geo: [geoCoordinates, geoShape].filter(Boolean),
+    },
+    distribution: [
+      dataDownload(referenceDownload),
+    ],
+  };
   return pageDocument({
     baseUrl,
     path,
     title: `${chokepoint.displayName} Chokepoint Status | World Monitor`,
     description,
     lastmod,
+    extraStyles: `
+      details[data-chokepoint-faq] { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; background: var(--panel); }
+      details[data-chokepoint-faq] summary { cursor: pointer; color: var(--text); font-weight: 600; }
+      details[data-chokepoint-faq] p { margin: 8px 0 0; }
+`,
     jsonLd: [
       {
         '@context': 'https://schema.org',
@@ -2202,31 +2688,16 @@ ${relatedItems.map((item) => `        <li>${item}</li>`).join('\n')}
           geo: [geoCoordinates, geoShape].filter(Boolean),
           additionalProperty: additionalProperty.length ? additionalProperty : undefined,
         },
-        mainEntity: {
-          '@type': 'Dataset',
-          name: `World Monitor chokepoint reference for ${chokepoint.displayName}`,
-          description: `A World Monitor maritime reference dataset for ${chokepoint.displayName}, with its position, connected waters, energy shock model support, and modelled trade-route corridors.`,
-          creator: { ...WORLD_MONITOR_ORG },
-          license: DATASET_LICENSE,
-          dateModified: laterDate(lastmod, DATASET_SCHEMA_CONTENT_VERSION),
-          isAccessibleForFree: true,
-          includedInDataCatalog: includedInDataCatalog(baseUrl),
-          variableMeasured: [
-            'Geographic coordinates',
-            'Connected waters',
-            'Energy shock model support',
-            'Modelled trade routes',
-          ],
-          spatialCoverage: {
-            '@type': 'Place',
-            name: chokepoint.displayName,
-            identifier: chokepoint.id,
-            geo: [geoCoordinates, geoShape].filter(Boolean),
-          },
-          distribution: [
-            dataDownload(referenceDownload),
-          ],
-        },
+        mainEntity: dataset,
+      },
+      {
+        '@context': 'https://schema.org',
+        '@type': 'FAQPage',
+        mainEntity: analysis.faqs.map((faq) => ({
+          '@type': 'Question',
+          name: faq.question,
+          acceptedAnswer: { '@type': 'Answer', text: faq.answer },
+        })),
       },
       dataCatalogLd(baseUrl),
     ],
@@ -2376,6 +2847,8 @@ ${snapshotSection}
     name: country.name,
     identifier: country.code,
   }));
+  // Dataset.spatialCoverage must stay a literal Place for Google; WebPage.about keeps Country.
+  const coverageSpatial = coveragePlaces.map((place) => ({ ...place, '@type': 'Place' }));
   const distribution = [
     dataDownload(absoluteUrl(baseUrl, datasetDownloadHref(path, CRISIS_DATASET_DOWNLOAD))),
   ];
@@ -2418,13 +2891,13 @@ ${snapshotSection}
           license: DATASET_LICENSE,
           dateModified: laterDate(
             hasPulse ? pulseDateOnly(pulse.asOf, lastmod) : lastmod,
-            DATASET_SCHEMA_CONTENT_VERSION,
+            DATASET_SCHEMA_CONTENT_VERSION.crisis,
           ),
           temporalCoverage: hasPulse ? datasetTemporalCoverage(pulse.referencePeriod) : undefined,
           isAccessibleForFree: true,
           includedInDataCatalog: includedInDataCatalog(baseUrl),
           variableMeasured,
-          spatialCoverage: coveragePlaces.length === 1 ? coveragePlaces[0] : coveragePlaces,
+          spatialCoverage: coverageSpatial.length === 1 ? coverageSpatial[0] : coverageSpatial,
           distribution,
         },
       },
@@ -2548,8 +3021,10 @@ ${examples}
           license: DATASET_LICENSE,
           // This reference is a formula plus documentation-derived examples --
           // it has no observation window, so it carries no temporalCoverage and
-          // is dated from its content version, not the freeze wall clock.
-          dateModified: lastmod,
+          // is dated from its content version, not the freeze wall clock. The
+          // family schema stamp rides alongside so a Dataset-shape change signals
+          // recrawl without dragging the page lastmod with it (#7382).
+          dateModified: laterDate(lastmod, DATASET_SCHEMA_CONTENT_VERSION.tools),
           isAccessibleForFree: true,
           includedInDataCatalog: includedInDataCatalog(baseUrl),
           variableMeasured: [
@@ -2975,6 +3450,8 @@ export async function buildCorpus({
         tradeRoutesById: data.tradeRoutesById,
         researchReports: data.researchReports,
         livePulse: data.livePulse,
+        capturedAt: data.chokepointObservation?.capturedAt || null,
+        volumeObservedAt: data.chokepointObservation?.volumeObservedAt || null,
       }),
     );
     writeGeneratedFile(
@@ -2982,6 +3459,8 @@ export async function buildCorpus({
       datasetDownloadFile(pagePath, CHOKEPOINT_DATASET_DOWNLOAD),
       chokepointDatasetDownload(chokepoint, {
         tradeRoutesById: data.tradeRoutesById,
+        capturedAt: data.chokepointObservation?.capturedAt || null,
+        volumeObservedAt: data.chokepointObservation?.volumeObservedAt || null,
       }),
     );
   }

@@ -3289,6 +3289,9 @@
           "path": "scripts/seed-resilience-static.mjs"
         },
         {
+          "path": "server/worldmonitor/resilience/v1/_indicator-source-policy.ts"
+        },
+        {
           "path": "src/config/feeds.ts"
         }
       ]
@@ -7107,9 +7110,6 @@
       "references": [
         {
           "path": "scripts/build-chokepoint-transit-snapshot.mjs"
-        },
-        {
-          "path": "scripts/build-research-reports.mjs"
         }
       ]
     },
@@ -7593,15 +7593,10 @@
       "host": "restcountries.com",
       "provider": "restcountries.com",
       "kind": "structured",
-      "observed": true,
+      "observed": false,
       "license": "Provider terms for this upstream API/dataset; verify before redistribution",
       "attribution": "Credit restcountries.com and link to the original upstream API/dataset.",
-      "status": "terms-review",
-      "references": [
-        {
-          "path": "server/worldmonitor/intelligence/v1/get-country-facts.ts"
-        }
-      ]
+      "status": "excluded"
     },
     {
       "host": "reuters-reutersnow-1-eu.rakuten.wurl.tv",
@@ -7924,6 +7919,9 @@
         },
         {
           "path": "scripts/build-crawlable-corpus.mjs"
+        },
+        {
+          "path": "scripts/build-use-cases.mjs"
         }
       ]
     },
@@ -14227,6 +14225,9 @@
         },
         {
           "path": "src/config/docs-locale-seo.ts"
+        },
+        {
+          "path": "src/config/schema-graph-ids.ts"
         },
         {
           "path": "src/config/variant-meta.ts"
