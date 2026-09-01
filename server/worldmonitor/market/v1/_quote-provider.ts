@@ -291,8 +291,12 @@ export class CascadeQuoteProvider implements MarketQuoteProvider {
     for (const provider of candidates) {
       // Caller cancellation, before or between attempts, ends the cascade
       // without a provider verdict — trying the next provider would spend
-      // budget on an answer nobody is waiting for (#6475).
-      if (signal?.aborted) return { status: 'cancelled' };
+      // budget on an answer nobody is waiting for (#6475). A rate_limited
+      // verdict already on record is preserved (same as the post-error break).
+      if (signal?.aborted) {
+        if (sawRateLimited) return { status: 'rate_limited' };
+        return { status: 'cancelled' };
+      }
       const outcome = await provider.fetchQuote(symbol, signal);
       if (outcome.status === 'cancelled') return outcome;
       if (outcome.status === 'ok') {

@@ -39,6 +39,7 @@ import {
 import {
   CascadeQuoteProvider,
   FinnhubQuoteProvider,
+  AlphaVantageQuoteProvider,
 } from '../server/worldmonitor/market/v1/_quote-provider';
 
 const BOOTSTRAP_KEY = 'market:stocks-bootstrap:v1';
@@ -200,6 +201,24 @@ describe('gap-fetch failure provenance (#6475)', () => {
     assert.equal(harness.finnhubCalls.length, 1, 'a real provider failure keeps the backoff');
     assert.equal(reasonFor(second, 'MSFT'), 'MARKET_QUOTE_UNAVAILABLE_REASON_PROVIDER_ERROR');
   });
+
+  it('a second call after a real 429 preserves PROVIDER_RATE_LIMITED and rateLimited', async () => {
+    const harness = installHarness({ provider: { TSLA: { status: 429 } } });
+
+    const first = await listMarketQuotes(CTX, { symbols: ['TSLA'] });
+    assert.equal(reasonFor(first, 'TSLA'), 'MARKET_QUOTE_UNAVAILABLE_REASON_PROVIDER_RATE_LIMITED');
+    assert.equal(first.rateLimited, true);
+    assert.equal(harness.finnhubCalls.length, 1);
+
+    const second = await listMarketQuotes(CTX, { symbols: ['TSLA'] });
+    assert.equal(harness.finnhubCalls.length, 1, '429 backoff must absorb the immediate retry');
+    assert.equal(
+      reasonFor(second, 'TSLA'),
+      'MARKET_QUOTE_UNAVAILABLE_REASON_PROVIDER_RATE_LIMITED',
+      'backoff short-circuit must carry the rate-limit verdict, not PROVIDER_ERROR',
+    );
+    assert.equal(second.rateLimited, true);
+  });
 });
 
 describe('provider adapters report caller cancellation as its own outcome (#6475)', () => {
@@ -249,5 +268,39 @@ describe('provider adapters report caller cancellation as its own outcome (#6475
     controller.abort();
     const cascade = new CascadeQuoteProvider([new FinnhubQuoteProvider('key')]);
     assert.deepEqual(await cascade.fetchQuote('AAPL', controller.signal), { status: 'cancelled' });
+  });
+
+  it('preserves rate_limited when the caller aborts after an upstream 429', async () => {
+    const controller = new AbortController();
+    const finnhub = {
+      name: 'finnhub',
+      canQuote: () => true,
+      fetchQuote: async () => {
+        controller.abort(new DOMException('deadline', 'AbortError'));
+        return { status: 'rate_limited' } as const;
+      },
+    };
+    const second = {
+      name: 'second',
+      canQuote: () => true,
+      fetchQuote: async () => ({ status: 'not_found' } as const),
+    };
+
+    const cascade = new CascadeQuoteProvider([finnhub, second]);
+    assert.deepEqual(await cascade.fetchQuote('NVDA', controller.signal), { status: 'rate_limited' });
+  });
+
+  it('Alpha Vantage maps an aborted fetch to cancelled, never to error', async () => {
+    globalThis.fetch = ((_input: RequestInfo | URL, opts?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        opts?.signal?.addEventListener('abort', () => reject(opts.signal?.reason), { once: true });
+      })) as typeof fetch;
+
+    const controller = new AbortController();
+    const provider = new AlphaVantageQuoteProvider('key');
+    const pending = provider.fetchQuote('AAPL', controller.signal);
+    controller.abort(new DOMException('caller gone', 'AbortError'));
+
+    assert.deepEqual(await pending, { status: 'cancelled' });
   });
 });

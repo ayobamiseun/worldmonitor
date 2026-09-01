@@ -256,7 +256,21 @@ export class QuoteGapFetchFailureError extends Error {
 
 /** The recorded provider verdict a rejection carries, if it carries one. */
 function recordedReasonFromError(err: unknown): Reason | undefined {
-  return err instanceof QuoteGapFetchFailureError ? err.reason : undefined;
+  if (err instanceof QuoteGapFetchFailureError) return err.reason;
+  if (err instanceof CachedFetchUnavailableBackoffError && err.reasonTag) {
+    return err.reasonTag as Reason;
+  }
+  return undefined;
+}
+
+function shouldArmQuoteUnavailableBackoff(err: unknown, callRemainingMs: number): boolean {
+  if (err instanceof CachedFetchCancelledError) return false;
+  // On the deadline-bound path the inflight timeout is a backstop that must
+  // not arm backoff when it races a deadline abort (#6475).
+  if (err instanceof CachedFetchTimeoutError && callRemainingMs <= QUOTE_PROVIDER_CALL_BUDGET_MS) {
+    return false;
+  }
+  return true;
 }
 
 export function classifyGapFetchFailure(input: {
@@ -346,7 +360,12 @@ async function resolveMissingSymbols(missing: string[]): Promise<GapFetchResult>
           throw new QuoteGapFetchFailureError(reason, outcome.status === 'rate_limited' ? 'provider rate limited' : outcome.message);
         },
         QUOTE_NEGATIVE_TTL_SECONDS,
-        { timeoutMs: gapFetchCallTimeoutMs(remainingMs), cacheFetcherErrors: false },
+        {
+          timeoutMs: gapFetchCallTimeoutMs(remainingMs),
+          cacheFetcherErrors: false,
+          unavailableBackoffReason: recordedReasonFromError,
+          shouldArmUnavailableBackoff: (err) => shouldArmQuoteUnavailableBackoff(err, remainingMs),
+        },
       ), deadlineSignal);
 
       if (cached) quotes.set(symbol, cached);
@@ -363,7 +382,7 @@ async function resolveMissingSymbols(missing: string[]): Promise<GapFetchResult>
       const reason = err instanceof CachedFetchCancelledError
         ? REASON.budget
         : err instanceof CachedFetchUnavailableBackoffError
-          ? REASON.providerError
+          ? (err.reasonTag as Reason | undefined) ?? REASON.providerError
           : classifyGapFetchFailure({
               deadlineAborted: deadlineSignal.aborted,
               now,
