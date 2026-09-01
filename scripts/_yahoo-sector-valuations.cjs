@@ -477,6 +477,14 @@ async function collectV7Valuations(
   // keeps the leg: dropping it would remove that client's only proxy path.
   const deferProxyToBatch = typeof client?.fetchV7BatchAcrossExits === 'function'
     || typeof client?.fetchV7BatchDetailed === 'function';
+  const batchBudgetAvailable = () => deadlineAt == null || deadlineAt - now() >= BATCH_MIN_BUDGET_MS;
+  const recordPerSymbolV7Result = (symbol, result) => {
+    diagnostics.push({ symbol, outcomes: result?.diagnostics || [] });
+    if (result?.kind === 'success') {
+      freshVals[symbol] = result.value;
+      if (result.value?.source) valuationSources.add(result.value.source);
+    }
+  };
   for (const s of symbols) {
     let result;
     if (deadlineAt != null && now() >= deadlineAt) {
@@ -486,7 +494,10 @@ async function collectV7Valuations(
         diagnostics: [{ route: 'v7Quote', attempts: 0, responseClass: 'deadline_exceeded', failure: 'valuation_budget_exceeded' }],
       };
     } else if (client?.fetchV7Detailed) {
-      result = await client.fetchV7Detailed(s, { deadlineAt, skipProxy: deferProxyToBatch });
+      result = await client.fetchV7Detailed(s, {
+        deadlineAt,
+        skipProxy: deferProxyToBatch && batchBudgetAvailable(),
+      });
     } else {
       const direct = await fetchYahooV7QuoteDirect(s, { userAgent });
       const routeDiagnostics = [{
@@ -509,11 +520,7 @@ async function collectV7Valuations(
         result = { ...proxied, diagnostics: routeDiagnostics };
       }
     }
-    diagnostics.push({ symbol: s, outcomes: result?.diagnostics || [] });
-    if (result?.kind === 'success') {
-      freshVals[s] = result.value;
-      if (result.value?.source) valuationSources.add(result.value.source);
-    }
+    recordPerSymbolV7Result(s, result);
     const remainingMs = deadlineAt == null ? DEFAULT_REQUEST_SPACING_MS : Math.max(0, deadlineAt - now());
     if (remainingMs > 0) await sleepFn(Math.min(DEFAULT_REQUEST_SPACING_MS, remainingMs));
   }
@@ -537,16 +544,15 @@ async function collectV7Valuations(
   // and the remembered-exit recording live in exactly one place.
   const batchSymbols = symbols.filter((symbol) => !freshVals[symbol]);
   const rotatingBatch = typeof client?.fetchV7BatchAcrossExits === 'function';
-  if (
-    batchSymbols.length > 0
+  const batchShouldRun = batchSymbols.length > 0
     && (rotatingBatch || client?.fetchV7BatchDetailed)
     // Require a real slice of budget, not merely "not yet expired": this route
     // runs BEFORE the quoteSummary tier, so an uncapped slow batch would eat
     // the remainder and starve the alternative source entirely.
-    && (deadlineAt == null || deadlineAt - now() >= BATCH_MIN_BUDGET_MS)
-  ) {
+    && batchBudgetAvailable();
+  let batchError = null;
+  if (batchShouldRun) {
     let batchResult = null;
-    let batchError = null;
     try {
       const batchOptions = {
         deadlineAt: deadlineAt == null ? null : Math.min(deadlineAt, now() + BATCH_BUDGET_MS),
@@ -629,6 +635,41 @@ async function collectV7Valuations(
         };
         if (symbolSource) valuationSources.add(symbolSource);
       }
+    }
+  }
+  const proxyFallbackSymbols = symbols.filter((symbol) => !freshVals[symbol]);
+  if (
+    deferProxyToBatch
+    && proxyFallbackSymbols.length > 0
+    && client?.fetchV7Detailed
+    && (!batchShouldRun || batchError)
+  ) {
+    // The per-symbol loop skipped proxy expecting the batch tier, but the
+    // budget floor blocked it (or the batch threw). Fall back to the configured
+    // exit so symbols are not left with zero proxy recovery (#6279 review).
+    for (const s of proxyFallbackSymbols) {
+      if (deadlineAt != null && now() >= deadlineAt) {
+        const entry = diagnostics.find((item) => item.symbol === s);
+        const deadlineDiagnostic = {
+          route: 'v7Quote',
+          attempts: 0,
+          responseClass: 'deadline_exceeded',
+          failure: 'valuation_budget_exceeded',
+        };
+        if (entry) entry.outcomes.push(deadlineDiagnostic);
+        else diagnostics.push({ symbol: s, outcomes: [deadlineDiagnostic] });
+        continue;
+      }
+      const result = await client.fetchV7Detailed(s, { deadlineAt, skipProxy: false });
+      const entry = diagnostics.find((item) => item.symbol === s);
+      if (entry) entry.outcomes.push(...(result?.diagnostics || []));
+      else diagnostics.push({ symbol: s, outcomes: result?.diagnostics || [] });
+      if (result?.kind === 'success') {
+        freshVals[s] = result.value;
+        if (result.value?.source) valuationSources.add(result.value.source);
+      }
+      const remainingMs = deadlineAt == null ? DEFAULT_REQUEST_SPACING_MS : Math.max(0, deadlineAt - now());
+      if (remainingMs > 0) await sleepFn(Math.min(DEFAULT_REQUEST_SPACING_MS, remainingMs));
     }
   }
   return {

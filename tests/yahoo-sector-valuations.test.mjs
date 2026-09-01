@@ -1756,5 +1756,92 @@ describe('per-symbol v7 tier defers its proxy leg to the rotating batch (#6279)'
       'skipProxy must not touch the proxy',
     );
   });
+
+  it('falls back to per-symbol proxy when the batch budget gate blocks after deferral', async () => {
+    const start = Date.now();
+    let clock = start;
+    const deadlineAt = start + 2_500;
+    const harness = exitHarness({ badExits: [], truncated: ['XLK'], directTruncated: true });
+    const client = new YahooQuoteSummaryClient({
+      directRequest: async (url, options) => {
+        const result = await harness.directRequest(url, options);
+        clock = deadlineAt - 1_900;
+        return result;
+      },
+      proxyRequest: harness.proxyRequest,
+      resolveProxyString: () => 'exit-0',
+      resolveProxyStringForAttempt: (attempt) => `exit-${attempt}`,
+      sleepFn: async () => {},
+      logger: { warn: () => {} },
+    });
+
+    const result = await collectV7Valuations(['XLK'], {
+      client,
+      sleepFn: async () => {},
+      deadlineAt,
+      now: () => clock,
+    });
+
+    assert.ok(
+      singleSymbolProxyQuotes(harness).length >= 1,
+      'when batch cannot run, configured-exit proxy must recover direct failures',
+    );
+    assert.equal(result.valuations.XLK?.trailingPE, 31.2);
+  });
+
+  it('defers per-symbol proxy for fetchV7BatchDetailed-only injected clients', async () => {
+    const harness = exitHarness({ badExits: [], truncated: TRUNCATED, directTruncated: true });
+    const client = new YahooQuoteSummaryClient({
+      directRequest: harness.directRequest,
+      proxyRequest: harness.proxyRequest,
+      resolveProxyString: () => 'exit-0',
+      sleepFn: async () => {},
+      logger: { warn: () => {} },
+    });
+    let batchDetailedCalls = 0;
+    const narrowClient = {
+      fetchV7Detailed: (symbol, opts) => client.fetchV7Detailed(symbol, opts),
+      fetchV7BatchDetailed: async (symbols, opts) => {
+        batchDetailedCalls += 1;
+        return client.fetchV7BatchDetailed(symbols, opts);
+      },
+    };
+
+    const result = await collectV7Valuations(SECTORS, { client: narrowClient, sleepFn: async () => {} });
+
+    assert.deepEqual(
+      singleSymbolProxyQuotes(harness),
+      [],
+      'BatchDetailed-only clients still defer per-symbol proxy to the batch tier',
+    );
+    assert.ok(batchDetailedCalls >= 1, 'the batch fallback must run for uncovered symbols');
+    assert.deepEqual(Object.keys(result.valuations).sort(), ['XLF', 'XLK', 'XLV']);
+  });
+
+  it('falls back to per-symbol proxy when the rotating batch throws', async () => {
+    const harness = exitHarness({ badExits: [], truncated: ['XLK'], directTruncated: true });
+    const client = new YahooQuoteSummaryClient({
+      directRequest: harness.directRequest,
+      proxyRequest: harness.proxyRequest,
+      resolveProxyString: () => 'exit-0',
+      resolveProxyStringForAttempt: (attempt) => `exit-${attempt}`,
+      sleepFn: async () => {},
+      logger: { warn: () => {} },
+    });
+    const throwingClient = {
+      fetchV7Detailed: (symbol, opts) => client.fetchV7Detailed(symbol, opts),
+      fetchV7BatchAcrossExits: async () => {
+        throw new Error('batch boom');
+      },
+    };
+
+    const result = await collectV7Valuations(['XLK'], { client: throwingClient, sleepFn: async () => {} });
+
+    assert.ok(
+      singleSymbolProxyQuotes(harness).length >= 1,
+      'a thrown batch must not leave direct failures with zero proxy recovery',
+    );
+    assert.equal(result.valuations.XLK?.trailingPE, 31.2);
+  });
 });
 
