@@ -30,7 +30,7 @@ const entitlementListeners: Array<(state: EntitlementState | null) => void> = []
 const subscriptionListeners: Array<() => void> = [];
 
 const trackGateHit = vi.fn();
-const saveTabsState = vi.fn(() => ({ persisted: true }));
+const saveTabsState = vi.fn((..._args: unknown[]) => ({ persisted: true }));
 const showToast = vi.fn();
 
 const capEvaluations = vi.hoisted(() => ({ count: 0 }));
