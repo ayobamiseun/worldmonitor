@@ -61,6 +61,9 @@ export function attachBrowserLossDiagnostics(
   };
   events.onCrash(() => report('renderer-crash'));
   events.onBrowserDisconnected(() => report('browser-disconnected'));
-  events.onContextClose(() => report('context-closed'));
+  // Playwright closes contexts before it emits Browser.disconnected when the
+  // whole browser exits. Defer the ambiguous context signal for one microtask
+  // so the process-level signal can win the same synchronous close cascade.
+  events.onContextClose(() => queueMicrotask(() => report('context-closed')));
   return { dispose: () => { armed = false; } };
 }
