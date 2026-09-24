@@ -5,6 +5,9 @@ export const MAX_LIVE_SNAPSHOT_AGE_MS = 48 * 60 * 60 * 1_000;
 const MAX_AIRSPACE_OBSERVATION_AGE_MS = 24 * 60 * 60 * 1_000;
 const MAX_RENDERED_ROWS = 5;
 
+// The country intel brief labels CII bands from shared/cii-band.js; this file
+// cannot import it (see the verbatim-copy note below), so
+// tests/country-brief-evidence.test.mts holds the two tables equal.
 const SCORE_BANDS = [
   { min: 81, label: 'Critical' },
   { min: 66, label: 'High' },

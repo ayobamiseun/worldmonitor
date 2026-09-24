@@ -194,7 +194,13 @@ async function loadCountryDeepDivePanel(options = {}) {
       export function escapeHtml(value) { return value ?? ''; }
       export function safeHtmlToString(value) { return String(value ?? ''); }
     `],
-    ['intel-brief-stub', `export function formatIntelBrief(value) { return value; }`],
+    ['intel-brief-stub', `
+      export function formatIntelBrief(value) { return value; }
+      export function renderBriefEvidenceFooter(items, options = {}) {
+        if (!items || !items.length) return '';
+        return '<details class="' + (options.className ?? '') + '">' + items.map((item) => item.id + ' ' + item.label).join('; ') + '</details>';
+      }
+    `],
     ['export-stub', `
       const state = globalThis.__wmCountryDeepDiveTestState;
       export function exportCountryEvidenceMarkdown(data) {

@@ -70,6 +70,7 @@ import {
   developmentsHasDatedItem,
   isBriefSectionHeader,
   normalizeFrozenDevelopments,
+  parseBriefSections,
 } from './crawlable-developments.mjs';
 
 // One predicate for the freeze's coverage counters and this build's
@@ -3322,6 +3323,60 @@ export function formatCrawlableIntelBrief(text, countryName) {
   return out.join('\n');
 }
 
+function briefHeadingText(heading, name) {
+  return /^WHAT THIS MEANS FOR\b/i.test(heading)
+    ? `What this means for ${name}`
+    : heading.replace(/:\s*$/, '').toLowerCase().replace(/^./, (letter) => letter.toUpperCase());
+}
+
+// Sections a page shows from an evidence-grounded brief. Situation is left
+// out: it restates the Recent developments list rendered directly above it.
+function publishedBriefSections(brief, country) {
+  return parseBriefSections(brief.text, country).filter((section) => section.key !== 'situation');
+}
+
+// Evidence-grounded brief (sections + World Monitor data points). Returns ''
+// when no section beyond Situation survived: an empty brief block tells a
+// reader nothing, so the page shows none.
+function renderStructuredIntelBrief(brief, name, countryCode) {
+  const sections = publishedBriefSections(brief, { countryCode, countryName: name });
+  if (sections.length === 0) return '';
+  const citedSources = new Set();
+  const citedEvidence = new Set();
+  const blocks = sections.map((section) => {
+    const claims = section.claims.map((claim) => {
+      for (const index of claim.sourceIndexes) citedSources.add(index);
+      for (const id of claim.evidenceIds) citedEvidence.add(id);
+      const markers = [...claim.sourceIndexes.map((index) => `[${index}]`), ...claim.evidenceIds.map((id) => `[${id}]`)].join('');
+      return `          <p>${escapeHtml(claim.text)} ${escapeHtml(markers)}</p>`;
+    });
+    return [`          <h3>${escapeHtml(briefHeadingText(section.heading, name))}</h3>`, ...claims].join('\n');
+  });
+  const evidence = (Array.isArray(brief.evidence) ? brief.evidence : []).filter((item) => citedEvidence.has(item.id));
+  const evidenceItems = evidence.map((item) => {
+    const label = `${escapeHtml(item.id)} · ${escapeHtml(item.label)}: ${escapeHtml(item.value)}`;
+    const linked = item.url ? `<a href="${escapeHtml(item.url)}"${isWorldMonitorUrl(item.url) ? '' : ' rel="nofollow noopener"'}>${label}</a>` : label;
+    return `            <li class="source">${linked} · <time datetime="${escapeHtml(item.asOf)}">${escapeHtml(prettyDate(item.asOf.slice(0, 10)))}</time></li>`;
+  });
+  const evidenceList = evidenceItems.length > 0
+    ? `\n          <h4>World Monitor data cited</h4>\n          <ul data-brief-evidence>\n${evidenceItems.join('\n')}\n          </ul>`
+    : '';
+  const counts = [
+    citedSources.size > 0 ? `${citedSources.size} cited ${citedSources.size === 1 ? 'report' : 'reports'}` : '',
+    evidence.length > 0 ? `${evidence.length} World Monitor data ${evidence.length === 1 ? 'point' : 'points'}` : '',
+  ].filter(Boolean).join(' and ');
+  const credit = `Automated summary of ${counts}, generated <time datetime="${escapeHtml(brief.generatedAt)}">${escapeHtml(formatStaticDateTime(brief.generatedAt))}</time>.`;
+  return `        <div data-intel-brief>\n          <h3>Country brief</h3>\n${blocks.join('\n')}${evidenceList}\n          <p class="source">${credit}</p>\n        </div>`;
+}
+
+function isWorldMonitorUrl(url) {
+  try {
+    return new URL(url).hostname === 'www.worldmonitor.app';
+  } catch {
+    return false;
+  }
+}
+
 export function renderCountryDevelopments({ countryCode = '', countryName, developments, ciiEntry = null, pulse = null }) {
   const name = String(countryName || '').trim();
   if (!name) throw new Error('renderCountryDevelopments requires a country name');
@@ -3364,23 +3419,16 @@ export function renderCountryDevelopments({ countryCode = '', countryName, devel
       .join('\n');
     parts.push(`        <ul>\n${items}\n        </ul>`);
   }
-  if (brief) {
+  // A skipped or withheld brief renders nothing: the reason is pipeline
+  // bookkeeping (it stays in the snapshot and the build log), and printing it
+  // told readers the page had failed. The model id is never shown.
+  if (brief && Array.isArray(brief.evidence)) {
+    const briefHtml = renderStructuredIntelBrief(brief, name, countryCode);
+    if (briefHtml) parts.push(briefHtml);
+  } else if (brief) {
     const briefHtml = formatCrawlableIntelBrief(brief.text, name);
-    const generatedLine = `Brief generated <time datetime="${escapeHtml(brief.generatedAt)}">${escapeHtml(formatStaticDateTime(brief.generatedAt))}</time>`;
-    parts.push(`        <div data-intel-brief>\n          <h3>Country brief</h3>\n${briefHtml}\n          <p class="source">${generatedLine}${brief.model ? ` by ${escapeHtml(brief.model)}` : ''} from ${brief.sources.length} grounding sources.</p>\n        </div>`);
-  } else {
-    const reasons = {
-      'no-grounding': 'No country-specific grounding sources were captured.',
-      'thin-grounding': 'The grounding sources did not include at least two distinct publishers.',
-      'uncurated-grounding': 'The grounding sources did not include a curated news source.',
-      'unsupported-citation': 'The brief was withheld because its citations did not pass the source-grounding checks.',
-      'no-service-key': 'Brief generation was unavailable when this snapshot was captured.',
-      failed: 'The brief request failed when this snapshot was captured.',
-      empty: 'The brief service returned no usable brief for this snapshot.',
-    };
-    const reason = Object.hasOwn(reasons, rows?.briefSkipped)
-      ? reasons[rows.briefSkipped] : 'No brief was captured for this snapshot.';
-    parts.push(`        <p data-brief-unavailable>No country brief is available for ${escapeHtml(name)} in this snapshot. ${reason}</p>`);
+    const credit = `Automated summary of ${brief.sources.length} cited ${brief.sources.length === 1 ? 'report' : 'reports'}, generated <time datetime="${escapeHtml(brief.generatedAt)}">${escapeHtml(formatStaticDateTime(brief.generatedAt))}</time>.`;
+    parts.push(`        <div data-intel-brief>\n          <h3>Country brief</h3>\n${briefHtml}\n          <p class="source">${credit}</p>\n        </div>`);
   }
   if (timeline.length > 0) {
     const events = timeline
@@ -3392,6 +3440,9 @@ export function renderCountryDevelopments({ countryCode = '', countryName, devel
       })
       .join('\n');
     parts.push(`        <ol data-intel-timeline>\n${events}\n        </ol>`);
+  }
+  if (parts.length === 0) {
+    parts.push(`        <p data-developments-empty>No recent reporting on ${escapeHtml(name)} was captured in this snapshot.</p>`);
   }
   const inner = parts.join('\n');
   return `      <section data-country-developments aria-label="Recent developments in ${escapeHtml(name)}">\n        <h2>Recent developments in ${escapeHtml(name)}</h2>\n${inner}\n      </section>`;
@@ -3434,6 +3485,21 @@ function assertDevelopmentsBrief(brief) {
   }
   if (citations.some((citation) => citation < 1 || citation > brief.sources.length)) {
     throw new Error('country developments brief carries an out-of-range source citation');
+  }
+  if (brief.evidence === undefined) return;
+  if (!Array.isArray(brief.evidence)) throw new Error('country developments brief carries malformed evidence');
+  const evidenceIds = new Set();
+  for (const item of brief.evidence) {
+    const valid = item && typeof item === 'object'
+      && /^E\d{1,2}$/.test(item.id)
+      && ['kind', 'label', 'value', 'factText'].every((field) => typeof item[field] === 'string' && item[field].trim())
+      && typeof item.asOf === 'string' && isCanonicalIsoInstant(item.asOf)
+      && (item.url === undefined || item.url === '' || isValidHttpsUrl(item.url));
+    if (!valid) throw new Error('country developments brief evidence is missing id, label, value, fact text, ISO time, or an https URL');
+    evidenceIds.add(item.id);
+  }
+  for (const match of brief.text.matchAll(/\[(E\d{1,2})\]/g)) {
+    if (!evidenceIds.has(match[1])) throw new Error('country developments brief cites evidence it does not carry');
   }
 }
 
@@ -3510,7 +3576,18 @@ export function assertCountryDevelopmentsRendered({
       throw new Error(`${pagePath} dropped frozen headline ${headline.url}`);
     }
   }
-  if (rows.brief && typeof rows.brief.text === 'string' && rows.brief.text.trim()) {
+  if (rows.brief && Array.isArray(rows.brief.evidence)) {
+    // Structured briefs render their non-Situation claims, each as escaped
+    // text in its own paragraph; every one must reach the page, and a brief
+    // with none renders no block to check.
+    for (const section of publishedBriefSections(rows.brief, { countryCode, countryName })) {
+      for (const claim of section.claims) {
+        if (!html.includes(escapeHtml(claim.text))) {
+          throw new Error(`${pagePath} dropped its frozen intel brief`);
+        }
+      }
+    }
+  } else if (rows.brief && typeof rows.brief.text === 'string' && rows.brief.text.trim()) {
     // Anchor on first AND last content lines after stripping section titles,
     // bullets, and emphasis markers. Every generated brief opens with the same
     // boilerplate header, so the first line alone cannot catch a cross-country
@@ -3570,7 +3647,7 @@ function intelBriefHtml(html) {
 // still plain text rather than <h*> tags.
 const MEANS_FOR_ISO_RE = /^\s*what this means for [a-z]{2}(?=\s*(?::|$))/im;
 
-export function assertCountryBriefPresentation({ pagePath, html, sources }) {
+export function assertCountryBriefPresentation({ pagePath, html, sources, evidence = [] }) {
   const main = corpusMainHtml(html);
   if (main.includes('**')) {
     throw new Error(`${pagePath} renders literal markdown emphasis in <main>`);
@@ -3583,7 +3660,9 @@ export function assertCountryBriefPresentation({ pagePath, html, sources }) {
       .filter((match) => !/\bclass="source"/.test(match[2]))
       .map((match) => corpusVisibleText(match[3]).replace(/&(amp|lt|gt|quot|#39);/g,
         (entity) => ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" })[entity]));
-    const gap = briefCitationGroundingGap({ text: claims.join('\n'), sources });
+    // Rendered claims may cite only World Monitor evidence: the Situation
+    // section that carries the headline citations is not rendered.
+    const gap = briefCitationGroundingGap({ text: claims.join('\n'), sources, evidence }, {}, { requireHeadlineCitation: evidence.length === 0 });
     if (gap) throw new Error(`${pagePath} brief has unsupported citation: ${gap}`);
   }
   const headingSource = brief ?? main;
@@ -3930,7 +4009,7 @@ ${analysis.readingGuide ? `      <h2>How to use this evidence</h2>
     scriptSrcs: ['/tools/live-tools.js'],
   });
   assertCountryDevelopmentsRendered({ pagePath: path, html, developments, countryCode: country.code, countryName: country.name });
-  assertCountryBriefPresentation({ pagePath: path, html, sources: developments?.brief?.sources || [] });
+  assertCountryBriefPresentation({ pagePath: path, html, sources: developments?.brief?.sources || [], evidence: developments?.brief?.evidence || [] });
   assertLivePulseMovementClaim(html, { pagePath: path, ageDays });
   return html;
 }
