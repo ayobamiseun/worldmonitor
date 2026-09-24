@@ -80,6 +80,45 @@ describe('MaterialEventsPanel refresh', () => {
     expect(element.querySelector('.panel-loading')).toBeNull();
   });
 
+  it('shares one in-flight request across overlapping callers', async () => {
+    const panel = new MaterialEventsPanel();
+    document.body.appendChild(panel.getElement());
+
+    let resolveFirst!: (value: ReturnType<typeof okResponse>) => void;
+    const firstResponse = new Promise<ReturnType<typeof okResponse>>((resolve) => { resolveFirst = resolve; });
+    mockListMaterialEvents.mockImplementationOnce(() => firstResponse);
+    mockListMaterialEvents.mockImplementation(() => Promise.resolve(okResponse()));
+
+    // The auto-retry countdown calls fetchData directly, outside the refresh
+    // scheduler's in-flight lock, so it can overlap a scheduled refresh.
+    const first = panel.fetchData();
+    const second = panel.fetchData();
+    resolveFirst(okResponse());
+
+    expect(await settle(first)).toBe(true);
+    expect(await settle(second)).toBe(true);
+    expect(mockListMaterialEvents).toHaveBeenCalledTimes(1);
+
+    // Once settled, the next call issues a fresh request.
+    expect(await settle(panel.fetchData())).toBe(true);
+    expect(mockListMaterialEvents).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['unavailable', { events: [], unavailable: true, fetchedAtMs: 0 }],
+    ['empty', { events: [], unavailable: false, fetchedAtMs: 0 }],
+  ])('reports an %s first load as unavailable, not as a quiet feed', async (_label, response) => {
+    const panel = new MaterialEventsPanel();
+    document.body.appendChild(panel.getElement());
+
+    mockListMaterialEvents.mockImplementationOnce(() => Promise.resolve(response));
+    expect(await settle(panel.fetchData())).toBe(false);
+
+    const text = panel.getElement().textContent ?? '';
+    expect(text).toContain('SEC material events are temporarily unavailable');
+    expect(text).not.toContain('No recent SEC material events');
+  });
+
   it('shows a retryable error when the first load fails', async () => {
     const panel = new MaterialEventsPanel();
     document.body.appendChild(panel.getElement());

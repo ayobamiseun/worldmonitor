@@ -107,6 +107,7 @@ export function renderMaterialEvent(event: ProjectedMaterialEvent, nowMs: number
 
 export class MaterialEventsPanel extends Panel {
   private _hasData = false;
+  private _inFlight: Promise<boolean> | null = null;
 
   constructor() {
     super({
@@ -117,7 +118,15 @@ export class MaterialEventsPanel extends Panel {
     });
   }
 
-  public async fetchData(): Promise<boolean> {
+  // The error auto-retry calls fetchData outside the refresh scheduler's
+  // in-flight lock; sharing one request keeps an older response from
+  // rendering over a newer one.
+  public fetchData(): Promise<boolean> {
+    this._inFlight ??= this.load().finally(() => { this._inFlight = null; });
+    return this._inFlight;
+  }
+
+  private async load(): Promise<boolean> {
     // Errors only render before the first success, so a refresh must not blank
     // the last good list — a failed one would leave the panel on the spinner.
     if (!this._hasData) this.showLoading();
@@ -126,8 +135,10 @@ export class MaterialEventsPanel extends Panel {
       const resp = await client.listMaterialEvents({ itemCode: '', limit: EVENT_LIMIT });
 
       const events = projectMaterialEvents(resp.events ?? []);
+      // An empty 7-day window across every SEC filer means the seed is broken,
+      // not that nothing happened — keep the retrying error state.
       if (resp.unavailable || events.length === 0) {
-        if (!this._hasData) this.showError('No recent SEC material events', () => void this.fetchData());
+        if (!this._hasData) this.showError('SEC material events are temporarily unavailable', () => void this.fetchData());
         return false;
       }
 
