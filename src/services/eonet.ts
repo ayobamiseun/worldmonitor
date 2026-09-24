@@ -38,7 +38,9 @@ const breaker = createCircuitBreaker<ListNaturalEventsResponse>({ name: 'Natural
 
 const emptyFallback: ListNaturalEventsResponse = { events: [], fetchedAt: 0, dataAvailable: false };
 
-function toNaturalEvent(e: ListNaturalEventsResponse['events'][number]): NaturalEvent {
+/** Exported for the embed loader, which receives this wire shape from the
+ *  composed map-frame endpoint rather than from this module's own fetch. */
+export function toNaturalEvent(e: ListNaturalEventsResponse['events'][number]): NaturalEvent {
   return {
     id: e.id,
     title: e.title,

@@ -16,7 +16,7 @@
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { buildSourceAttributionStats } from './source-attribution.mjs';
 import { extractAssignedObjectBlock } from './lib/js-source-structure.mjs';
 
@@ -948,7 +948,10 @@ export async function withStatsRoot(fn) {
         continue;
       }
       try {
-        cpSync(join(ROOT, entry.name), join(sandbox, entry.name), { recursive: true });
+        cpSync(join(ROOT, entry.name), join(sandbox, entry.name), {
+          recursive: true,
+          filter: (from) => basename(from) !== 'node_modules',
+        });
       } catch {
         // A path that cannot be copied (platform link, transient state): the
         // stat reports zero for whatever lived there, same as a repo
@@ -975,7 +978,7 @@ function dirHasFiles(rel) {
   return false;
 }
 
-function computeStats() {
+function computeStats({ sourceAttribution: suppliedAttribution } = {}) {
   const makefile = read('Makefile');
   const serverCard = parseJson('public/.well-known/mcp/server-card.json');
   const mcpApps = parseMcpAppsInventory();
@@ -1060,7 +1063,7 @@ function computeStats() {
   // several feed URLs, while a structured endpoint may never appear in the
   // curated-feed registry. The attribution checker owns manifest coverage;
   // docs-stats pins the public count surfaces to the same live number.
-  const sourceAttribution = buildSourceAttributionStats({ rootDir: rootOf() });
+  const sourceAttribution = suppliedAttribution ?? buildSourceAttributionStats({ rootDir: rootOf() });
 
   // ---- Operational source counts used by data-source and methodology docs ----
   const airportCount = (read('src/config/airports.ts').match(/\biata:\s*'/g) || []).length;
@@ -1691,7 +1694,7 @@ function validateHealthSummaryDocs(stats, docs = null) {
         return m ? Number(m[1]) : null;
       };
       const counts = {};
-      for (const name of ['total', 'ok', 'warn', 'onDemandWarn', 'staleContent', 'rolloutPending', 'crit']) {
+      for (const name of ['total', 'ok', 'warn', 'containedWarn', 'onDemandWarn', 'staleContent', 'rolloutPending', 'crit']) {
         counts[name] = field(name);
         if (counts[name] === null) failures.push(`${where}: /api/health summary example is missing "${name}"`);
       }
@@ -1709,6 +1712,15 @@ function validateHealthSummaryDocs(stats, docs = null) {
       if (counts.rolloutPending > counts.warn) {
         failures.push(
           `${where}: rolloutPending (${counts.rolloutPending}) is documented as a subset of warn (${counts.warn})`,
+        );
+      }
+      // Same rule as rolloutPending: the pages state containedWarn is a subset
+      // of warn, not an additional bucket, so it must never exceed it. Without
+      // this the partition check above stays silent, because containedWarn is
+      // deliberately absent from that sum.
+      if (counts.containedWarn > counts.warn) {
+        failures.push(
+          `${where}: containedWarn (${counts.containedWarn}) is documented as a subset of warn (${counts.warn})`,
         );
       }
       // staleContent is no longer a subset of warn (a graced entry counts in

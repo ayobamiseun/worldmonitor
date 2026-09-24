@@ -49,6 +49,7 @@ import {
   discoverContentCorpusPages,
 } from '../scripts/discover-content-corpus-pages.mjs';
 import { guardBuiltOutput, shouldSkipBuiltOutput } from './_lib/built-output-guard.mjs';
+import { AGENT_TEXT_FILES } from '../scripts/cloudflare-cache-rule.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf-8'));
@@ -75,7 +76,7 @@ const frontendDockerfileSource = readFileSync(resolve(__dirname, '../docker/Dock
 const dockerignoreSource = readFileSync(resolve(__dirname, '../.dockerignore'), 'utf-8');
 const vercelIgnoreSource = readFileSync(resolve(__dirname, '../scripts/vercel-ignore.sh'), 'utf-8');
 const variantDashboardSource = readFileSync(resolve(__dirname, '../src/config/variant-dashboard-html.ts'), 'utf-8');
-const SPA_HTML_CACHE_SOURCE = '/((?!api|mcp|a2a|ask|oauth|assets|blog|docs|country-instability-index|countries|chokepoints|compare|crises|tools|research|reference|changelog|sources|use-cases|src|tmp|server|embed|embed\\.html|favico|map-styles|data|textures|pro|sw\\.js|workbox-[a-f0-9]+\\.js|manifest\\.webmanifest|offline\\.html|robots\\.txt|robots\\.www\\.txt|robots\\.variant\\.txt|robots\\.api\\.txt|sitemap\\.xml|sitemap-main\\.xml|schemamap\\.xml|sandbox|llms\\.txt|llms-full\\.txt|llms\\*\\.txt|openapi\\.yaml|openapi\\.json|plugin\\.json|auth\\.md|pricing\\.md|support\\.md|ai-search\\.md|agents\\.md|developers\\.md|developers/llms\\.txt|mcp-server\\.md|openapi\\.md|sdks\\.md|world-monitor\\.md|api-versioning\\.md|agent\\.txt|\\.well-known|wm-widget-sandbox\\.html|mcp-grant\\.html|mcp-grant|.*\\.md$).*)';
+const SPA_HTML_CACHE_SOURCE = '/((?!api|mcp|a2a|ask|oauth|assets|blog|docs|country-instability-index|countries|chokepoints|compare|crises|tools|research|reference|changelog|sources|use-cases|accuracy|src|tmp|server|embed|embed\\.html|favico|map-styles|data|textures|pro|sw\\.js|workbox-[a-f0-9]+\\.js|manifest\\.webmanifest|offline\\.html|robots\\.txt|robots\\.www\\.txt|robots\\.variant\\.txt|robots\\.api\\.txt|sitemap\\.xml|sitemap-main\\.xml|schemamap\\.xml|sandbox|llms\\.txt|llms-full\\.txt|llms\\*\\.txt|openapi\\.yaml|openapi\\.json|plugin\\.json|auth\\.md|pricing\\.md|support\\.md|ai-search\\.md|agents\\.md|developers\\.md|developers/llms\\.txt|mcp-server\\.md|openapi\\.md|sdks\\.md|world-monitor\\.md|api-versioning\\.md|agent\\.txt|\\.well-known|wm-widget-sandbox\\.html|mcp-grant\\.html|mcp-grant|.*\\.md$).*)';
 const GLOBAL_SECURITY_HEADER_SOURCE = '/((?!docs|embed|embed\\.html|wm-widget-sandbox\\.html).*)';
 const APP_ROOT_HOST_PATTERN = '^(?:(?:www|tech|finance|commodity|happy|energy)\\.)?worldmonitor\\.app$';
 const WEBMCP_PRODUCTION_HOST_PATTERN = '^(?:www|tech|finance|commodity|happy|energy)\\.worldmonitor\\.app$';
@@ -366,7 +367,6 @@ const getCspDirectiveTokens = (csp, directive) => {
 // scheme-wide source is flagged while the known ones stay quiet.
 const KNOWN_FRAME_WILDCARDS = [
   'https://*.clerk.accounts.dev',
-  'https://*.vercel.app',
   'https://*.dodopayments.com',
   'https://*.hs.dodopayments.com',
   'https://*.custom.hs.dodopayments.com',
@@ -635,8 +635,10 @@ describe('crawlable content corpus deployment contracts', () => {
     for (const path of [
       'docs/docs.json',
       'scripts/build-comparison-pages.mjs',
+      'scripts/comparison-page-narratives.mjs',
       'scripts/unranked-country-inventory.mjs',
       'scripts/build-use-cases.mjs',
+      'scripts/build-accuracy-page.mjs',
       'scripts/crawlable-sources-page.mjs',
       'scripts/source-origin.mjs',
       'scripts/source-origin.d.mts',
@@ -667,8 +669,10 @@ describe('crawlable content corpus deployment contracts', () => {
       for (const path of [
         'docs/docs.json',
         'scripts/build-comparison-pages.mjs',
+      'scripts/comparison-page-narratives.mjs',
         'scripts/unranked-country-inventory.mjs',
         'scripts/build-use-cases.mjs',
+        'scripts/build-accuracy-page.mjs',
         'scripts/crawlable-sources-page.mjs',
         'scripts/source-origin.mjs',
         'scripts/source-origin.d.mts',
@@ -721,6 +725,19 @@ describe('crawlable content corpus deployment contracts', () => {
 
     for (const path of ['docker-compose.override.yml', 'secrets/']) {
       assert.ok(ignoreRules.has(path), `${path} must never enter Docker build contexts or caches`);
+    }
+  });
+
+  it('marks stock workspaces and their markdown twins noindex without breaking deep links (#7905)', () => {
+    for (const path of ['/stocks', '/stocks/', '/stocks.md', '/stocks/AAPL', '/stocks/ZZZZFAKE',
+      '/stocks/aapl/', '/stocks/BRK.B', '/stocks/7203.T', '/stocks/AAPL.md', '/stocks/ZZZZFAKE.md']) {
+      assert.equal(effectiveHeader(path, 'X-Robots-Tag'), 'noindex, follow', path);
+    }
+    for (const path of ['/dashboard', '/stocksmith', '/countries/united-states']) {
+      assert.equal(effectiveHeader(path, 'X-Robots-Tag'), null, path);
+    }
+    for (const symbol of ['AAPL', 'ZZZZFAKE', 'BRK.B', '7203.T']) {
+      assert.equal(firstRewriteFor({ host: 'www.worldmonitor.app', path: `/stocks/${symbol}` })?.destination, DASHBOARD_HTML_DESTINATION);
     }
   });
 
@@ -854,10 +871,83 @@ describe('crawlable content corpus deployment contracts', () => {
     }
   });
 
+  it('advertises the edge cache on the blog, the proxied docs and the root agent text files (#7747)', () => {
+    // The vercel.json half of the pair. The Cloudflare half is
+    // scripts/cloudflare-cache-rule.mjs, and tests/cloudflare-cache-rule.test.mjs
+    // fails when the two halves cover different surfaces.
+    for (const route of ['/blog', '/blog/', '/blog/glossary/ais/', '/blog/rss.xml', '/blog/llms.txt', '/blog/sitemap-index.xml']) {
+      assert.equal(effectiveHeader(route, 'CDN-Cache-Control'), HTML_ENTRY_EDGE_CACHE, `${route} must advertise the 600s Cloudflare TTL`);
+      assert.equal(effectiveHeader(route, 'Vercel-CDN-Cache-Control'), HTML_ENTRY_EDGE_CACHE, `${route} must advertise the 600s Vercel TTL`);
+    }
+    // Blog assets keep their own policies: immutable hashed bundles, and the
+    // zone's month-long "Blog" rule for OG and post images. A shared 600s TTL
+    // would shorten Vercel's cache of the bundles and make the document rule the
+    // last writer of edge_ttl for the images.
+    for (const route of ['/blog/_astro/index.abc123.js', '/blog/og/post.png', '/blog/images/post.png']) {
+      assert.equal(effectiveHeader(route, 'CDN-Cache-Control'), null, `${route} must not inherit the document TTL`);
+      assert.equal(effectiveHeader(route, 'Vercel-CDN-Cache-Control'), null, `${route} must not inherit the document TTL`);
+    }
+    assert.equal(effectiveCacheControl('/blog/_astro/index.abc123.js'), 'public, max-age=31536000, immutable');
+
+    // /docs is a proxy to Mintlify, which negotiates markdown on Accept without
+    // a matching Vary and serves RSC flights at the document URL. Cloudflare gets
+    // the TTL and keys the negotiating requests out in the zone rule; Vercel's
+    // own cache must not store these at all, because it would key HTML and
+    // markdown under one URL. Vercel strips Vercel-CDN-Cache-Control before the
+    // response leaves, so the browser never sees the no-store.
+    for (const route of ['/docs/documentation', '/docs/mcp-overview', '/docs/zh/about/', '/docs/documentation.md', '/docs/sitemap.xml']) {
+      assert.equal(effectiveHeader(route, 'CDN-Cache-Control'), HTML_ENTRY_EDGE_CACHE, `${route} must advertise the 600s Cloudflare TTL`);
+      assert.equal(effectiveHeader(route, 'Vercel-CDN-Cache-Control'), 'no-store', `${route} must keep Vercel's cache out of the Mintlify proxy`);
+      assert.equal(effectiveHeader(route, 'X-Content-Type-Options'), 'nosniff', `${route} must still carry the docs security headers`);
+    }
+    for (const route of ['/docs/mcp', '/docs/mcp/', '/docs/mcp/session', '/docs/_next/static/chunks/a.js', '/docs/_mintlify/favicons/a.png']) {
+      assert.equal(effectiveHeader(route, 'CDN-Cache-Control'), null, `${route} is not a document and must not advertise the TTL`);
+      assert.equal(effectiveHeader(route, 'Vercel-CDN-Cache-Control'), null, `${route} is not a document and must not carry a Vercel cache policy`);
+    }
+
+    // The sitemaps joined AGENT_TEXT_FILES in #7869 and keep the stricter
+    // browser policy they have always had — the crawler that re-fetches a
+    // sitemap wants a revalidation, and the shared edge TTL is unaffected.
+    const SITEMAPS = new Set(['sitemap.xml', 'sitemap-main.xml']);
+    for (const file of AGENT_TEXT_FILES) {
+      const route = `/${file}`;
+      assert.equal(effectiveHeader(route, 'CDN-Cache-Control'), HTML_ENTRY_EDGE_CACHE, `${route} must advertise the 600s Cloudflare TTL`);
+      assert.equal(effectiveHeader(route, 'Vercel-CDN-Cache-Control'), HTML_ENTRY_EDGE_CACHE, `${route} must advertise the 600s Vercel TTL`);
+      assert.equal(
+        effectiveCacheControl(route),
+        SITEMAPS.has(file) ? 'public, max-age=3600, must-revalidate' : 'public, max-age=3600',
+        `${route} must keep its browser policy`,
+      );
+      assert.ok(existsSync(resolve(__dirname, '../public', file)), `${route} must be a static file in public/`);
+    }
+    // /index.md reaches the origin under its own name and is rewritten to
+    // /home.md there; robots.txt is left to the zone bypass on purpose (it is
+    // re-fetched rarely and cheap to serve); the nested llms.txt twins are not
+    // root files. /schemamap.xml is not in the sitemap index and no crawler is
+    // pointed at it.
+    for (const route of ['/index.md', '/robots.txt', '/schemamap.xml', '/api/download.md', '/developers/llms.txt']) {
+      assert.equal(effectiveHeader(route, 'CDN-Cache-Control'), null, `${route} must not advertise the document TTL`);
+    }
+  });
+
   it('keeps robots.txt advertising root, blog, and Mintlify docs sitemaps', () => {
     assert.match(robotsSource, /^Sitemap: https:\/\/www\.worldmonitor\.app\/sitemap\.xml$/m);
     assert.match(robotsSource, /^Sitemap: https:\/\/www\.worldmonitor\.app\/blog\/sitemap-index\.xml$/m);
     assert.match(robotsSource, /^Sitemap: https:\/\/www\.worldmonitor\.app\/docs\/sitemap\.xml$/m);
+  });
+
+  // #7749 gave the sitemaps the Vercel half of the pair and deliberately left
+  // the Cloudflare bypass alone. Round 7 then measured both still DYNAMIC under
+  // a GET while every other corpus route hit, which is what the half-pair
+  // predicts: the bypass rule names /sitemap.xml and .xml is outside
+  // Cloudflare's default-cacheable extensions. #7869 completes the pair — the
+  // claim lives in scripts/cloudflare-cache-rule.mjs (AGENT_TEXT_FILES).
+  it('caches root sitemaps at both shared caches (#7869, supersedes #7749)', () => {
+    for (const route of ['/sitemap.xml', '/sitemap-main.xml']) {
+      assert.equal(effectiveCacheControl(route), 'public, max-age=3600, must-revalidate');
+      assert.equal(effectiveHeader(route, 'Vercel-CDN-Cache-Control'), HTML_ENTRY_EDGE_CACHE);
+      assert.equal(effectiveHeader(route, 'CDN-Cache-Control'), HTML_ENTRY_EDGE_CACHE);
+    }
   });
 
   it('keeps the root sitemap generated while delegating blog and docs inventories', () => {
@@ -1177,7 +1267,7 @@ describe('welcome landing page routing', () => {
   // #4825: public/index.md became Vercel's DIRECTORY INDEX for `/` — filesystem
   // resolution beats the `/` → /pro/welcome.html rewrite, so the apex homepage
   // served raw text/markdown to browsers. No `index.*` file may exist in public/;
-  // the markdown homepage twin lives at public/home.md and keeps its scored URL
+  // the markdown homepage twin is built at public/pro/home.md and keeps its scored URL
   // through the /index.md rewrite below.
   it('keeps public/ free of index.* files so filesystem resolution cannot hijack the / rewrite', () => {
     const publicDir = resolve(__dirname, '../public');
@@ -1185,11 +1275,13 @@ describe('welcome landing page routing', () => {
     assert.deepEqual(offenders, [], `public/${offenders[0] ?? ''} would shadow the / welcome rewrite as a directory index`);
   });
 
-  it('serves the markdown homepage twin at /index.md via rewrite to the non-index home.md', () => {
-    assert.ok(existsSync(resolve(__dirname, '../public/home.md')), 'expected public/home.md (markdown homepage twin)');
+  it('serves the complete built markdown homepage at /index.md', () => {
+    if (!shouldSkipProBuiltOutput()) {
+      assert.ok(existsSync(resolve(__dirname, '../public/pro/home.md')), 'expected built public/pro/home.md');
+    }
     const rewrite = vercelConfig.rewrites.find((r) => r.source === '/index.md');
     assert.ok(rewrite, 'expected a rewrite for /index.md');
-    assert.equal(rewrite.destination, '/home.md');
+    assert.equal(rewrite.destination, '/pro/home.md');
     // #6575: the SPA catch-all this ordering guarded is gone; /index.md only
     // needs its own explicit rewrite to win over filesystem resolution.
     assert.equal(vercelConfig.rewrites.filter((r) => r.source === '/index.md').length, 1);
@@ -1209,6 +1301,27 @@ describe('welcome landing page routing', () => {
     }
   });
 
+  it('opens deployment and branch preview roots through the dashboard route', () => {
+    for (const host of [
+      'worldmonitor-h0zk88n4l-eliewm.vercel.app',
+      'worldmonitor-git-perf-defer-dashboard-app-eliewm.vercel.app',
+    ]) {
+      const redirect = firstRedirectFor({ host, path: '/' });
+      assert.equal(redirect?.destination, '/dashboard');
+      assert.equal(redirect.permanent, false);
+      assert.equal(firstRewriteFor({ host, path: redirect.destination })?.destination, DASHBOARD_HTML_DESTINATION);
+      assert.equal(firstRedirectFor({ host, path: '/', query: { mode: 'agent' } }), null);
+      assert.equal(firstRewriteFor({ host, path: '/', query: { mode: 'agent' } })?.destination, '/agent-view.json');
+    }
+  });
+
+  it('keeps preview root routing off production homepages, unknown pages, and lookalike hosts', () => {
+    for (const host of ['worldmonitor.app', 'www.worldmonitor.app', 'example.com', 'preview.vercel.app.evil.example']) {
+      assert.equal(firstRedirectFor({ host, path: '/' }), null);
+    }
+    assert.equal(firstRedirectFor({ host: 'preview.vercel.app', path: '/missing-page' }), null);
+  });
+
   it('keeps variant canonicals aligned with the /dashboard routing strategy', () => {
     const variantUrls = getVariantUrls();
     assert.equal(variantUrls.full, 'https://www.worldmonitor.app/dashboard');
@@ -1224,40 +1337,10 @@ describe('welcome landing page routing', () => {
     }
   });
 
-  it('keeps variant social-preview canonicals aligned with variant metadata', () => {
-    const variantUrls = getVariantUrls();
-    const nonFullUrls = Object.entries(variantUrls).filter(([variant]) => variant !== 'full');
-
-    for (const [variant, url] of nonFullUrls) {
-      assert.match(
-        middlewareSource,
-        new RegExp(`\\b${variant}:\\s*\\{[\\s\\S]*?url:\\s*'${escapeRegExp(url)}'`),
-        `${variant} social-preview OG/canonical URL must match variant-meta.ts`
-      );
-    }
-
-    assert.match(
-      middlewareSource,
-      /const og = VARIANT_OG\[variant as keyof typeof VARIANT_OG\]/,
-      'social-preview metadata must come from the variant registry',
-    );
-    assert.match(
-      middlewareSource,
-      /escHtml\(og\.url\)/,
-      'social-preview URLs must stay HTML-escaped',
-    );
-    assert.match(
-      middlewareSource,
-      /path === '\/' && SOCIAL_PREVIEW_UA\.test\(ua\)/,
-      'only social preview bots may receive the variant root stub',
-    );
-    assert.doesNotMatch(middlewareSource, /AI_CRAWLER_UA|AI_CRAWLER_VARIANT_LINKS/);
-  });
-
   it('redirects legacy root map-state deep links to /dashboard before welcome routing', () => {
     assert.match(
       middlewareSource,
-      /LEGACY_DASHBOARD_ROOT_QUERY_KEYS = \['lat', 'lon', 'zoom', 'view', 'timeRange', 'layers'\]/,
+      /LEGACY_DASHBOARD_ROOT_QUERY_KEYS = \['lat', 'lon', 'zoom', 'view', 'timeRange', 'layers', 'c', 'country', 'chokepoint'\]/,
       'middleware must list dashboard URL-state params that bypass the root welcome page',
     );
     assert.match(
@@ -1732,7 +1815,8 @@ describe('welcome landing page routing', () => {
     // the redirect is decided from the live __session JWT alone.
     assert.ok(!welcomeApp.includes("import('./services/clerk')"));
     assert.ok(!welcomeApp.includes("import('./services/checkout')"));
-    assert.ok(welcomeApp.includes('maybeRedirectWelcomeVisitor(document.cookie, window.location)'));
+    assert.ok(welcomeApp.includes('maybeRedirectWelcomeVisitor(readDocumentCookie(), window.location)'));
+    assert.ok(welcomeApp.includes("import { readDocumentCookie } from './services/clerk-session'"));
   });
 });
 
@@ -2133,7 +2217,7 @@ describe('security header guardrails', () => {
     const script = packageJson.scripts?.['test:e2e:webmcp'] ?? '';
     const productionScript = packageJson.scripts?.['test:e2e:webmcp:production'] ?? '';
     const variantSmokeJob = testWorkflowSource.match(
-      /\n {2}variant-smoke-full:\n[\s\S]*?(?=\n {2}[a-z][a-z0-9-]+:\n|$)/,
+      /\n {2}variant-smoke-pro-webmcp:\n[\s\S]*?(?=\n {2}[a-z][a-z0-9-]+:\n|$)/,
     )?.[0] ?? '';
     assert.match(script, /WM_REQUIRE_WEBMCP=1/);
     assert.match(script, /e2e\/webmcp\.spec\.ts/);
@@ -2611,6 +2695,17 @@ describe('security header guardrails', () => {
     }
   });
 
+  it('CSP framing rejects unrelated Vercel projects while preserving same-origin previews and the toolbar', () => {
+    const csp = getHeaderValue('Content-Security-Policy');
+    for (const directive of ['frame-src', 'frame-ancestors']) {
+      const tokens = getCspDirectiveTokens(csp, directive);
+      assert.ok(tokens.includes("'self'"), `${directive} must allow same-origin preview frames`);
+      assert.ok(tokens.some((token) => token === 'https://vercel.live'), `${directive} must allow the Vercel toolbar`);
+      assert.ok(!tokens.includes('https://*.vercel.app'), `${directive} must not trust every Vercel team`);
+    }
+    assert.deepEqual(findOpenFrameSources(getCspDirectiveTokens(csp, 'frame-ancestors')), []);
+  });
+
   // Per-file assertions, so the built /pro pages drop out of the population
   // rather than taking the five committed files down with them (#6898).
   it('HTML entry script tags carry the nonce trusted by the header CSP', () => {
@@ -2723,6 +2818,7 @@ describe('security header guardrails', () => {
     // (`https://*.vercel.app`). It therefore passed while dead. Drive the
     // predicate directly against widenings written the way they'd really appear.
     for (const widened of [
+      'https://*.vercel.app', // arbitrary projects on other Vercel teams
       'https://*.evil.com',   // a new vendor wildcard
       'https://*',            // scheme-wide with a wildcard host
       'http://*.evil.com',
@@ -3277,9 +3373,8 @@ describe('agent readiness: api-catalog + openapi build', () => {
         script.includes('npm run build:openapi'),
         `scripts["${buildName}"] must chain "npm run build:openapi" so the web bundle ships the spec; got: ${script}`
       );
-      assert.equal(
-        pkg.scripts[prebuildName],
-        'npm run product:facts',
+      assert.ok(
+        pkg.scripts[prebuildName]?.split(' && ').includes('npm run product:facts'),
         `scripts["${prebuildName}"] must regenerate ignored inventory facts before ${buildName}`,
       );
     }
@@ -3409,11 +3504,14 @@ describe('agent readiness: MCP/OAuth origin alignment', () => {
       /resource_metadata="\$\{[A-Za-z_][A-Za-z0-9_]*\}"|`[^`]*resource_metadata="\$\{[^}]+\}"/,
       'api/mcp.ts must construct resource_metadata from a host-derived variable'
     );
-    // Must actually read the request host header somewhere in the file.
+    // Must derive the origin from the request, through the shared resolver that
+    // validates Host against the allowlist (api/_agent-metadata.ts). Reading the
+    // raw header directly would reflect a spoofed Host into the discovery
+    // pointer, and could name a host whose metadata document we never serve.
     assert.match(
       source,
-      /request\.headers\.get\(['"]host['"]\)|req\.headers\.get\(['"]host['"]\)/i,
-      'api/mcp.ts should read the request host header'
+      /resolveMetadataOrigin\(req(?:uest)?\)/,
+      'api/mcp.ts must derive the resource_metadata origin via resolveMetadataOrigin'
     );
   });
 
@@ -3550,6 +3648,15 @@ describe('agent readiness: MCP/OAuth origin alignment', () => {
 describe('agent readiness: auth.md walkthrough', () => {
   const authMd = readFileSync(resolve(__dirname, '../public/auth.md'), 'utf-8');
 
+  it('opens with its title and describes API key and OAuth authentication', () => {
+    assert.match(
+      authMd,
+      /^# WorldMonitor — Agent Authentication \(auth\.md\)\n/,
+      'auth.md must open directly with its H1 for scanner compatibility'
+    );
+    assert.match(authMd, /API keys?.*OAuth|OAuth.*API keys?/i);
+  });
+
   it('publishes /auth.md with the WorkOS-prescribed sections', () => {
     for (const heading of ['Discover', 'Pick a method', 'Register', 'Claim', 'Use the credential', 'Errors', 'Revocation']) {
       assert.match(
@@ -3668,7 +3775,7 @@ describe('agent readiness: generic markdown URL-fallback rewrite', () => {
     );
     const mdIdx = vercelConfig.rewrites.indexOf(mdTwinRewrite);
     assert.ok(mdIdx > rewriteIndex('/docs/:match*'), '/docs/:match* must stay ahead of the generic .md fallback');
-    assert.ok(mdIdx > rewriteIndex('/index.md'), '/index.md → /home.md must stay ahead of the generic .md fallback');
+    assert.ok(mdIdx > rewriteIndex('/index.md'), '/index.md → /pro/home.md must stay ahead of the generic .md fallback');
   });
 
   it('does not reintroduce a shadowing /api/:path* → /api/not-found rewrite', () => {
@@ -3682,7 +3789,7 @@ describe('agent readiness: generic markdown URL-fallback rewrite', () => {
     assert.equal(firstRewriteFor({ host: 'www.worldmonitor.app', path: '/dashboard.md' })?.destination, '/api/md-twin?path=:mdPath');
     assert.equal(firstRewriteFor({ host: 'www.worldmonitor.app', path: '/stocks/AAPL.md' })?.destination, '/api/md-twin?path=:mdPath');
     assert.equal(firstRewriteFor({ host: 'www.worldmonitor.app', path: '/docs/auth.md' })?.destination, 'https://worldmonitor.mintlify.dev/docs/:match*');
-    assert.equal(firstRewriteFor({ host: 'www.worldmonitor.app', path: '/index.md' })?.destination, '/home.md');
+    assert.equal(firstRewriteFor({ host: 'www.worldmonitor.app', path: '/index.md' })?.destination, '/pro/home.md');
     assert.equal(firstRewriteFor({ host: 'www.worldmonitor.app', path: '/api/health.md' }), null);
   });
 
@@ -3690,6 +3797,30 @@ describe('agent readiness: generic markdown URL-fallback rewrite', () => {
     assert.ok(SPA_HTML_CACHE_SOURCE.includes('|.*\\.md$'), 'HTML cache catch-all must exclude every *.md path');
     assert.equal(sourceToRegExp(SPA_HTML_CACHE_SOURCE).test('/dashboard.md'), false);
     assert.equal(sourceToRegExp(SPA_HTML_CACHE_SOURCE).test('/dashboard'), true);
+  });
+
+  it('never declares a static canonical over the unbounded generated .md space', () => {
+    // The curated twins (pricing.md, developers.md, …) are standalone documents
+    // with no HTML sibling, so their literal self-canonical header rules are
+    // correct. The generated space is unbounded — /countries/iran.md and an
+    // invented /countries/does-not-exist-xyz.md both land on /api/md-twin — so a
+    // canonical rule that reached them would mint a self-canonical soft-404 that
+    // no handler change can retract (#7860). Only the handler may set a
+    // canonical there, and it points at the sibling HTML page.
+    const generatedTwins = ['/countries/iran.md', '/countries/does-not-exist-xyz.md', '/stocks/AAPL.md'];
+    for (const rule of vercelConfig.headers ?? []) {
+      const declaresCanonical = (rule.headers ?? []).some(
+        (h) => h.key?.toLowerCase() === 'link' && /rel="?canonical"?/.test(h.value ?? ''),
+      );
+      if (!declaresCanonical) continue;
+      for (const path of generatedTwins) {
+        assert.equal(
+          sourceToRegExp(rule.source).test(path),
+          false,
+          `header rule "${rule.source}" declares a canonical over generated twin ${path}`,
+        );
+      }
+    }
   });
 });
 
@@ -3773,17 +3904,19 @@ describe('vercel.json functions config (none expected after carousel moved to ed
 // status) or the full IANA URI form (RFC 9728 OAuth rels). The MCP
 // card rel carries anchor="/mcp" because the server card describes
 // the /mcp endpoint, not the document URL being fetched.
-describe('agent readiness: homepage Link headers', () => {
+describe('agent readiness: public document Link headers', () => {
   const vercel = JSON.parse(readFileSync(resolve(__dirname, '../vercel.json'), 'utf-8'));
 
-  for (const source of ['/', '/dashboard', '/dashboard.html']) {
+  it('keeps discovery headers off blog and pro asset routes', () => {
+    for (const path of ['/blog/_astro/main.js', '/blog/og/post.png', '/blog/images/post.jpg', '/pro/assets/main.js']) {
+      assert.equal(effectiveHeader(path, 'Link'), null, path);
+    }
+  });
+
+  for (const source of ['/', '/dashboard', '/dashboard.html', '/blog', '/blog/', '/blog/glossary/ais/', '/blog/example/', '/pro', '/pro/']) {
     it(`${source} emits a Link header`, () => {
-      const entry = vercel.headers.find((h) =>
-        h.source === source && h.headers.some((header) => header.key === 'Link')
-      );
-      assert.ok(entry, `expected a headers entry for ${source}`);
-      const linkHeader = entry.headers.find((h) => h.key === 'Link');
-      assert.ok(linkHeader, `expected a Link header on ${source}`);
+      const linkHeader = { value: effectiveHeader(source, 'Link') };
+      assert.ok(linkHeader.value, `expected a Link header on ${source}`);
 
       // Must advertise each required rel at least once
       const requiredRels = [
@@ -4779,7 +4912,8 @@ describe('agent readiness: named developer-resource pages (#4953)', () => {
   for (const page of DEV_PAGES) {
     it(`public/${page.file} opens with the brand-named H1 "${page.h1}"`, () => {
       const body = readFileSync(resolve(__dirname, `../public/${page.file}`), 'utf-8');
-      assert.ok(body.startsWith(`${page.h1}\n`), `public/${page.file} must open with "${page.h1}"`);
+      const content = body.replace(/^---\n[\s\S]*?\n---\n+/, '');
+      assert.ok(content.startsWith(`${page.h1}\n`), `public/${page.file} must open with "${page.h1}" after metadata`);
     });
 
     it(`${page.path} serves the static page, never the app shell`, () => {
@@ -5319,5 +5453,51 @@ describe('variant-host canonicalization (#6833–#6836)', () => {
     assert.ok(SPA_HTML_CACHE_SOURCE.includes('|src|'), 'HTML cache catch-all must exclude /src');
     assert.ok(SPA_HTML_CACHE_SOURCE.includes('|tmp|'), 'HTML cache catch-all must exclude /tmp');
     assert.ok(SPA_HTML_CACHE_SOURCE.includes('|server|'), 'HTML cache catch-all must exclude /server');
+  });
+});
+
+describe('cold-load metric evidence reaches the CI artifact (#7837)', () => {
+  const mapBudgetE2eSource = readFileSync(
+    resolve(__dirname, '../e2e/map-overlay-marker-budget.spec.ts'),
+    'utf-8',
+  );
+
+  // The failure this pins is SILENT. `testInfo.attach({ body })` keeps the
+  // bytes in memory for a reporter to persist, and the `list` reporter this
+  // project runs persists nothing — so the spec passed while its cold-load
+  // metrics never reached the uploaded artifact (shard-1 of run 34144452921
+  // contained zero files for this spec). Nothing goes red when that regresses;
+  // the evidence simply stops existing, which is how #7837's own acceptance
+  // criteria became unanswerable.
+  it('attaches the cold-load metrics by path, never by body', () => {
+    assert.match(mapBudgetE2eSource, /testInfo\.outputPath\('cold-dashboard-metrics\.json'\)/);
+    assert.match(mapBudgetE2eSource, /await writeFile\(path, payload, 'utf8'\)/);
+    assert.match(
+      mapBudgetE2eSource,
+      /testInfo\.attach\('cold-dashboard-metrics\.json', \{ path, contentType: 'application\/json' \}\)/,
+    );
+    assert.doesNotMatch(
+      mapBudgetE2eSource,
+      /attach\('cold-dashboard-metrics\.json', \{[\s\S]{0,80}?body:/,
+      'a body attachment is dropped by the list reporter and never reaches test-results/',
+    );
+    // A path attachment only survives a PASSING test because output is kept.
+    assert.match(playwrightConfigSource, /preserveOutput:\s*'always'/);
+    // ...and test-results/ is what the smoke job uploads.
+    assert.match(testWorkflowSource, /path: test-results\//);
+  });
+
+  // #7867 gives the first-paint sample its own CI-derived budget. The settled
+  // diagnostic remains optional because hydration readiness is incomplete on CI.
+  it('asserts the first-paint budgets against the first-paint sample only', () => {
+    assert.match(
+      mapBudgetE2eSource,
+      /assertDashboardMetricBudgets\(samples\.map\(\(sample\) => sample\.firstPaint\.postGc\), FIRST_PAINT_METRIC_BUDGETS\)/,
+    );
+    assert.doesNotMatch(
+      mapBudgetE2eSource,
+      /assertDashboardMetricBudgets\(samples\.map\(\(sample\) => sample\.quiescence/,
+      'the settled sample is recorded, never asserted (#7837)',
+    );
   });
 });

@@ -121,6 +121,10 @@
       "name": "seed-bundle-static-ref-heavy"
     },
     {
+      "id": "017af607-5a4c-49d7-b8dc-1c28d06d1835",
+      "name": "seed-bundle-yield-curves"
+    },
+    {
       "id": "12e8e87d-1214-4ba3-a813-709f279a5ba9",
       "name": "seed-chokepoint-exposure"
     },
@@ -239,6 +243,10 @@
     {
       "id": "e6156007-e917-4139-90bd-71b6333a6d0e",
       "name": "seed-hormuz"
+    },
+    {
+      "id": "5f943d96-5f89-4817-941b-fdc36b71722e",
+      "name": "seed-imd-cyclone-marine"
     },
     {
       "id": "c615c211-1237-47cc-8d90-e23657437838",

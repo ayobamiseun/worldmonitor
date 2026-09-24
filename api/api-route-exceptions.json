@@ -248,6 +248,13 @@
       "removal_issue": null
     },
     {
+      "path": "api/mcp/structured-content.ts",
+      "category": "external-protocol",
+      "reason": "MCP tools/call structuredContent builder + the anyOf outputSchema it is advertised under (#8328). Pure helper imported by the MCP dispatcher and registry, not a route; same external-protocol constraint as the parent shim.",
+      "owner": "@koala73",
+      "removal_issue": null
+    },
+    {
       "path": "api/mcp/types.ts",
       "category": "external-protocol",
       "reason": "MCP shared type declarations (McpAuthContext, McpHandlerDeps, ToolDef union, etc.). Pure types — no runtime behaviour — but lives under api/mcp/ so the contract script requires a listing.",
@@ -488,8 +495,8 @@
     },
     {
       "path": "api/youtube/live.js",
-      "category": "non-json",
-      "reason": "Streams YouTube live metadata — chunked text response, not a typed JSON payload.",
+      "category": "upstream-proxy",
+      "reason": "Names a YouTube video through YouTube's public oEmbed endpoint for channel management; channel live detection is retired and answers 410.",
       "owner": "@SebastienMelki",
       "removal_issue": null
     },
@@ -649,6 +656,13 @@
       "owner": "@SebastienMelki",
       "removal_issue": null
     },
+    {
+      "path": "api/notification-suppressions.js",
+      "category": "internal-helper",
+      "reason": "Anonymous operator incident-control read for the service worker: serves the Redis notification link-suppression set (blocked URLs/hosts) so already-delivered push payloads stop navigating on click. Kept outside sebuf because the SW consults it via a plain GET with no auth context at click time, and the shape is an unversioned incident snapshot rather than a typed domain RPC.",
+      "owner": "@SebastienMelki",
+      "removal_issue": null
+    },
 
     {
       "path": "api/bootstrap.js",
@@ -710,6 +724,20 @@
       "path": "api/embed/entitlement.ts",
       "category": "internal-helper",
       "reason": "Auth bootstrap for the partner /embed iframe (#6599). Returns whether an embedding account's API key (X-WorldMonitor-Key) may render an allowlisted panel. Not a product data API: panel payloads stay on existing sebuf RPCs. Cookie and viewer session tokens are stripped/rejected so entitlement is keyed to the partner account, not the page visitor. Shape is unversioned by design — allowed boolean plus panel id.",
+      "owner": "@koala73",
+      "removal_issue": null
+    },
+    {
+      "path": "api/embed/map-frame.ts",
+      "category": "internal-helper",
+      "reason": "The single composed read the partner /embed map frame polls, replacing four separate anonymous RPC calls. Not a product data API: it accepts one parameter (`layers`) and returns the verbatim payloads of handlers already published as sebuf RPCs — no bbox, page size, or time window, because every knob is a knob a stolen embed credential could turn. Deliberately NOT a sebuf RPC of its own: the free and keyed tiers need different Cache-Control on one path, and CACHE_TIER_BY_PATH in the domain gateway is per-path, so routing it there would let a keyless response be cached and served to a keyed caller. Shareability is decided from the URL alone, before any credential is read (a CDN hit answers before the origin sees a header — #5386): only the exact raw query `layers=<canonical free subset>&public=1` is shared-cacheable, bounding the CDN key space to the free tier's seven non-empty subsets. Every other shape, credentialed or not, is served `private, no-store`, so a near-miss degrades to correct-but-uncached rather than to a shared entry that could answer the wrong caller. Builder and validator are one module (shared/embed-map-frame.ts) so an emitted URL and a cacheable URL cannot drift.",
+      "owner": "@koala73",
+      "removal_issue": null
+    },
+    {
+      "path": "api/embed/session.ts",
+      "category": "internal-helper",
+      "reason": "Credential exchange for the partner /embed iframe: trades the account's wme_ embed key for a short-lived, panel-scoped wmg_ grant that the frame then polls with. Not a product data API — it returns only a bearer token and its expiry. Deliberately NOT a sebuf RPC: a domain gateway route accepts only wms_ sessions, wm_ keys, or PUBLIC_NO_AUTH_RPC_PATHS membership, and teaching the shared auth cascade a third credential family would widen the very blast radius this exchange exists to narrow. Response is private, no-store because the body IS a credential.",
       "owner": "@koala73",
       "removal_issue": null
     },

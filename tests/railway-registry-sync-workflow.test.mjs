@@ -277,7 +277,8 @@ describe('Railway Registry Sync workflow', () => {
     const summary = stepNamed(workflow.jobs.reconcile, 'Explain a failed reconciliation');
     assert.equal(summary.if, 'failure()');
     assert.match(summary.run, /Stale revision/);
-    assert.match(summary.run, /Source branch, check-suite, or required-variable drift/);
+    assert.match(summary.run, /Source branch or check-suite drift/);
+    assert.match(summary.run, /missing source credentials are listed separately and do not fail registry sync/);
     assert.match(summary.run, /GITHUB_STEP_SUMMARY/);
     assert.equal(summary.env, undefined);
   });

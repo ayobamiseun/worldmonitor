@@ -123,6 +123,27 @@ export type PlanFeatures = {
    */
   mcpAccess?: boolean;
   /**
+   * Partner-embed key issuance — gates minting `wme_…` keys
+   * (`convex/embedKeys.ts`). Deliberately NOT `apiAccess`: an embed key is
+   * pasted into the partner's PUBLIC HTML (`data-key` on `public/embed.js`),
+   * so it is worthless outside the embed surface and must be reachable by
+   * every paid tier — including Pro and Pro Business, which are
+   * `apiAccess: false` and therefore cannot mint a `wm_…` key at all.
+   *
+   * A named flag rather than a bare `tier >= 1` at each call site, for the
+   * same reason `mcpAccess` is one: the paywall ledger
+   * (`scripts/generate-entitlement-crosswalk.mjs`) can only certify a rule it
+   * can see, and a capability spelled out per-plan is what a pricing change
+   * edits. `shared/embed-access.ts` holds the single predicate that reads it.
+   *
+   * Optional for the same reason as `mcpAccess`: rows written before this
+   * field existed omit it, and the read-time catalog merge
+   * (`convex/entitlements.ts`) supplies the plan default. Consumers treat
+   * `undefined` as false (fail-closed). Catalog entries below ALWAYS set the
+   * field explicitly.
+   */
+  embedAccess?: boolean;
+  /**
    * Per-account daily REST request allowance (the "included" number). Read by
    * the per-account rate-limit layer (#3199): the daily usage meter counts but
    * never rejects at this value; the hard safety ceiling is 10× this number.
@@ -207,6 +228,7 @@ const FREE_FEATURES: PlanFeatures = {
   prioritySupport: false,
   exportFormats: [],
   mcpAccess: false,
+  embedAccess: false,
   dataExport: false,
 };
 
@@ -226,6 +248,7 @@ const PRO_FEATURES: PlanFeatures = {
   prioritySupport: false,
   exportFormats: [],
   mcpAccess: true,
+  embedAccess: true,
   dataExport: false,
 };
 
@@ -256,6 +279,7 @@ const PRO_BUSINESS_FEATURES: PlanFeatures = {
   prioritySupport: true,
   exportFormats: ["csv", "json", "pdf"],
   mcpAccess: true,
+  embedAccess: true,
   dataExport: true,
 };
 
@@ -275,6 +299,7 @@ const API_STARTER_FEATURES: PlanFeatures = {
   prioritySupport: false,
   exportFormats: ["csv", "json", "pdf"],
   mcpAccess: true,
+  embedAccess: true,
   dataExport: true,
 };
 
@@ -295,6 +320,7 @@ const API_BUSINESS_FEATURES: PlanFeatures = {
   // xlsx removed (#4974): no XLSX exporter exists anywhere in the product.
   exportFormats: ["csv", "json", "pdf"],
   mcpAccess: true,
+  embedAccess: true,
   dataExport: true,
 };
 
@@ -316,6 +342,7 @@ const ENTERPRISE_FEATURES: PlanFeatures = {
   // (#4974): neither has an exporter, and this array is display truth.
   exportFormats: ["csv", "json", "pdf"],
   mcpAccess: true,
+  embedAccess: true,
   dataExport: true,
 };
 
@@ -484,7 +511,7 @@ export const PRODUCT_CATALOG: Record<string, CatalogEntry> = {
     features: API_BUSINESS_FEATURES,
     marketingFeatures: [
       "Everything in API Starter",
-      "Redistribution rights — embed our data in what you sell",
+      "R1–R3 redistribution rights for customer-facing products",
       "300 requests/minute",
       "10,000 requests/day included (REST + MCP combined; a live MCP call counts as 2-3)",
       "5 Pro licenses — invite users at any corporate email domain",

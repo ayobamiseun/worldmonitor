@@ -18,6 +18,17 @@ const ORIGINAL_ENV = {
 };
 const ORIGINAL_SIGTERM_LISTENERS = new Set(process.rawListeners('SIGTERM'));
 
+// Cap idle retry waits — attempt count and logged wait stay real (see the
+// WM_SEED_RETRY_DELAY_MS comment in scripts/_seed-utils.mjs withRetry).
+const originalRetryDelay = process.env.WM_SEED_RETRY_DELAY_MS;
+beforeEach(() => {
+  process.env.WM_SEED_RETRY_DELAY_MS = '0';
+});
+afterEach(() => {
+  if (originalRetryDelay === undefined) delete process.env.WM_SEED_RETRY_DELAY_MS;
+  else process.env.WM_SEED_RETRY_DELAY_MS = originalRetryDelay;
+});
+
 let recordedCalls;
 let expireResult;
 let expirePipelineStatus;
@@ -554,7 +565,7 @@ test('Sprint 1: validation failure with canonical contentAge MIRRORS newestItemA
     contentAge: {
       newestItemAt: FROZEN_NEWEST_AT,
       oldestItemAt: FROZEN_OLDEST_AT,
-      maxContentAgeMin: 12960,    // 9 days, matching disease-outbreaks pilot
+      maxContentAgeMin: 12960,
     },
   });
 

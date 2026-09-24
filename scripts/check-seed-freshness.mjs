@@ -4,6 +4,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
+import { CONTENT_AGE_PREWARNING_RATIO } from '../api/_content-age.js';
+
 const DEFAULT_HEALTH_URL = 'https://api.worldmonitor.app/api/health?compact=1';
 const BASELINE_URL = new URL('./seed-freshness-baseline.json', import.meta.url);
 // api/health.js only serves a cached verdict for 60 seconds. Allow its maximum
@@ -14,6 +16,16 @@ export const MAX_HEALTH_OBSERVATION_AGE_MS = 80 * 1000;
 export function validateCompactHealthPayload(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('Compact health payload must be an object');
+  }
+  if (Object.hasOwn(payload, 'pending')) {
+    if (!payload.pending || typeof payload.pending !== 'object' || Array.isArray(payload.pending)) {
+      throw new Error('Compact health pending must be an object');
+    }
+    for (const entry of Object.values(payload.pending)) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new Error('Compact health pending entries must be objects');
+      }
+    }
   }
   // Compact health omits `problems` entirely when every check is healthy.
   if (payload.problems == null && payload.status === 'HEALTHY') return payload;
@@ -48,6 +60,48 @@ export function isOnDemandProblem(problem) {
   return problem?.onDemand === true && ON_DEMAND_SOFT_STATUSES.has(problem?.status);
 }
 
+// Content-age pre-warning (CONTENT_AGE_PREWARNING in api/health.js): the
+// reader's 80%-of-budget lead-time flag. Advisory only — the hard
+// STALE_CONTENT path stays the fail-closed authority, so this predicate is
+// excluded from operational problems UNCONDITIONALLY: a malformed advisory
+// entry is dropped, never promoted into a blocking false alarm. Validity is
+// checked separately for reporting; it must not gate the exclusion.
+export function isContentAgePreWarningProblem(problem) {
+  return problem?.status === 'CONTENT_AGE_PREWARNING';
+}
+
+// Full wire-field validation for reporting. Runs against the FENCED
+// observation time (checkedAt), not the monitor's wall clock: a valid
+// snapshot can cross its breach instant between snapshot and read, and that
+// must not invalidate the diagnostic. Returns null for any malformed shape.
+export function contentAgePreWarningDiagnostic(name, problem, observedAtMs) {
+  if (!isContentAgePreWarningProblem(problem)) return null;
+  const age = problem.contentAgeMin;
+  const budget = problem.maxContentAgeMin;
+  const warnAt = problem.warnAtContentAgeMin;
+  const remaining = problem.contentAgeRemainingMin;
+  const breachMs = Date.parse(typeof problem.contentAgeBreachAt === 'string' ? problem.contentAgeBreachAt : '');
+  if (!Number.isFinite(age) || age < 0) return null;
+  if (!Number.isFinite(budget) || budget <= 0) return null;
+  // Read the policy ratio from the shared assessor module so a future
+  // policy change cannot silently desynchronize the monitor's validation.
+  if (warnAt !== Math.ceil(budget * CONTENT_AGE_PREWARNING_RATIO)) return null;
+  if (age < warnAt || age > budget) return null;
+  if (remaining !== budget - age) return null;
+  if (!Number.isFinite(breachMs)) return null;
+  return {
+    name,
+    status: problem.status,
+    graceUntil: null,
+    contentAgeMin: age,
+    maxContentAgeMin: budget,
+    usedPercent: Math.round((age / budget) * 1000) / 10,
+    remainingMin: remaining,
+    breachAt: problem.contentAgeBreachAt,
+    breachObserved: observedAtMs != null && Number.isFinite(observedAtMs) ? observedAtMs >= breachMs : null,
+  };
+}
+
 // #6059 — a schema whose producer has not reached its first scheduled run yet.
 // Softened for the SAME reason as on-demand (absence is explained, not a
 // fault), but on strictly tighter terms: /api/health emits the deadline it
@@ -78,9 +132,17 @@ export const MAX_ROLLOUT_WINDOW_MS = 24 * 60 * 60 * 1000;
 // window far longer than the publisher can legally mint.
 export const STALE_CONTENT_GRACE_SKEW_SLACK_MS = 5 * 60 * 1000;
 export const MAX_STALE_CONTENT_GRACE_MS = 3 * 60 * 60 * 1000 + STALE_CONTENT_GRACE_SKEW_SLACK_MS;
+// Mirrors CHINA_DECISION_SIGNALS_PENDING_MS in api/health.js, with the same
+// cross-machine clock-skew allowance used for stale-content grace. The API
+// keeps health pending for three hours after proven full operational coverage
+// while producer retries remain diagnostic-only. This monitor must consume the
+// bounded verdict instead of turning it back into an operational failure.
+export const CHINA_COVERAGE_PENDING_SKEW_SLACK_MS = 5 * 60 * 1000;
+export const MAX_CHINA_COVERAGE_PENDING_MS = 3 * 60 * 60 * 1000
+  + CHINA_COVERAGE_PENDING_SKEW_SLACK_MS;
 
 function hasActiveBoundedDeadline(raw, now, maxWindowMs) {
-  const until = Date.parse(raw ?? '');
+  const until = Date.parse(typeof raw === 'string' ? raw : '');
   if (!Number.isFinite(until)) return false;
   if (until - now > maxWindowMs) return false;
   return now < until;
@@ -100,32 +162,110 @@ export function isStaleContentGraceProblem(problem, now = Date.now()) {
   );
 }
 
-/**
- * Sources that are diagnosed STALE_CONTENT but still inside their bounded grace.
- *
- * These are deliberately NOT operational failures yet — that is the whole point
- * of the grace — but filtering them out of the run entirely would make a green
- * report indistinguishable from one where nothing is wrong at all. Surfacing
- * them separately keeps "three feeds are mid-grace, alerting at 14:05Z" visible
- * to whoever reads the run.
- */
-export function findGracedStaleContent(payload, now = Date.now()) {
-  return Object.entries(payload.problems ?? {})
-    .filter(([, problem]) => isStaleContentGraceProblem(problem, now))
+// Mirrors RELAY_GATEWAY_GATE_TRANSPORT_GRACE_MS in api/health.js, plus the
+// same clock-skew slack the other bounded deadlines carry. A first
+// RELAY_GATE_UNREACHABLE sighting (one relay timeout or 5xx) is pending, not
+// operational, until the publisher's deadline passes; a stall that outlives
+// it pages as usual.
+export const RELAY_GATE_TRANSPORT_GRACE_SKEW_SLACK_MS = 5 * 60 * 1000;
+export const MAX_RELAY_GATE_TRANSPORT_GRACE_MS = 3 * 60 * 1000 + RELAY_GATE_TRANSPORT_GRACE_SKEW_SLACK_MS;
+
+export function isRelayGateGraceProblem(problem, now = Date.now()) {
+  if (problem?.status !== 'RELAY_GATE_UNREACHABLE') return false;
+  return hasActiveBoundedDeadline(problem.transportGraceUntil, now, MAX_RELAY_GATE_TRANSPORT_GRACE_MS);
+}
+
+export function isChinaCoveragePendingProblem(problem, now = Date.now()) {
+  if (!['COVERAGE_PARTIAL', 'CHINA_DEGRADED'].includes(problem?.status)) return false;
+  return hasActiveBoundedDeadline(
+    problem.chinaCoveragePendingUntil,
+    now,
+    MAX_CHINA_COVERAGE_PENDING_MS,
+  );
+}
+
+export function isSourceFailurePendingProblem(problem, now = Date.now()) {
+  const earthquake = problem?.errorCode === 'EARTHQUAKE_UPSTREAM_INCOMPLETE';
+  const nhc = /^NHC_(POINT_REQUEST_FAILED|POINT_RESPONSE_INVALID)$/.test(problem?.errorCode || '');
+  const mnd = /^MND_[A-Z0-9_]{1,60}$/.test(problem?.errorCode || '');
+  return problem?.status === 'SEED_ERROR'
+    && Number.isFinite(problem.records) && problem.records > 0
+    && Number.isFinite(problem.seedAgeMin) && problem.seedAgeMin >= 0
+    && Number.isFinite(problem.maxStaleMin) && problem.seedAgeMin <= problem.maxStaleMin
+    && problem.consecutiveSourceFailures === 1
+    && typeof problem.errorCode === 'string' && (earthquake || nhc || mnd)
+    && problem.errorCode === problem.lastSourceFailureCode
+    && hasActiveBoundedDeadline(problem.sourceFailurePendingUntil, now, (earthquake ? 15 : 215) * 60_000);
+}
+
+function isWorkerControlPendingProblem(name, problem, now) {
+  const control = problem?.workerControl;
+  const failure = control?.subsystems?.scan?.claimFailure;
+  return name === 'companyMonitoringWorker' && problem?.status === 'SEED_ERROR'
+    && Number.isFinite(problem.records) && problem.records > 0 && problem.maxStaleMin === 5
+    && control?.status === 'error' && control.outcome === 'claim_error'
+    && control.subsystems?.scan?.status === 'error' && control.subsystems.scan.outcome === 'claim_error'
+    && control.subsystems.admission?.status === 'ok'
+    && ['disabled', 'idle', 'admission_recorded', 'admission_replayed'].includes(control.subsystems.admission.outcome)
+    && Number.isInteger(failure?.consecutiveFailures) && failure.consecutiveFailures >= 1 && failure.consecutiveFailures < 3
+    && ((['timeout', 'network'].includes(failure.kind) && failure.httpStatus === null)
+      || (failure.kind === 'http_transient' && [408, 429, 500, 502, 503, 504].includes(failure.httpStatus)))
+    && Number.isSafeInteger(failure.lastHealthyAt) && failure.lastHealthyAt > 0 && failure.lastHealthyAt <= now
+    && typeof problem.workerControlPendingUntil === 'string'
+    && Date.parse(problem.workerControlPendingUntil) === failure.lastHealthyAt + 300_000
+    && hasActiveBoundedDeadline(problem.workerControlPendingUntil, now, 300_000);
+}
+
+export function findPendingDiagnostics(payload, now = Date.now()) {
+  const observedAtMs = Date.parse(payload?.checkedAt);
+  return compactHealthEntries(payload)
+    .filter(([name, problem]) => (
+      // Pre-warnings are reported only when the full wire shape validates;
+      // malformed ones are dropped here AND excluded from operational
+      // problems unconditionally, so they vanish rather than false-alarm.
+      (isContentAgePreWarningProblem(problem)
+        && contentAgePreWarningDiagnostic(name, problem, observedAtMs) !== null)
+      || isStaleContentGraceProblem(problem, now)
+      || isSourceFailurePendingProblem(problem, now)
+      || isChinaCoveragePendingProblem(problem, now)
+      || isRelayGateGraceProblem(problem, now)
+      || isWorkerControlPendingProblem(name, problem, now)
+    ))
     .map(([name, problem]) => ({
-      name,
-      status: problem?.status ?? 'UNKNOWN',
-      graceUntil: problem?.staleContentGraceUntil ?? null,
-    }));
+      ...(
+        contentAgePreWarningDiagnostic(name, problem, observedAtMs)
+        ?? {
+          name,
+          status: problem?.status ?? 'UNKNOWN',
+          graceUntil: problem?.staleContentGraceUntil
+            ?? problem?.sourceFailurePendingUntil
+            ?? problem?.chinaCoveragePendingUntil
+            ?? problem?.transportGraceUntil
+            ?? problem?.workerControlPendingUntil
+            ?? null,
+        }
+      ),
+    }))
+    .sort((a, b) => (b.usedPercent ?? -1) - (a.usedPercent ?? -1) || a.name.localeCompare(b.name));
+}
+
+function compactHealthEntries(payload) {
+  validateCompactHealthPayload(payload);
+  return Object.entries({ ...(payload.pending ?? {}), ...(payload.problems ?? {}) });
 }
 
 export function findOperationalProblems(payload, now = Date.now()) {
-  validateCompactHealthPayload(payload);
-  return Object.entries(payload.problems ?? {})
-    .filter(([, problem]) => (
+  return compactHealthEntries(payload)
+    .filter(([name, problem]) => (
+      !isContentAgePreWarningProblem(problem)
+      &&
       !isOnDemandProblem(problem)
       && !isRolloutPendingProblem(problem, now)
       && !isStaleContentGraceProblem(problem, now)
+      && !isSourceFailurePendingProblem(problem, now)
+      && !isChinaCoveragePendingProblem(problem, now)
+      && !isRelayGateGraceProblem(problem, now)
+      && !isWorkerControlPendingProblem(name, problem, now)
     ))
     .map(([name, problem]) => ({
       name,
@@ -458,7 +598,7 @@ export function buildAcceptanceObservation(payload, baseline, now = Date.now()) 
     version: 1,
     checkedAt,
     acceptance,
-    graced: findGracedStaleContent(payload, now),
+    graced: findPendingDiagnostics(payload, now),
     report: formatAcceptanceReport(acceptance, checkedAt),
   };
 }
@@ -500,6 +640,38 @@ export function formatAcceptanceMarkdown({ checkedAt, acceptance, report, graced
   return `${lines.join('\n')}\n`;
 }
 
+// Cover an abandoned 30s refresh lease plus its replacement sweep, without
+// turning a persistent outage into an unbounded scheduled job.
+export async function fetchCompactHealth(healthUrl, {
+  fetchFn = (...args) => globalThis.fetch(...args),
+  now = () => Date.now(),
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+} = {}) {
+  const deadline = now() + 45_000;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const remainingMs = deadline - now();
+    if (remainingMs <= 0) break;
+    const response = await fetchFn(healthUrl, {
+      headers: { 'User-Agent': 'worldmonitor-seed-freshness-monitor/1.0' },
+      signal: AbortSignal.timeout(Math.min(20_000, remainingMs)),
+    });
+    if (response.ok) return response.json();
+    const payload = response.status === 503 ? await response.json() : null;
+    if (payload?.status !== 'REFRESH_PENDING') {
+      throw new Error(`Compact health request failed: HTTP ${response.status}`);
+    }
+    const retryAfter = response.headers.get('Retry-After');
+    let delayMs = 3_000;
+    if (retryAfter && /^\d+$/.test(retryAfter)) delayMs = Number(retryAfter) * 1_000;
+    else if (retryAfter && /^[A-Za-z]{3}, \d{2} [A-Za-z]{3} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(retryAfter)
+      && Number.isFinite(Date.parse(retryAfter))) delayMs = Date.parse(retryAfter) - now();
+    delayMs = Math.max(100, delayMs);
+    if (attempt === 11 || delayMs >= deadline - now()) break;
+    await sleep(delayMs);
+  }
+  throw new Error('Compact health refresh remained pending within the retry budget');
+}
+
 async function main() {
   const { values } = parseArgs({
     args: process.argv.slice(2),
@@ -510,15 +682,7 @@ async function main() {
     strict: true,
   });
   const healthUrl = process.env.HEALTH_URL || DEFAULT_HEALTH_URL;
-  const response = await fetch(healthUrl, {
-    headers: { 'User-Agent': 'worldmonitor-seed-freshness-monitor/1.0' },
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!response.ok) {
-    throw new Error(`Compact health request failed: HTTP ${response.status}`);
-  }
-
-  const payload = await response.json();
+  const payload = await fetchCompactHealth(healthUrl);
   const observation = buildAcceptanceObservation(payload, readAcceptanceBaseline());
   const outputPath = values['json-output'];
   if (outputPath) writeFileSync(outputPath, `${JSON.stringify(observation, null, 2)}\n`);

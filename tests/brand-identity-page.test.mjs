@@ -19,7 +19,7 @@ function organizationBlocks(html) {
 describe('World Monitor brand-identity page', () => {
   it('opens with the brand-named H1 and a NAP table crawlers can quote', () => {
     const body = read(BRAND_PAGE);
-    assert.ok(body.startsWith('# World Monitor\n'), 'world-monitor.md must open with "# World Monitor"');
+    assert.match(body, /^---\n[\s\S]*?\n---\n+# World Monitor\n/, 'world-monitor.md must retain its brand H1 after metadata');
     assert.match(body, /## Official identity \(NAP\)/);
     assert.match(body, /\|\s*Name\s*\|\s*World Monitor\s*\|/);
     assert.match(body, /https:\/\/www\.worldmonitor\.app/);
@@ -102,9 +102,11 @@ describe('Organization JSON-LD NAP alignment', () => {
     assert.doesNotMatch(read('pro-test/prerender.mjs'), /Organization JSON-LD|ORGANIZATION_JSONLD/);
   });
 
-  it('links owned registry packages, never the foreign PyPI name or the product item', () => {
+  it('links the organization profile and owned packages, never foreign identities', () => {
     const [org] = organizationBlocks(read('pro-test/welcome.html'));
     for (const edge of [
+      'https://www.crunchbase.com/organization/world-monitor',
+      'https://www.wikidata.org/wiki/Q141437464',
       'https://rubygems.org/gems/worldmonitor',
       'https://pypi.org/project/worldmonitor-sdk/',
       'https://pkg.go.dev/github.com/koala73/worldmonitor/sdk/go',

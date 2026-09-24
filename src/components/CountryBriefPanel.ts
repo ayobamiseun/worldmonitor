@@ -209,8 +209,6 @@ export interface CountryBriefPanel {
   getTimelineMount(): HTMLElement | null;
   readonly signal: AbortSignal;
   onClose(cb: () => void): void;
-  setShareStoryHandler(handler: (code: string, name: string) => void): void;
-  setExportImageHandler(handler: (code: string, name: string) => void): void;
   updateBrief(data: CountryIntelData): void;
   updateNews(headlines: NewsItem[]): void;
   updateMarkets(markets: PredictionMarket[]): void;
@@ -218,6 +216,7 @@ export interface CountryBriefPanel {
   updateInfrastructure(code: string): void;
   showGeoError?(onRetry: () => void): void;
   updateScore?(score: CountryScore | null, signals: CountryBriefSignals): void;
+  isFallbackBrief?(): boolean;
   updateSignalDetails?(details: CountryDeepDiveSignalDetails): void;
   updateMilitaryActivity?(summary: CountryDeepDiveMilitarySummary): void;
   updateDefenseIndustrialBase?(data: GetDefenseIndustrialBaseResponse | null): void;

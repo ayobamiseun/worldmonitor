@@ -129,7 +129,7 @@
         "currentForCheckout": true,
         "selfServe": true,
         "dashboardAiCallsPerDay": 10000,
-        "description": "Everything in API Starter, Redistribution rights — embed our data in what you sell, 300 requests/minute, 10,000 requests/day included (REST + MCP combined; a live MCP call counts as 2-3), 5 Pro licenses — invite users at any corporate email domain, Priority support, Commercial license — for your customers"
+        "description": "Everything in API Starter, R1–R3 redistribution rights for customer-facing products, 300 requests/minute, 10,000 requests/day included (REST + MCP combined; a live MCP call counts as 2-3), 5 Pro licenses — invite users at any corporate email domain, Priority support, Commercial license — for your customers"
       },
       {
         "planKey": "api_business_annual",
@@ -165,8 +165,25 @@
     "heroProofStats": {
       "mapLayers": 57,
       "feeds": 461,
-      "providers": 747,
+      "providers": 761,
       "alertOrigins": 5
+    },
+    "depthProofStats": {
+      "mapLayers": 57,
+      "feeds": 461,
+      "providers": 761,
+      "alertOrigins": 5,
+      "chokepoints": 13,
+      "instabilityCountries": 31,
+      "resilienceRanked": 170,
+      "submarineCables": 86,
+      "pipelinesLng": 159,
+      "aiDatacenters": 313,
+      "hotspots": 29,
+      "stockExchanges": 29,
+      "mcpTools": 75,
+      "commands": 618,
+      "languages": 28
     }
   },
   "products": {
@@ -325,7 +342,7 @@
       "description": "Launch your own product on WorldMonitor data",
       "features": [
         "Everything in API Starter",
-        "Redistribution rights — embed our data in what you sell",
+        "R1–R3 redistribution rights for customer-facing products",
         "300 requests/minute",
         "10,000 requests/day included (REST + MCP combined; a live MCP call counts as 2-3)",
         "5 Pro licenses — invite users at any corporate email domain",

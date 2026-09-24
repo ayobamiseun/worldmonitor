@@ -14,6 +14,7 @@ import {
   waitForConvexAuthForUser,
 } from './convex-client';
 import { getCurrentClerkUser } from './clerk';
+import { hasAccountEmbedAccess } from '../../shared/embed-access';
 
 export interface EntitlementState {
   planKey: string;
@@ -51,6 +52,15 @@ export interface EntitlementState {
      * never locks a paying customer out of their own data.
      */
     dataExport?: boolean;
+    /**
+     * Partner-embed key issuance (`wme_…`). Deliberately separate from
+     * `apiAccess`: both Pro tiers sell embedding without REST access, so
+     * gating the Embeds tab on `apiAccess` would hide it from most of the
+     * customers who bought it. Undefined on snapshots older than the catalog
+     * field; the account gate also accepts a verified Clerk PRO role while the
+     * Convex snapshot hydrates.
+     */
+    embedAccess?: boolean;
   };
   validUntil: number;
 }
@@ -276,6 +286,14 @@ export function getEntitlementState(): EntitlementState | null {
 export function hasFeature(flag: keyof EntitlementState['features']): boolean {
   if (currentState === null) return false;
   return Boolean(currentState.features[flag]);
+}
+
+/**
+ * Check the account-level embed grant from both verified auth authorities.
+ * Clerk's current PRO role must not wait for the Convex snapshot to hydrate.
+ */
+export function hasEmbedAccessForAccount(role: 'free' | 'pro' | undefined): boolean {
+  return hasAccountEmbedAccess(role, currentState, Date.now());
 }
 
 /**

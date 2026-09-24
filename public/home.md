@@ -1,6 +1,12 @@
+---
+title: "World Monitor"
+description: "Live global intelligence, API access, authentication, and agent capabilities."
+canonical: "https://www.worldmonitor.app/home.md"
+---
+
 # World Monitor — By the time it's news, you already knew.
 
-As of 2026-09-04.
+As of 2026-09-08.
 
 World Monitor is a free real-time global intelligence dashboard. It brings ships, aircraft, conflict events, alerts, infrastructure, markets, weather, cyber signals, and curated news onto one live map. Its analysis layer helps users see when separate signals begin to converge into one event that matters.
 
@@ -82,6 +88,7 @@ World Monitor is not a general web-search engine, a complete historical archive,
 
 - [Brand identity](https://www.worldmonitor.app/world-monitor.md) — official name, canonical domain, NAP, and press mentions
 - [Product and API documentation](https://www.worldmonitor.app/docs/documentation)
+- [Competitor comparisons](https://www.worldmonitor.app/compare/) — World Monitor against Liveuamap, ACLED, GDELT, Dataminr, Recorded Future, Deep State Map, chokepoint trackers and MCP servers, with the cells each competitor wins
 - [Source catalog](https://www.worldmonitor.app/sources/)
 - [Support and contact](https://www.worldmonitor.app/support.md)
 - [GitHub repository](https://github.com/koala73/worldmonitor)

@@ -19,8 +19,17 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PRODUCT_CATALOG, PUBLIC_PRODUCT_METADATA } from '../convex/config/productCatalog.ts';
-import { TOOL_REGISTRY, toolAccess } from '../api/mcp/registry/index.ts';
+import { AI_DATA_CENTERS } from '../src/config/ai-datacenters.ts';
+import { CHOKEPOINT_REGISTRY } from '../src/config/chokepoint-registry.ts';
+import { UNDERSEA_CABLES } from '../src/config/geo-map.ts';
 import { getCompleteLayerCatalogKeys } from '../src/config/map-layer-definitions.ts';
+import { INTEL_HOTSPOTS } from '../shared/geo-data.ts';
+import { PIPELINES } from '../shared/pipelines-data.ts';
+import { TOOL_REGISTRY, toolAccess } from '../api/mcp/registry/index.ts';
+import { publishedRankedCountries } from './build-ai-search.mjs';
+import { commandPaletteCommandCount } from './lib/command-palette-count.mjs';
+import { lngFacilityCount } from './_storage-facility-registry.mjs';
+import { computeStats } from './docs-stats.mjs';
 import { loadManifest, scanUpstreamHosts, sourceAttributionStats } from './source-attribution.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -134,6 +143,8 @@ const plans = publicCatalogEntries.map(([planKey, entry]) => ({
   ].join(', '),
 }));
 
+const heroProofStats = buildHeroProofStats();
+
 const facts = {
   _generated: 'scripts/generate-public-product-facts.mjs — do not edit by hand; run `npm run product:facts`',
   product: {
@@ -145,7 +156,8 @@ const facts = {
   },
   currency: PUBLIC_PRODUCT_METADATA.currency,
   plans,
-  heroProofStats: buildHeroProofStats(),
+  heroProofStats,
+  depthProofStats: buildDepthProofStats(heroProofStats),
 };
 
 /**
@@ -165,6 +177,40 @@ function buildHeroProofStats() {
   };
 }
 
+/**
+ * "Under the hood" band proof figures (#7745). The subhead promises "Every
+ * number below is live in the dashboard today — not a roadmap", so every slot
+ * is measured from the same registries that produce ai-search.md's coverage
+ * block and the hero rail, and generation fails closed on any non-numeric
+ * value — the band shipped with adjectives in 14 of 15 slots for exactly the
+ * reason this validation exists.
+ */
+function buildDepthProofStats(hero) {
+  const stats = computeStats();
+  const candidate = {
+    // The first four slots carry the same labels — and therefore the same
+    // published figures — as the hero rail.
+    ...hero,
+    chokepoints: CHOKEPOINT_REGISTRY.length,
+    instabilityCountries: stats.tier1Countries,
+    resilienceRanked: publishedRankedCountries(ROOT).ranked,
+    submarineCables: UNDERSEA_CABLES.length,
+    pipelinesLng: PIPELINES.length + lngFacilityCount(),
+    aiDatacenters: AI_DATA_CENTERS.length,
+    hotspots: INTEL_HOTSPOTS.length,
+    stockExchanges: stats.stockExchangeCount,
+    mcpTools: TOOL_REGISTRY.length,
+    commands: commandPaletteCommandCount(),
+    languages: stats.locales,
+  };
+  for (const [key, value] of Object.entries(candidate)) {
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new Error(`depth proof stat ${key} must be a positive integer, got ${JSON.stringify(value)}`);
+    }
+  }
+  return candidate;
+}
+
 const catalogBundle = {
   _generated: facts._generated,
   facts,
@@ -179,6 +225,8 @@ emit('scripts/shared/product-facts.generated.json', json(facts));
 // Slim homepage proof numerals. Hero.tsx imports this file — not the full
 // facts bundle — so the welcome JS payload grows by bytes, not kilobytes.
 emit('pro-test/src/generated/hero-stats.json', json(facts.heroProofStats));
+// Same rationale for the "Under the hood" band numerals that Depth.tsx renders.
+emit('pro-test/src/generated/depth-stats.json', json(facts.depthProofStats));
 emit('shared/product-catalog.generated.json', json(catalogBundle));
 emit('scripts/shared/product-catalog.generated.json', json(catalogBundle));
 
@@ -306,6 +354,10 @@ for (const path of proLocalePaths) {
     delete locale.footer?.beFirstInLine;
     delete locale.form;
     delete locale.referral;
+    // The "Under the hood" band renders measured numerals (depth-stats.json),
+    // so the retired adjective value slots are lifecycle-cleaned like the
+    // waitlist copy above. Labels (sNl) stay — they remain the localized copy.
+    for (let slot = 1; slot <= 15; slot += 1) delete locale.welcome?.depth?.[`s${slot}v`];
     return json(locale);
   });
 }

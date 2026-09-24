@@ -52,7 +52,9 @@ function mapConfidence(c: string): 'high' | 'medium' | 'low' {
 
 // ---- Core Adapter: proto UnrestEvent -> legacy SocialUnrestEvent ----
 
-function toSocialUnrestEvent(e: UnrestEvent): SocialUnrestEvent {
+/** Exported for the embed loader, which receives this wire shape from the
+ *  composed map-frame endpoint rather than from this module's own fetch. */
+export function toSocialUnrestEvent(e: UnrestEvent): SocialUnrestEvent {
   return {
     id: e.id,
     title: e.title,
@@ -99,11 +101,11 @@ const emptyFallback: ListUnrestEventsResponse = {
 
 export async function fetchProtestEvents(): Promise<ProtestData> {
   const hydrated = getHydratedData('unrestEvents') as ListUnrestEventsResponse | undefined;
-  if (hydrated?.events?.length) {
+  if (Array.isArray(hydrated?.events)) {
     // Warm the breaker under the same key a later recurring call reads
     // (#7048); a bare return drained the consume-once slot and forced a
     // refetch.
-    unrestBreaker.recordSuccess(hydrated);
+    unrestBreaker.recordSuccess(hydrated, 'available-v1');
     const events = hydrated.events.map(toSocialUnrestEvent);
     const byCountry = new Map<string, SocialUnrestEvent[]>();
     for (const event of events) {
@@ -131,7 +133,8 @@ export async function fetchProtestEvents(): Promise<ProtestData> {
       swLat: 0,
       swLon: 0,
     });
-  }, emptyFallback);
+  }, emptyFallback, { cacheKey: 'available-v1' });
+  if (resp === emptyFallback) throw new Error('Unrest events unavailable');
 
   const events = resp.events.map(toSocialUnrestEvent);
 

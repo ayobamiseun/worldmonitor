@@ -102,7 +102,8 @@ jobs:
             echo
             echo '- **Stale revision:** run the workflow from the current `main`; never re-run an older workflow attempt.'
             echo '- **Registry-managed drift:** fix the registry or the reconciler, then run the current `main` workflow.'
-            echo '- **Source branch, check-suite, or required-variable drift:** repair the named Railway service setting; the registry patch cannot write these fields.'
+            echo '- **Source branch or check-suite drift:** repair the named Railway service setting; the registry patch cannot write these fields.'
+            echo '- **Runtime prerequisites:** missing source credentials are listed separately and do not fail registry sync. The ingestion monitor reports source health.'
             echo '- **CLI or observation failure:** restore Railway access, then run the current `main` workflow.'
             echo
             echo 'Do not run a local production `--apply` from a stale checkout.'

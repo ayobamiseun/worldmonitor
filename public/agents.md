@@ -1,3 +1,9 @@
+---
+title: "World Monitor agent guide"
+description: "Machine interfaces, authentication, request policy, and rate limits."
+canonical: "https://www.worldmonitor.app/agents.md"
+---
+
 # World Monitor — Agent Guide
 
 > How AI agents should work with worldmonitor.app: machine surfaces, authentication, crawl policy, rate limits, and discovery endpoints. Prefer the structured surfaces below over scraping the HTML dashboard — the dashboard is a WebGL SPA and yields nothing useful to a text parser.

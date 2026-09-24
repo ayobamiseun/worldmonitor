@@ -71,7 +71,7 @@ test('per-member cadence is the declared one, not TTC\'s cron inherited', () => 
     ['VIA-Rail-Live', 15 * MIN],
     ['TTC-Alerts', 5 * MIN],
     ['Toronto-TFS', 5 * MIN],
-    ['Toronto-TPS', 15 * MIN],
+    ['Toronto-TPS', 30 * MIN],
     // Retrospective MCI and an annual aggregate: 6h keeps our copy warm inside
     // the 24h canonical TTL rather than chasing upstream, which edits monthly.
     ['TPS-MCI', 6 * HOUR],

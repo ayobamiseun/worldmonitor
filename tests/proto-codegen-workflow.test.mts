@@ -10,7 +10,7 @@ import { parse as parseYaml } from 'yaml';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = resolve(root, '.github/workflows/proto-check.yml');
 const workflowSource = readFileSync(workflowPath, 'utf8');
-const deployGateSource = readFileSync(resolve(root, '.github/workflows/deploy-gate.yml'), 'utf8');
+const deployGateScript = readFileSync(resolve(root, '.github/scripts/deploy-gate.sh'), 'utf8');
 const contributing = readFileSync(resolve(root, 'CONTRIBUTING.md'), 'utf8');
 const agentInstructions = readFileSync(resolve(root, 'AGENTS.md'), 'utf8');
 const scorecardMirrorSource = readFileSync(
@@ -464,6 +464,11 @@ describe('proto codegen workflow trust boundaries (#3340)', () => {
   it('defaults to no token permissions and never uses pull_request_target', () => {
     assert.deepEqual(workflow.permissions, {});
     assert.doesNotMatch(workflowSource, /pull_request_target/);
+    assert.equal(
+      workflow.concurrency?.group,
+      'proto-freshness-${{ github.event.pull_request.number || github.sha }}',
+      'proto-check must fall back to github.sha so two mainline pushes do not share one group (#8445)',
+    );
     assert.equal(workflow.concurrency?.['cancel-in-progress'], true);
     assert.ok(
       workflow.on?.pull_request == null || Object.keys(workflow.on.pull_request).length === 0,
@@ -484,12 +489,13 @@ describe('proto codegen workflow trust boundaries (#3340)', () => {
   });
 
   it('classifies the complete codegen path domain with decoded GitHub paths', () => {
-    const input = workflow.env?.CODEGEN_INPUT_REGEX;
+    const inputs = (workflow.env?.CODEGEN_INPUT_PATHS ?? '').split(/\s+/).filter(Boolean);
+    const isInput = (path: string) => inputs.some((input) => input.endsWith('/') ? path.startsWith(input) : path === input);
     const generatedPaths = (workflow.env?.GENERATED_PATHS ?? '').split(/\s+/).filter(Boolean);
     const isGenerated = (path: string) => generatedPaths.some((generated) =>
       generated.endsWith('/') ? path.startsWith(generated) : path === generated,
     );
-    assert.ok(input, 'workflow must define the codegen input class');
+    assert.ok(inputs.length > 0, 'workflow must define the codegen input class');
     assert.ok(generatedPaths.length > 0, 'workflow must define one generated-output registry');
     assert.equal(workflow.env?.GENERATED_OUTPUT_REGEX, undefined);
 
@@ -502,7 +508,7 @@ describe('proto codegen workflow trust boundaries (#3340)', () => {
       'src/shared/premium-paths.ts',
       'Makefile',
     ]) {
-      assert.match(path, new RegExp(input), `${path} must be a codegen input`);
+      assert.ok(isInput(path), `${path} must be a codegen input`);
     }
     assert.equal(isGenerated('src/generated/client.ts'), true);
     assert.equal(isGenerated('docs/api/worldmonitor.openapi.yaml'), true);
@@ -515,8 +521,21 @@ describe('proto codegen workflow trust boundaries (#3340)', () => {
 
     const workflowOnly = runChangeClassifier(['.github/workflows/proto-check.yml']);
     assert.equal(workflowOnly.status, 0, workflowOnly.stderr);
-    assert.match(workflowOnly.output, /^codegen=false$/m);
+    assert.match(workflowOnly.output, /^codegen=true$/m);
     assert.match(workflowOnly.output, /^breaking=false$/m);
+
+    const railwayOnly = runChangeClassifier([
+      'scripts/audit-railway-watch-paths.mjs', 'scripts/run-railway-registry-sync.mjs',
+      'scripts/railway-services.json', '.github/workflows/railway-registry-sync.yml',
+    ]);
+    assert.equal(railwayOnly.status, 0, railwayOnly.stderr);
+    assert.match(railwayOnly.output, /^codegen=false$/m);
+    const removedInput = runChangeClassifier([{ filename: 'scripts/openapi-inject-security.mjs', status: 'removed' }]);
+    assert.match(removedInput.output, /^codegen=true$/m);
+    const renamedInput = runChangeClassifier([{
+      filename: 'archive/injector.mjs', previous_filename: 'scripts/openapi-inject-security.mjs', status: 'renamed',
+    }]);
+    assert.match(renamedInput.output, /^codegen=true$/m);
 
     const unrelated = runChangeClassifier(['src/components/Panel.ts']);
     assert.equal(unrelated.status, 0, unrelated.stderr);
@@ -883,7 +902,7 @@ describe('proto codegen workflow trust boundaries (#3340)', () => {
       'internal-merge-freshness',
       'proto-freshness',
     ]) {
-      assert.match(deployGateSource, new RegExp(`"${checkName}"`), `${checkName} must remain required`);
+      assert.match(deployGateScript, new RegExp(`"${checkName}"`), `${checkName} must remain required`);
     }
     const aggregateStep = stepByName('proto-freshness', 'Publish aggregate proto freshness result');
     assert.equal(aggregateStep.env?.TRUSTED_FORK, '${{ needs.changes.outputs.trusted_fork }}');

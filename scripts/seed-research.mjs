@@ -8,6 +8,8 @@
  * - listTrendingRepos (python, javascript, typescript daily)
  */
 
+import ARXIV_CATEGORIES from './shared/research-arxiv-categories.json' with { type: 'json' };
+
 import { loadEnvFile, CHROME_UA, runSeed, writeExtraKeyWithMeta, sleep } from './_seed-utils.mjs';
 
 loadEnvFile(import.meta.url);
@@ -21,11 +23,24 @@ export const RESEARCH_MAX_STALE_MIN = 150;
 export const ARXIV_TTL = 10800;
 const HN_TTL = 600;
 const TECH_EVENTS_TTL = 28800; // 8h — outlives maxStaleMin:480 for health buffer
+// Distinct seed-meta key for this seeder's tech-events mirror. MUST NOT share
+// seed-meta:research:tech-events with scripts/ais-relay.cjs: the relay writes
+// research:tech-events-bootstrap:v1 (the payload /api/health counts and
+// bootstrap hydration serves) plus that meta, and defers its boot seed while
+// the meta is younger than its 6h interval. The default meta-key derivation
+// strips ':v1', so this file's extra-key write used to refresh the relay's
+// meta on every hourly seed-research run (Railway cron 0 */1 * * *; two live
+// meta writes on 2026-09-23 were 62min apart) while never writing the
+// bootstrap payload — the relay then postponed its first seed on every restart
+// (age always < 6h), the bootstrap key silently expired, and health reported
+// EMPTY records=0 next to a fresh seedAge. seed-health intervalMin 240 is the
+// declared expected interval, not this seeder's real write cadence. See
+// incident 2026-09-23.
+export const TECH_EVENTS_SEED_META_KEY = 'seed-meta:research:tech-events:seeder';
 const TRENDING_TTL = 3600;
 
 // ─── arXiv Papers ───
 
-const ARXIV_CATEGORIES = ['cs.AI', 'cs.CL', 'cs.CR'];
 
 // Parse arXiv Atom XML into paper records. Pure — split out so the fetch path stays testable.
 function parseArxivEntries(xml) {
@@ -100,50 +115,54 @@ export async function fetchArxivPapers({ fetchFn = fetch, retries = 1, sleepFn =
 
 // ─── Hacker News ───
 
-async function fetchHackerNews() {
-  const feeds = ['top', 'best'];
+export async function fetchHackerNews() {
+  const feeds = ['top', 'new', 'best', 'ask', 'show', 'job'];
   const results = {};
 
   for (const feed of feeds) {
-    const idsResp = await fetch(`https://hacker-news.firebaseio.com/v0/${feed}stories.json`, {
-      headers: { 'User-Agent': CHROME_UA },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!idsResp.ok) { console.warn(`  HN ${feed}: HTTP ${idsResp.status}`); continue; }
-    const allIds = await idsResp.json();
-    if (!Array.isArray(allIds)) continue;
+    try {
+      const idsResp = await fetch(`https://hacker-news.firebaseio.com/v0/${feed}stories.json`, {
+        headers: { 'User-Agent': CHROME_UA },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!idsResp.ok) { console.warn(`  HN ${feed}: HTTP ${idsResp.status}`); continue; }
+      const allIds = await idsResp.json();
+      if (!Array.isArray(allIds)) continue;
 
-    const ids = allIds.slice(0, 30);
-    const items = [];
+      const ids = allIds.slice(0, 30);
+      const items = [];
 
-    for (let i = 0; i < ids.length; i += 10) {
-      const batch = ids.slice(i, i + 10);
-      const batchResults = await Promise.all(
-        batch.map(async (id) => {
-          try {
-            const res = await fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, {
-              headers: { 'User-Agent': CHROME_UA },
-              signal: AbortSignal.timeout(5_000),
-            });
-            if (!res.ok) return null;
-            const raw = await res.json();
-            if (!raw || raw.type !== 'story') return null;
-            return {
-              id: raw.id || 0, title: raw.title || '', url: raw.url || '',
-              score: raw.score || 0, commentCount: raw.descendants || 0,
-              by: raw.by || '', submittedAt: (raw.time || 0) * 1000,
-            };
-          } catch { return null; }
-        }),
-      );
-      items.push(...batchResults.filter(Boolean));
+      for (let i = 0; i < ids.length; i += 10) {
+        const batch = ids.slice(i, i + 10);
+        const batchResults = await Promise.all(
+          batch.map(async (id) => {
+            try {
+              const res = await fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, {
+                headers: { 'User-Agent': CHROME_UA },
+                signal: AbortSignal.timeout(5_000),
+              });
+              if (!res.ok) return null;
+              const raw = await res.json();
+              if (!raw || (raw.type !== 'story' && raw.type !== 'job')) return null;
+              return {
+                id: raw.id || 0, title: raw.title || '', url: raw.url || '',
+                score: raw.score || 0, commentCount: raw.descendants || 0,
+                by: raw.by || '', submittedAt: (raw.time || 0) * 1000,
+              };
+            } catch { return null; }
+          }),
+        );
+        items.push(...batchResults.filter(Boolean));
+      }
+
+      const cacheKey = `research:hackernews:v1:${feed}:30`;
+      if (items.length > 0) {
+        results[cacheKey] = { items, pagination: undefined };
+      }
+      console.log(`  HN ${feed}: ${items.length} stories`);
+    } catch (error) {
+      console.warn(`  HN ${feed} failed: ${error?.message || error}`);
     }
-
-    const cacheKey = `research:hackernews:v1:${feed}:30`;
-    if (items.length > 0) {
-      results[cacheKey] = { items, pagination: undefined };
-    }
-    console.log(`  HN ${feed}: ${items.length} stories`);
   }
   return results;
 }
@@ -358,11 +377,21 @@ async function fetchAll() {
     }
   }
   if (allData.hn) { for (const [key, data] of Object.entries(allData.hn)) await writeExtraKeyWithMeta(key, data, HN_TTL, data.items?.length ?? 0); }
-  if (allData.techEvents?.events?.length > 0) await writeExtraKeyWithMeta('research:tech-events:v1', allData.techEvents, TECH_EVENTS_TTL, allData.techEvents.events.length);
+  if (allData.techEvents?.events?.length > 0) await writeTechEventsMirror(allData.techEvents);
   if (allData.trending) { for (const [key, data] of Object.entries(allData.trending)) await writeExtraKeyWithMeta(key, data, TRENDING_TTL, data.repos?.length ?? 0); }
 
   const primaryKey = allData.arxiv?.['research:arxiv:v1:cs.AI::50'];
   return primaryKey || { papers: [], pagination: undefined };
+}
+
+// Persist the tech-events mirror under the SEEDER-owned meta key. Extracted so
+// the write path stays behaviorally testable (see
+// tests/seed-research-tech-events-meta-ownership.test.mjs): the meta key
+// override is load-bearing — the default derivation would collide with the
+// relay-owned seed-meta:research:tech-events and starve the bootstrap payload.
+export async function writeTechEventsMirror(techEvents, deps = {}) {
+  const write = deps.writeExtraKeyWithMeta ?? writeExtraKeyWithMeta;
+  await write('research:tech-events:v1', techEvents, TECH_EVENTS_TTL, techEvents.events.length, TECH_EVENTS_SEED_META_KEY);
 }
 
 function validate(data) {

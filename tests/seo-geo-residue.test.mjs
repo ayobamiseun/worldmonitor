@@ -9,7 +9,8 @@ import { dirname, join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { buildLlmsFullText, redactInternalApiOrigins } from '../scripts/build-llms-full.mjs';
+import { comparisonDiscoveryEntries } from '../scripts/build-comparison-pages.mjs';
+import { COMPARISONS_HEADING, buildLlmsFullText, redactInternalApiOrigins, withComparisonsSection, withCorpusNavigation } from '../scripts/build-llms-full.mjs';
 import { resolveLatestLivePulseSnapshotPath } from '../scripts/build-crawlable-corpus.mjs';
 import { parseSitemapDocument } from '../scripts/verify-sitemaps.mjs';
 
@@ -80,6 +81,31 @@ describe('GEO residue #7463', () => {
     assert.match(committed, /product-facts\.json.*capabilities\.localeCodes/);
   });
 
+  it('llms-full inlines the generated forecast-accuracy record, not only an index link', () => {
+    const generated = buildLlmsFullText({ rootDir: repoRoot });
+    const snapshot = readJson(resolveLatestLivePulseSnapshotPath(repoRoot));
+    const skill = snapshot.forecastScorecard?.scorecard?.skill;
+    const section = generated.split(/^## Forecast accuracy$/m)[1]?.split(/^## /m)[0] ?? '';
+    assert.match(generated, /^## Forecast accuracy$/m);
+    assert.match(section, /does not publish/i);
+    assert.match(section, /https:\/\/www\.worldmonitor\.app\/accuracy\//);
+    assert.ok(
+      Number.isFinite(skill?.brier) && skill.count > 0,
+      'the committed pulse snapshot must carry a measurable headline cohort so this section cannot be a hardcoded stub',
+    );
+    assert.match(section, new RegExp(`Brier of ${Number(skill.brier).toFixed(3)}`));
+    assert.match(section, new RegExp(`${Number(skill.count).toLocaleString('en-US')} scored forecasts`));
+    assert.match(
+      section,
+      new RegExp(`${Number(snapshot.forecastScorecard.scorecard.rollingWindowDays).toLocaleString('en-US')}-day window`),
+    );
+    assert.doesNotMatch(
+      section,
+      /issue #\d+/,
+      'the corpus section must state the negative scope without a tracker-only sentence',
+    );
+  });
+
   // "Usable" was previously read as "not redacted", and the URL this pinned —
   // https://api.worldmonitor.app/resilience/v1/get-runtime-manifest — 404s: the
   // route is /api/resilience/v1/..., and the link had been published without the
@@ -118,6 +144,39 @@ describe('GEO residue #7463', () => {
     assert.match(mixed, /\[REDACTED\]\/api\/resilience\/v1\/get-runtime-manifest/);
     assert.ok(mixed.includes(`${publicApiOrigin}${manifestPath}`), 'the public API origin must survive redaction');
     assert.match(mixed, /pragma: allowlist secret/);
+  });
+
+  it('gives the full corpus unique headings and a complete, resolvable contents list (#7749)', () => {
+    const generated = buildLlmsFullText({ rootDir: repoRoot });
+    const headings = [...generated.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
+    assert.equal(new Set(headings).size, headings.length, 'section headings must be unique');
+    const contents = generated.match(/<!-- corpus-navigation:start -->([\s\S]*?)<!-- corpus-navigation:end -->/)?.[1];
+    assert.ok(contents, 'the generated corpus needs a table of contents');
+    const links = [...contents.matchAll(/^- \[([^\]]+)\]\(#([^\)]+)\)$/gm)];
+    assert.deepEqual(links.map((match) => match[1]), headings, 'contents must enumerate every section in order');
+    assert.equal(new Set(links.map((match) => match[2])).size, links.length);
+    for (const [, , anchor] of links) {
+      assert.equal(generated.split(`<a id="${anchor}"></a>`).length - 1, 1, `${anchor} must resolve exactly once`);
+    }
+    assert.match(generated, /\[Data Sources\]\(#corpus-data-sources-country-resilience-index-methodology\)/,
+      'the imported methodology must link its own data sources');
+    for (const [, anchor] of generated.matchAll(/\]\(#([^)]+)\)/g)) {
+      assert.ok(generated.includes(`<a id="${anchor}"></a>`), `${anchor} must resolve within the corpus`);
+    }
+  });
+
+  it('qualifies colliding headings, preserves code examples, and rewrites document-local links (#7749)', () => {
+    const code = '```markdown\n## Sources\n[example](#sources)\n```';
+    const generated = withCorpusNavigation([
+      { title: 'Brief', text: '# Product\n\n## Sources\n[Brief sources](#sources)' },
+      { title: 'Methodology', text: `## Sources!\n[Method sources](#sources)\n\n${code}\n\n### Sources` },
+    ]);
+    assert.match(generated, /^# Product\n/);
+    assert.match(generated, /## Sources! \(Methodology\)/);
+    assert.match(generated, /### Sources \(Methodology\) 2/);
+    assert.match(generated, /\[Brief sources\]\(#corpus-sources\)/);
+    assert.match(generated, /\[Method sources\]\(#corpus-sources-methodology\)/);
+    assert.ok(generated.includes(code), 'fenced headings and links must remain code');
   });
 
   it('serves the MCP server card at the newer well-known server.json name', () => {
@@ -182,19 +241,17 @@ describe('GEO residue #7463', () => {
     assert.doesNotMatch(useCases[1], /livePulse/);
   });
 
-  it('homepage source has a YYYY-MM-DD as-of date in JSON-LD and visible copy', () => {
-    const index = read('pro-test/index.html');
+  it('homepage editorial copy retains its reviewed as-of date', () => {
     const hero = read('pro-test/src/welcome/Hero.tsx');
     const home = read('public/home.md');
     const en = readJson('pro-test/src/locales/en.json');
 
-    assert.match(index, /"dateModified": "2026-09-04"/);
-    assert.match(hero, /dateTime="2026-09-04"/);
-    assert.match(home, /2026-09-04/);
-    assert.match(String(en.welcome?.hero?.asOf || ''), /2026-09-04|4 September 2026/);
+    assert.match(hero, /dateTime="2026-09-08"/);
+    assert.match(home, /2026-09-08/);
+    assert.match(String(en.welcome?.hero?.asOf || ''), /2026-09-08|8 September 2026/);
   });
 
-  it('homepage welcome.html dates track the teaser strip snapshot (#7654)', () => {
+  it('homepage and Pro software dates track the teaser strip snapshot (#7654)', () => {
     // The strip reads docs/snapshots/crawlable-live-pulse-*.json, so the host
     // page's crawler-facing dates come from the same freeze — refreshed by
     // `npm run teasers:welcome`, never hand-maintained.
@@ -202,6 +259,7 @@ describe('GEO residue #7463', () => {
     const welcome = read('pro-test/welcome.html');
     assert.match(welcome, new RegExp(`<meta name="lastmod" content="${snapshot.capturedAt}"`));
     assert.match(welcome, new RegExp(`"dateModified": "${snapshot.capturedAt}"`));
+    assert.match(read('pro-test/index.html'), new RegExp(`"dateModified": "${snapshot.capturedAt}"`));
   });
 
   it('does not add well-known server.json to the MCP registry publish path filter', () => {
@@ -217,6 +275,13 @@ describe('GEO residue #7463', () => {
     const workflow = read('.github/workflows/resilience-snapshot-refresh.yml');
     assert.match(workflow, /npm run build:llms-full/);
     assert.match(workflow, /git add "\$snapshot_path" public\/sitemap\.xml public\/sitemap-main\.xml public\/llms-full\.txt/);
+  });
+
+  it('regenerates llms-full when the weekly pulse snapshot refreshes', () => {
+    const workflow = read('.github/workflows/crawlable-pulse-refresh.yml');
+    assert.match(workflow, /npm run build:llms-full/);
+    assert.match(workflow, /git add "\$snapshot_path" public\/sitemap\.xml public\/sitemap-main\.xml public\/llms-full\.txt/);
+    assert.match(workflow, /tests\/seo-geo-residue\.test\.mjs/);
   });
 });
 
@@ -313,6 +378,131 @@ describe('GEO residue #7463 filesystem', () => {
       names.includes('server.json'),
       false,
       'well-known server.json must be a rewrite alias, not a second copy of the card',
+    );
+  });
+});
+
+// The 13 /compare/ pages scored 85–92 on citability yet were referenced from
+// none of the surfaces built to tell an assistant what the site offers: zero
+// mentions in llms.txt, llms-full.txt, or the served homepage (#7746). The
+// section is generated from COMPARISON_PAGES and spliced into llms.txt by the
+// same script that emits llms-full.txt, so the two cannot drift from each
+// other or from the pages; the sitemap cross-check catches a route family
+// that ships without a discovery entry at all.
+describe('GEO residue #7746 (compare discoverability)', () => {
+  const llmsTxt = () => read('public/llms.txt');
+  const sitemapCompareUrls = () =>
+    parseSitemapDocument(read('public/sitemap-main.xml')).locations
+      .filter((loc) => new URL(loc).pathname.startsWith('/compare/'))
+      .sort();
+
+  it('lists every sitemap /compare/ URL in llms.txt and the generated llms-full corpus', () => {
+    const urls = sitemapCompareUrls();
+    assert.ok(urls.length >= 13, `sitemap-main.xml should carry the 13-route compare family, got ${urls.length}`);
+    const generated = buildLlmsFullText({ rootDir: repoRoot });
+    for (const url of urls) {
+      // Exactly once: the splice locates its section by heading, so a renamed
+      // heading would leave a stale copy behind that the fixed-point check
+      // cannot see. Counting the links catches that duplicate.
+      assert.equal(llmsTxt().split(`](${url})`).length, 2, `public/llms.txt must link ${url} exactly once`);
+      assert.ok(generated.includes(`](${url})`), `generated llms-full must link ${url}`);
+    }
+  });
+
+  it('keeps the llms.txt Comparisons section in sync with the generator, between Answer Blocks and Live Instances', () => {
+    const body = llmsTxt();
+    assert.equal(
+      withComparisonsSection(body),
+      body,
+      'public/llms.txt Comparisons section is stale — run npm run build:llms-full',
+    );
+    const answerBlocks = body.indexOf('\n## AI Search Answer Blocks\n');
+    const comparisons = body.indexOf(`\n${COMPARISONS_HEADING}\n`);
+    const liveInstances = body.indexOf('\n## Live Instances\n');
+    assert.ok(answerBlocks !== -1 && comparisons !== -1 && liveInstances !== -1, 'all three headings must exist');
+    assert.ok(
+      answerBlocks < comparisons && comparisons < liveInstances,
+      'Comparisons must sit between AI Search Answer Blocks and Live Instances',
+    );
+    assert.equal(
+      (body.match(new RegExp(`^${COMPARISONS_HEADING}$`, 'mg')) ?? []).length,
+      1,
+      'llms.txt must carry exactly one Comparisons section',
+    );
+  });
+
+  it('derives one query-led discovery entry per compare route, matching the sitemap set exactly', () => {
+    const entries = comparisonDiscoveryEntries('https://www.worldmonitor.app');
+    assert.deepEqual(entries.map((entry) => entry.url).sort(), sitemapCompareUrls());
+    const descriptions = new Set();
+    for (const entry of entries) {
+      assert.ok(entry.title.length > 0, `${entry.url} needs a title`);
+      assert.ok(
+        entry.description.length >= 60 && entry.description.length <= 240,
+        `${entry.url} summary must be 60–240 chars, got ${entry.description.length}`,
+      );
+      assert.ok(!descriptions.has(entry.description), `${entry.url} summary duplicates another entry`);
+      descriptions.add(entry.description);
+      assert.ok(
+        llmsTxt().includes(`- [${entry.title}](${entry.url}): ${entry.description}`),
+        `llms.txt must carry the exact entry for ${entry.url}`,
+      );
+    }
+  });
+
+  it('splices the section idempotently and fails loudly on malformed input', () => {
+    const doc = '# X\n\n## AI Search Answer Blocks\n\nbody\n\n## Live Instances\n\n- a\n';
+    const once = withComparisonsSection(doc);
+    assert.ok(once.includes(`\n${COMPARISONS_HEADING}\n`), 'first run inserts the section');
+    assert.ok(once.indexOf(COMPARISONS_HEADING) < once.indexOf('## Live Instances'), 'inserted ahead of Live Instances');
+    assert.equal(withComparisonsSection(once), once, 'the inserted document is a fixed point');
+    const edited = once.replace('- [Compare World Monitor]', '- [Stale]');
+    assert.notEqual(edited, once);
+    assert.equal(withComparisonsSection(edited), once, 'a hand-edited section is replaced in place');
+    assert.throws(() => withComparisonsSection('# X\n\n## Documentation\n\n- a\n'), /Live Instances/);
+    assert.throws(() => withComparisonsSection(`${once}\n${COMPARISONS_HEADING}\n\nextra\n`), /exactly one/);
+  });
+
+  it('links the Liveuamap FAQ answer to the comparison page on the homepage and its agent mirror', () => {
+    const label = 'worldmonitor.app/compare/liveuamap-alternatives';
+    const href = '/compare/liveuamap-alternatives/';
+    const en = readJson('pro-test/src/locales/en.json');
+    assert.equal(en.welcome.faq.q5, 'How is this different from a conflict map like Liveuamap?');
+    // The destination rides inside the answer string, like the terms link in
+    // a11, so the FAQPage JSON-LD keeps it and the translator pins the URL.
+    assert.ok(en.welcome.faq.a5.endsWith(`: ${label}.`), 'en a5 must end with the comparison destination');
+    assert.equal(en.welcome.faq.a5Link, undefined, 'the label lives in a5, not a separate key');
+    for (const file of readdirSync(join(repoRoot, 'pro-test/src/locales'))) {
+      const answer = readJson(`pro-test/src/locales/${file}`).welcome?.faq?.a5;
+      assert.ok(typeof answer === 'string' && answer.includes(label), `${file} a5 must keep the comparison destination`);
+    }
+    assert.equal(readJson('scripts/locale-baselines/pro-test.json')['welcome.faq.a5'], en.welcome.faq.a5);
+    // FAQ.tsx maps that label to the route, and the route must be one the
+    // comparison registry actually emits, so a renamed slug cannot leave the
+    // homepage on a 404 while every generated surface moves.
+    const faqSource = read('pro-test/src/welcome/FAQ.tsx');
+    const mapping = faqSource.match(/label: '([^']+)', href: '(\/compare\/[^']+)'/);
+    assert.ok(mapping, 'FAQ.tsx must map a compare label to its route');
+    assert.equal(mapping[1], label);
+    assert.equal(mapping[2], href);
+    assert.ok(
+      comparisonDiscoveryEntries('https://www.worldmonitor.app').some((entry) => entry.url === `https://www.worldmonitor.app${href}`),
+      'the FAQ route must be a registered comparison page',
+    );
+    assert.match(
+      read('public/home.md'),
+      /\]\(https:\/\/www\.worldmonitor\.app\/compare\/\)/,
+      'home.md must link the comparison hub',
+    );
+    assert.match(
+      read('public/ai-search.md'),
+      /^- Competitor comparisons[^\n]*https:\/\/www\.worldmonitor\.app\/compare\/$/m,
+      'ai-search.md Relevant Pages must list the comparison hub',
+    );
+    assert.match(
+      read('.github/workflows/resilience-snapshot-refresh.yml'),
+      /git add [^\n]*public\/llms\.txt/,
+      'the monthly refresh must stage llms.txt now that build:llms-full owns it',
     );
   });
 });

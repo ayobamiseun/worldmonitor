@@ -29,6 +29,7 @@ import { UNDERSEA_CABLES } from '../src/config/geo-map.ts';
 import { getCompleteLayerCatalogKeys } from '../src/config/map-layer-definitions.ts';
 import { PIPELINES } from '../shared/pipelines-data.ts';
 import { INTEL_HOTSPOTS } from '../shared/geo-data.ts';
+import { lngFacilityCount } from './_storage-facility-registry.mjs';
 import { SOURCE_DOMAINS } from './crawlable-sources-page.mjs';
 import { resolveLatestResilienceSnapshotPath } from './build-crawlable-corpus.mjs';
 import {
@@ -135,7 +136,7 @@ export function buildCoverageBullets({ stats, resilience }) {
     `- ${count(stats.rankableUniverseCountries)}-country rankable universe for the Country Resilience Index, of which ${count(resilience.ranked)} are ranked in the published snapshot captured ${resilience.capturedAt}`,
     `- ${count(CHOKEPOINT_REGISTRY.length)} maritime chokepoints with AIS-based transit intelligence`,
     `- ${count(UNDERSEA_CABLES.length)} submarine cable routes`,
-    `- ${count(PIPELINES.length)} pipelines and LNG assets`,
+    `- ${count(PIPELINES.length + lngFacilityCount())} pipelines and LNG assets`,
     `- ${count(AI_DATA_CENTERS.length)} AI datacenters mapped`,
     `- ${count(INTEL_HOTSPOTS.length)} scored geopolitical hotspots`,
     `- ${count(stats.stockExchangeCount)} stock exchanges in the markets registry`,

@@ -331,6 +331,7 @@
       "aisDisruptions": "AIS Disruptions",
       "satelliteFires": "Satellite Fires",
       "temporalAnomalies": "Temporal Anomalies",
+      "temporalUnavailable": "Temporal observations unavailable",
       "cyberThreats": "Cyber Threats",
       "earthquakes": "Earthquakes",
       "displaced": "Displaced",
@@ -924,9 +925,12 @@
   "components": {
     "webcams": {
       "paused": "Webcams paused",
-      "pausedIdle": "Webcams paused — move mouse to resume",
       "play": "Play",
-      "previewStatus": "Live preview",
+      "previewStatus": "Ready to play",
+      "connecting": "Connecting…",
+      "unverified": "Can’t confirm this stream is live",
+      "offline": "{{city}} is offline right now",
+      "noFeeds": "No live webcams in this region right now",
       "regions": {
         "all": "ALL",
         "mideast": "MIDEAST",
@@ -1319,9 +1323,6 @@
       "base": "Base",
       "nuclear": "Nuclear"
     },
-    "community": {
-      "joinDiscussion": "Help Shape What's Next"
-    },
     "threatLabels": {
       "critical": "CRIT",
       "high": "HIGH",
@@ -1602,6 +1603,9 @@
       "analysisFrameworksSaveToLibrary": "Save to Library",
       "streamAlwaysOnLabel": "Auto-play live streams on dashboard",
       "streamAlwaysOnDesc": "Starts Live News and Live Webcams automatically when visible. Leave off to load video only after you click Play.",
+      "streamIdleStopLabel": "Stop live video when idle",
+      "streamIdleStopDesc": "Stops Live News and Live Webcams after this long without activity and shows a notice in the panel.",
+      "streamIdleStopNever": "Never",
       "frameworkNote": "Applies to client-generated analysis only",
       "loadingServerInsights": "Loading server insights...",
       "usingCachedBrief": "Using cached brief...",
@@ -2046,6 +2050,7 @@
       "etfs": "ETFs",
       "netInflow": "NET INFLOW",
       "netOutflow": "NET OUTFLOW",
+      "netNeutral": "NET NEUTRAL",
       "table": {
         "ticker": "Ticker",
         "issuer": "Issuer",
@@ -2251,10 +2256,25 @@
         "context": "Context established"
       }
     },
+    "liveMedia": {
+      "idleStatus": "Paused for inactivity",
+      "idleBody": "Live video stopped after {{duration}} without mouse, keyboard or touch activity.",
+      "idleResume": "Resume",
+      "idleKeepPlaying": "Keep playing when idle",
+      "idleSettingsHint": "Change this anytime in Settings › Media.",
+      "idleKeepPlayingToast": "Live video will keep playing when idle. Change in Settings › Media."
+    },
     "liveNews": {
       "notLive": "{{name}} is not currently live",
-      "cannotEmbed": "{{name}} can't be played here — it may be restricted in your region (error {{code}})",
-      "botCheck": "YouTube is requesting sign-in to play {{name}}",
+      "embedBlocked": "YouTube won’t play {{name}} inside other sites right now",
+      "unavailable": "{{name}} can’t be played right now",
+      "noStream": "No live stream is set up for {{name}} yet",
+      "needsChannelUrl": "Add {{name}} again with its channel URL (youtube.com/channel/UC…) or a live video URL",
+      "insecureStream": "{{name}} uses an insecure (http) stream, which browsers block. Add it again with a secure (https) stream URL",
+      "connecting": "Connecting to {{name}}…",
+      "recording": "Recording",
+      "unverified": "Can’t confirm this stream is live",
+      "playNextChannel": "Play next channel",
       "signInToYouTube": "Sign in to YouTube",
       "openOnYouTube": "Open on YouTube",
       "playLiveFeed": "Play live feed",
@@ -2262,8 +2282,10 @@
       "manage": "Manage channels",
       "addChannel": "Add channel",
       "remove": "Remove",
-      "youtubeHandle": "YouTube handle (e.g. @Channel)",
-      "youtubeHandleOrUrl": "YouTube handle or URL",
+      "channelOrVideoUrl": "YouTube channel or video URL",
+      "channelUrlHint": "Paste a channel URL (youtube.com/channel/UC…) or a live video URL",
+      "httpsStreamHint": "Browsers block insecure (http) streams. Paste a secure (https) stream URL",
+      "youtubeChannel": "YouTube channel",
       "displayName": "Display name (optional)",
       "channelSettings": "Channel Settings",
       "save": "Save",
@@ -2279,7 +2301,6 @@
       "regionMiddleEast": "Middle East",
       "regionAfrica": "Africa",
       "regionOceania": "Oceania",
-      "invalidHandle": "Enter a valid YouTube handle (e.g. @ChannelName)",
       "verifying": "Verifying…",
       "hlsUrl": "HLS Stream URL (optional)",
       "invalidHlsUrl": "Enter a valid HLS stream URL (.m3u8)"
@@ -2382,7 +2403,7 @@
       "infoTooltip": "<strong>Economic Calendar</strong> Scheduled macroeconomic releases: CPI, NFP, GDP, PMI, and central bank decisions. Shows forecast vs actual vs prior. High-impact events highlighted. Source: economic data providers."
     },
     "fsi": {
-      "infoTooltip": "<strong>Financial Stress Indicator</strong> Kansas City Fed Financial Stress Index (KCFSI): measures stress in US financial markets using 11 indicators including yield spreads, volatility, and cross-correlations. Positive values indicate above-average stress. Source: Federal Reserve Bank of Kansas City.",
+      "infoTooltip": "<strong>Financial Stress Indicator</strong> WorldMonitor ratio of high-yield credit to long Treasuries, adjusted for equity volatility and the high-yield spread: (HYG / TLT) / (VIX × HY spread / 100). This is not the Kansas City Fed Financial Stress Index. A reading of 1.5 or higher is low stress; below 0.3 is high stress.",
       "title": "Financial Stress Indicator",
       "usFsiValue": "US FSI VALUE",
       "cissTitle": "EU CISS (Euro Area Systemic Stress)",
@@ -2711,6 +2732,13 @@
     },
     "correlation": {
       "loading": "Waiting for data...",
+      "waiting": "Waiting for the next data update. This panel updates automatically.",
+      "offline": "Waiting for a connection. This panel updates automatically when you are back online.",
+      "updated": "Updated {{time}}",
+      "saved": "Last known update {{time}} · Checking for updates",
+      "savedOffline": "Last known update {{time}} · Offline",
+      "localSignals": "Based on loaded dashboard signals",
+      "emptySaved": "No convergence in the last known update.",
       "empty": "No active convergence detected",
       "signals_one": "{{count}} signal",
       "signals_other": "{{count}} signals",
@@ -2858,6 +2886,27 @@
       "succeeded": "Passkey saved. You can use it next time you sign in.",
       "retryable": "That didn't finish. You can try again.",
       "failed": "We couldn't save a passkey on this device."
+    },
+    "decisionBrief": {
+      "commodityTitle": "Commodity decision brief",
+      "commodity": "Commodity / product",
+      "blockedChokepoint": "Assumed blocked chokepoint",
+      "commodityCapture": "Capture commodity comparison",
+      "title": "Decision brief",
+      "fuel": "Fuel",
+      "chokepoint": "Chokepoint",
+      "baseline": "Baseline disruption",
+      "comparison": "Comparison disruption",
+      "capture": "Capture / refresh both",
+      "downloadHtml": "Download decision HTML",
+      "downloadJson": "Download decision JSON",
+      "back": "← Back to brief",
+      "select": "Select an energy disruption, then capture both scenarios.",
+      "changed": "Selection changed. Capture both scenarios before exporting.",
+      "loading": "Capturing both scenarios…",
+      "captured": "Captured. Review observation dates and constraints before downloading.",
+      "failed": "Could not capture the scenarios. Check your access and retry. No result is available to export.",
+      "locked": "Decision brief is available on Pro."
     }
   },
   "popups": {
