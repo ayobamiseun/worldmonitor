@@ -118,7 +118,9 @@ export class MaterialEventsPanel extends Panel {
   }
 
   public async fetchData(): Promise<boolean> {
-    this.showLoading();
+    // Errors only render before the first success, so a refresh must not blank
+    // the last good list — a failed one would leave the panel on the spinner.
+    if (!this._hasData) this.showLoading();
     try {
       const client = await getIntelligenceClient();
       const resp = await client.listMaterialEvents({ itemCode: '', limit: EVENT_LIMIT });

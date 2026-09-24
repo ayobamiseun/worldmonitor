@@ -64,6 +64,12 @@ describe('projectMaterialEvents', () => {
     assert.deepEqual(projected.map((e) => e.company), ['NEWER', 'OLDER']);
   });
 
+  it('falls back to the CIK for a nameless filer and to 8-K for a blank form', () => {
+    const [projected] = projectMaterialEvents([event({ company: '', cik: '0000999999', form: '' })]);
+    assert.equal(projected!.company, 'CIK 0000999999');
+    assert.equal(projected!.form, '8-K');
+  });
+
   it('tolerates a malformed items array', () => {
     const projected = projectMaterialEvents([
       event({ items: undefined }),
@@ -76,10 +82,13 @@ describe('projectMaterialEvents', () => {
 
 describe('filedAtLabel', () => {
   it('renders a time for a same-day filing and a date otherwise', () => {
-    const sameDay = filedAtLabel(NOW - 3_600_000, NOW, 'en');
-    const older = filedAtLabel(NOW - 3 * 86_400_000, NOW, 'en');
-    assert.ok(/\d/.test(sameDay));
-    assert.notEqual(sameDay, older);
+    // Local noon, so "one hour earlier" is the same local day in every timezone.
+    const localNoon = new Date(2026, 7, 31, 12, 0).getTime();
+    const sameDay = filedAtLabel(localNoon - 3_600_000, localNoon, 'en');
+    const older = filedAtLabel(localNoon - 3 * 86_400_000, localNoon, 'en');
+    assert.match(sameDay, /\d{1,2}:\d{2}/);
+    assert.doesNotMatch(older, /\d{1,2}:\d{2}/);
+    assert.match(older, /Aug/);
   });
 
   it('renders an empty label for an unusable timestamp', () => {
@@ -114,5 +123,34 @@ describe('renderMaterialEvent', () => {
     );
     assert.ok(!unlinked.includes('<a '), 'an off-origin URL must not render as a link');
     assert.ok(unlinked.includes('ACME CORP'), 'the row still renders as text');
+  });
+
+  it('counts extra items on the badge and omits item markup when there are none', () => {
+    const multi = renderMaterialEvent(
+      projectMaterialEvents([event({
+        items: [
+          { code: '5.02', description: 'Departure of Directors or Certain Officers' },
+          { code: '9.01', description: 'Financial Statements and Exhibits' },
+        ],
+      })])[0]!,
+      NOW,
+      'en',
+    );
+    assert.ok(multi.includes('5.02 +1'));
+    assert.ok(!multi.includes('Financial Statements'), 'only the primary item description renders');
+
+    const bare = renderMaterialEvent(projectMaterialEvents([event({ items: [] })])[0]!, NOW, 'en');
+    assert.ok(!bare.includes('5.02'));
+    assert.ok(!bare.includes('Departure of Directors'));
+  });
+
+  it('keeps an on-origin URL with a quote inside the href attribute', () => {
+    const html = renderMaterialEvent(
+      projectMaterialEvents([event({ url: 'https://www.sec.gov/x"onmouseover="alert(1)' })])[0]!,
+      NOW,
+      'en',
+    );
+    assert.ok(html.includes('href="https://www.sec.gov/x&quot;onmouseover=&quot;alert(1)"'));
+    assert.ok(!html.includes('"onmouseover="'), 'a seeded quote must not close the href attribute');
   });
 });
