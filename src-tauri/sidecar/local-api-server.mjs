@@ -893,6 +893,20 @@ const cloudPreferredExact = new Set([
   '/api/supply-chain/v1/list-storage-facilities',
   '/api/supply-chain/v1/list-vulnerability-rankings',
   '/api/webcam/v1/list-webcams',
+  // 2026-09-25 rebase: climate, cyber, seismology and unrest each gained a
+  // live handler on main, so their seed-only routes moved from a domain
+  // prefix to exact entries, and these seed-only handlers are new.
+  '/api/aviation/v1/get-airport-ops-summary',
+  '/api/climate/v1/get-co2-monitoring',
+  '/api/climate/v1/get-ocean-ice-data',
+  '/api/climate/v1/list-air-quality-data',
+  '/api/climate/v1/list-climate-disasters',
+  '/api/climate/v1/list-climate-news',
+  '/api/economic/v1/get-government-yield-curve',
+  '/api/economic/v1/get-us-cpi-monthly',
+  '/api/economic/v1/get-us-interest-rates',
+  '/api/economic/v1/get-us-treasury-par-yield-curve',
+  '/api/economic/v1/get-world-cpi-monthly',
 ]);
 // Domains whose EVERY handler only reads seed-owned Redis (#5906). The sidecar
 // never holds Upstash credentials (UPSTASH_* is not in ALLOWED_ENV_KEYS), a
@@ -902,19 +916,15 @@ const cloudPreferredExact = new Set([
 // tests/sidecar-cloud-preferred-seed-only.test.mjs derives this list from
 // server/worldmonitor and fails when a seed-only route is not covered here.
 const cloudPreferredSeedOnlyPrefixes = [
-  '/api/climate/v1/',
   '/api/consumer-prices/v1/',
-  '/api/cyber/v1/',
   '/api/health/v1/',
   '/api/natural/v1/',
   '/api/positive-events/v1/',
   '/api/prediction/v1/',
   '/api/radiation/v1/',
   '/api/safety/v1/',
-  '/api/seismology/v1/',
   '/api/thermal/v1/',
   '/api/trade/v1/',
-  '/api/unrest/v1/',
   '/api/wildfire/v1/',
 ];
 const cloudPreferredAlwaysPrefixes = ['/api/scorecard/v1/'];
