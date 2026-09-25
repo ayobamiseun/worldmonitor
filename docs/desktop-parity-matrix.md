@@ -143,8 +143,8 @@ release-candidate checklist:
 3. README/docs drift → #5910. Corrected: Linux ARM64 in the README binaries
    row, updater host/TTL and Linux Secret Service in `docs/desktop-app.mdx`
    (+ zh), the phantom 50 MB cap in `docs/usage-rate-limits.mdx` (+ zh), a
-   Linux section in `docs/release-packaging.mdx` with a `desktop:package:linux`
-   script, the two pre-sebuf `local-backend-audit.md` drafts marked superseded,
+   Linux section in `docs/release-packaging.mdx` (via the existing
+   `desktop:package -- --os linux` runner), the two pre-sebuf `local-backend-audit.md` drafts marked superseded,
    and the stale `/api/risk-scores` citation in `desktop-readiness.ts`.
    `api/api-route-exceptions.json` already describes `api/fwdstart.js` correctly.
    Still open: the "Stable" label against release cadence, and `windows-exe`
