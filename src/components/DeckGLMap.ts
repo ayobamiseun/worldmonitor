@@ -3,7 +3,7 @@
  * Uses deck.gl for high-performance rendering of large datasets
  * Mobile devices gracefully degrade to the D3/SVG-based Map component
  */
-import { MapboxOverlay } from '@deck.gl/mapbox';
+import { MapLibreOverlay } from '@deck.gl/maplibre';
 import type { Layer, LayersList, PickingInfo } from '@deck.gl/core';
 import { GeoJsonLayer, ScatterplotLayer, PathLayer, IconLayer, TextLayer, PolygonLayer } from '@deck.gl/layers';
 import * as maplibregl from 'maplibre-gl';
@@ -16,6 +16,7 @@ import type {
   MapLayers,
   Hotspot,
   NewsItem,
+  NewsLocationMarker,
   InternetOutage,
   RelatedAsset,
   AssetType,
@@ -52,7 +53,7 @@ import type { GpsJamHex } from '@/services/gps-interference';
 import { fetchImageryScenes } from '@/services/imagery';
 import type { ImageryScene } from '@/generated/server/worldmonitor/imagery/v1/service_server';
 import type { TrafficAnomaly as ProtoTrafficAnomaly, DdosLocationHit } from '@/generated/client/worldmonitor/infrastructure/v1/service_client';
-import type { DisplacementFlow } from '@/services/displacement';
+import type { CrossBorderData, CrossBorderPoint, DisplacementFlow, InternalDisplacementData, InternalDisplacementRegion, InternalDisplacementRoute } from '@/services/displacement';
 import type { Earthquake } from '@/services/earthquakes';
 import type { ClimateAnomaly } from '@/services/climate';
 import type { RadiationObservation } from '@/services/radiation';
@@ -61,6 +62,7 @@ import type { WeatherAlert } from '@/services/weather';
 import type { CanadaRoadRecord } from '@/services/canada-roads';
 import type { CanadaAlert } from '@/services/canada-alerts';
 import { escapeHtml } from '@/utils/sanitize';
+import { corroborationLabelHtml } from '@/utils/corroboration-flag';
 import {
   derivePipelinePublicBadge,
   type PipelineEvidenceInput,
@@ -155,7 +157,13 @@ import type { KindnessPoint } from '@/services/kindness-data';
 import type { HappinessData } from '@/services/happiness-data';
 import type { RenewableInstallation } from '@/services/renewable-installations';
 import type { SpeciesRecovery } from '@/services/conservation-data';
-import { getCountriesGeoJson, getCountryAtCoordinates, getCountryBbox, getCountryCentroid } from '@/services/country-geometry';
+import {
+  canonicalizeCountryCode,
+  getCountriesGeoJson,
+  getCountryAtCoordinates,
+  getCountryBbox,
+  getCountryCentroid,
+} from '@/services/country-geometry';
 import type { DiseaseOutbreakItem } from '@/services/disease-outbreaks';
 import type { FeatureCollection, Geometry } from 'geojson';
 import type { ResilienceRankingItem } from '@/services/resilience';
@@ -217,6 +225,7 @@ interface DeckMapState {
 
 interface DeckGLMapOptions {
   chrome?: boolean;
+  mapLibreWorkerUrl?: string;
   /**
    * Fired when MapLibre cannot be (re)constructed after the initial ready
    * handshake — e.g. WebGL2 lost mid-session while recreating the fallback
@@ -525,12 +534,6 @@ function stableTradeRoutePhase(routeId: string): number {
 // or recreateWithFallback rebuilds the map.
 let __deckInterleavedRaceFilterInstalled = false;
 
-// deck.gl 9.x still reads map.transform for interleaved projection/terrain.
-// Remove this bridge when @deck.gl/mapbox supports MapLibre 6's camera API.
-class DeckCompatibleMap extends maplibregl.Map {
-  get transform() { return this._camera.transform; }
-}
-
 const DECK_INTERLEAVED_RACE_MESSAGE_RE = /Cannot read properties of null \(reading 'id'\)|null is not an object \(evaluating '[\w.]+\.id'\)/;
 const DECK_INTERLEAVED_RACE_SOURCE_RE = /(?:^|[/(])deck-stack-[A-Za-z0-9_-]+\.js/;
 
@@ -548,7 +551,7 @@ const DECK_INTERLEAVED_RACE_SOURCE_RE = /(?:^|[/(])deck-stack-[A-Za-z0-9_-]+\.js
  * custom-layer hook → deck iterates the layer list and hits a layer that was
  * finalized between resolveLayers and renderLayers.
  *
- * MapboxOverlay's own onError is bypassed because maplibre — not deck — owns
+ * MapLibreOverlay's own onError is bypassed because maplibre — not deck — owns
  * the render-loop callstack here (deck doesn't see the throw, so onError is
  * never invoked). The next frame renders cleanly with no user-visible
  * artifact, so swallowing here is safe.
@@ -587,7 +590,7 @@ export class DeckGLMap {
   private static readonly MAX_CLUSTER_LEAVES = 200;
 
   private container: HTMLElement;
-  private deckOverlay: MapboxOverlay | null = null;
+  private deckOverlay: MapLibreOverlay | null = null;
   private maplibreMap: maplibregl.Map | null = null;
   private state: DeckMapState;
   private popup: MapPopup;
@@ -622,6 +625,7 @@ export class DeckGLMap {
   private healthByCableId: Record<string, CableHealthRecord> = {};
   private protests: SocialUnrestEvent[] = [];
   private militaryFlights: MilitaryFlight[] = [];
+  private emergencyMarkers: import('../../shared/aircraft-emergencies').EmergencyMapMarker[] = [];
   private militaryFlightClusters: MilitaryFlightCluster[] = [];
   private activeFlightTrails = new Set<string>();
   private clearTrailsBtn: HTMLButtonElement | null = null;
@@ -630,6 +634,7 @@ export class DeckGLMap {
   private serverBases: MilitaryBaseEnriched[] = [];
   private serverBaseClusters: ServerBaseCluster[] = [];
   private serverBasesLoaded = false;
+  private serverBasesFetchSeq = 0;
   private baseConfigLoadPending = false;
   private naturalEvents: NaturalEvent[] = [];
   private firmsFireData: Array<{ lat: number; lon: number; brightness: number; frp: number; confidence: number; region: string; acq_date: string; daynight: string }> = [];
@@ -638,10 +643,12 @@ export class DeckGLMap {
   private aircraftPositions: PositionSample[] = [];
   private aircraftFetchTimer: ReturnType<typeof setInterval> | null = null;
   private news: NewsItem[] = [];
-  private newsLocations: Array<{ lat: number; lon: number; title: string; threatLevel: string; timestamp?: Date }> = [];
+  private newsLocations: NewsLocationMarker[] = [];
   private newsLocationFirstSeen = new Map<string, number>();
   private ucdpEvents: UcdpGeoEvent[] = [];
   private displacementFlows: DisplacementFlow[] = [];
+  private internalDisplacement: InternalDisplacementData | null = null;
+  private crossBorderArrivals: CrossBorderData | null = null;
   private gpsJammingHexes: GpsJamHexWithPolygon[] = [];
   private gpsJammingLoadSeq = 0;
   private climateAnomalies: ClimateAnomaly[] = [];
@@ -708,6 +715,7 @@ export class DeckGLMap {
   private hoveredCountryName: string | null = null;
 
   // Callbacks
+  private onNewsClick?: (item: Pick<NewsLocationMarker, 'article' | 'title'>) => void;
   private onHotspotClick?: (hotspot: Hotspot) => void;
   private onTradeArcClick?: (segment: TradeRouteSegment, waypoints: string[], x: number, y: number) => void;
   private onTimeRangeChange?: (range: TimeRange) => void;
@@ -763,7 +771,12 @@ export class DeckGLMap {
     const lngLat = this.maplibreMap.unproject([x, y]);
     if (!Number.isFinite(lngLat.lng)) return;
     const country = resolveCountryForPointerInteraction(
-      { code: this.hoveredCountryIso2, name: this.hoveredCountryName },
+      {
+        code: this.hoveredCountryIso2
+          ? canonicalizeCountryCode(this.hoveredCountryIso2)
+          : this.hoveredCountryIso2,
+        name: this.hoveredCountryName,
+      },
       this.hoverQueryThrottle?.isPending() ?? false,
       () => this.resolveCountryFromCoordinate(lngLat.lng, lngLat.lat),
     );
@@ -772,7 +785,7 @@ export class DeckGLMap {
       lon: lngLat.lng,
       screenX: e.clientX,
       screenY: e.clientY,
-      countryCode: country?.code,
+      countryCode: country?.code ? canonicalizeCountryCode(country.code) : country?.code,
       countryName: country?.name,
     });
   };
@@ -811,6 +824,7 @@ export class DeckGLMap {
   private destroyed = false;
   private usedFallbackStyle = false;
   private readonly chrome: boolean;
+  private readonly mapLibreWorkerUrl: string | undefined;
   private readonly onFatalError: ((error: unknown) => void) | null;
   private initPromise: Promise<void> = Promise.resolve();
   private styleLoadTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -890,6 +904,7 @@ export class DeckGLMap {
   constructor(container: HTMLElement, initialState: DeckMapState, options: DeckGLMapOptions = {}) {
     this.container = container;
     this.chrome = options.chrome ?? true;
+    this.mapLibreWorkerUrl = options.mapLibreWorkerUrl;
     this.onFatalError = options.onFatalError ?? null;
     this.state = {
       ...initialState,
@@ -1061,7 +1076,7 @@ export class DeckGLMap {
     wrapper.id = 'deckglMapWrapper';
     wrapper.style.cssText = 'position: relative; width: 100%; height: 100%; overflow: hidden;';
 
-    // MapLibre container - deck.gl renders directly into MapLibre via MapboxOverlay
+    // MapLibre container - deck.gl renders directly into MapLibre via MapLibreOverlay
     const mapContainer = document.createElement('div');
     mapContainer.id = 'deckgl-basemap';
     mapContainer.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%;';
@@ -1090,7 +1105,7 @@ export class DeckGLMap {
   }
 
   private async initMapLibre(): Promise<void> {
-    maplibregl.setWorkerUrl(maplibreWorkerUrl);
+    maplibregl.setWorkerUrl(this.mapLibreWorkerUrl ?? maplibreWorkerUrl);
     // No `setRTLTextPlugin` here: MapLibre 6 shapes Arabic and reorders
     // bidirectional text itself and deprecates the plugin. Registering the
     // self-hosted plugin after the 6.x upgrade also broke RTL labels outright —
@@ -1114,7 +1129,7 @@ export class DeckGLMap {
     const basemapEl = document.getElementById('deckgl-basemap');
     if (!basemapEl) return;
 
-    this.maplibreMap = new DeckCompatibleMap({
+    this.maplibreMap = new maplibregl.Map({
       container: basemapEl,
       style: primaryStyle,
       center: [preset.longitude, preset.latitude],
@@ -1189,7 +1204,7 @@ export class DeckGLMap {
         return;
       }
       try {
-        this.maplibreMap = new DeckCompatibleMap({
+        this.maplibreMap = new maplibregl.Map({
           container: fallbackEl,
           style: fallback,
           center: center ? [center.lon, center.lat] : [preset.longitude, preset.latitude],
@@ -1303,7 +1318,7 @@ export class DeckGLMap {
 
     installDeckInterleavedRaceFilter();
 
-    this.deckOverlay = new MapboxOverlay({
+    this.deckOverlay = new MapLibreOverlay({
       interleaved: true,
       layers: this.buildLayers(true),
       getTooltip: (info: PickingInfo) => this.getTooltip(info),
@@ -1945,6 +1960,7 @@ export class DeckGLMap {
     const filteredOutages = mapLayers.outages ? this.filterByTimeCached(this.outages, (outage) => outage.pubDate) : [];
     const filteredCableAdvisories = mapLayers.cables ? this.filterByTimeCached(this.cableAdvisories, (advisory) => advisory.reported) : [];
     const filteredFlightDelays = mapLayers.flights ? this.filterByTimeCached(this.flightDelays, (delay) => delay.updatedAt) : [];
+    const filteredCyberThreats = mapLayers.cyberThreats ? this.filterByTimeCached(this.cyberThreats, (threat) => threat.lastSeen ?? threat.firstSeen) : [];
     const filteredMilitaryFlights = mapLayers.military ? this.filterByTimeCached(this.militaryFlights, (flight) => flight.lastSeen) : [];
     const filteredMilitaryVessels = mapLayers.military ? this.filterByTimeCached(this.militaryVessels, (vessel) => vessel.lastAisUpdate) : [];
     const filteredMilitaryFlightClusters = mapLayers.military ? this.filterMilitaryFlightClustersByTimeCached(this.militaryFlightClusters) : [];
@@ -2147,8 +2163,8 @@ export class DeckGLMap {
     layers.push(this.createEmptyGhost('ddos-locations-layer'));
 
     // Cyber threat IOC layer
-    if (mapLayers.cyberThreats && this.cyberThreats.length > 0) {
-      layers.push(this.createCyberThreatsLayer());
+    if (mapLayers.cyberThreats && filteredCyberThreats.length > 0) {
+      layers.push(this.createCyberThreatsLayer(filteredCyberThreats));
     }
     layers.push(this.createEmptyGhost('cyber-threats-layer'));
 
@@ -2226,6 +2242,23 @@ export class DeckGLMap {
       layers.push(this.createMilitaryFlightClustersLayer(filteredMilitaryFlightClusters));
     }
 
+    // Above military flights: an emergency-squawking military aircraft is drawn
+    // in both layers, and its emergency marker must stay visible and clickable.
+    if (mapLayers.aircraftEmergencies && this.emergencyMarkers.length > 0) {
+      layers.push(new ScatterplotLayer<import('../../shared/aircraft-emergencies').EmergencyMapMarker>({
+        id: 'aircraft-emergencies', data: this.emergencyMarkers,
+        getPosition: aircraft => [aircraft.lon, aircraft.lat],
+        getFillColor: [251, 191, 36], getLineColor: [17, 24, 39],
+        getRadius: 7, radiusUnits: 'pixels', stroked: true, lineWidthMinPixels: 1,
+        pickable: true,
+        onClick: info => {
+          if (!info.object) return false;
+          this.container.dispatchEvent(new CustomEvent('aircraft-emergency-select', { detail: info.object.address }));
+          return true;
+        },
+      }));
+    }
+
     // Strategic waterways layer
     if (mapLayers.waterways) {
       layers.push(this.createWaterwaysLayer());
@@ -2279,6 +2312,13 @@ export class DeckGLMap {
     // Displacement flows arc layer
     if (mapLayers.displacement && this.displacementFlows.length > 0) {
       layers.push(this.createDisplacementArcsLayer());
+    }
+    if (mapLayers.displacement && this.crossBorderArrivals && this.crossBorderArrivals.points.length > 0) {
+      layers.push(this.createCrossBorderPointsLayer(this.crossBorderArrivals.points));
+    }
+    if (mapLayers.displacement && this.internalDisplacement) {
+      if (this.internalDisplacement.routes.length > 0) layers.push(this.createInternalDisplacementRoutesLayer(this.internalDisplacement.routes));
+      if (this.internalDisplacement.regions.length > 0) layers.push(this.createInternalDisplacementRegionsLayer(this.internalDisplacement.regions));
     }
 
     // Climate anomalies heatmap layer
@@ -2384,7 +2424,7 @@ export class DeckGLMap {
         getFillColor: (d) => ('count' in d ? [0, 212, 255, 180] : [255, 215, 0, 200]) as [number, number, number, number],
         radiusUnits: 'pixels',
         pickable: true,
-        // Consume the pick (return true) so MapboxOverlay onClick → handleClick
+        // Consume the pick (return true) so MapLibreOverlay onClick → handleClick
         // does not double-fire. Cluster vs leaf is routed in handleWebcamLayerClick.
         onClick: (info) => this.handleWebcamLayerClick(info),
       }));
@@ -3597,10 +3637,10 @@ export class DeckGLMap {
     });
   }
 
-  private createCyberThreatsLayer(): ScatterplotLayer<CyberThreat> {
+  private createCyberThreatsLayer(threats: CyberThreat[]): ScatterplotLayer<CyberThreat> {
     return new ScatterplotLayer<CyberThreat>({
       id: 'cyber-threats-layer',
-      data: this.cyberThreats,
+      data: threats,
       getPosition: (d) => [d.lon, d.lat],
       getRadius: (d) => {
         switch (d.severity) {
@@ -4936,19 +4976,24 @@ export class DeckGLMap {
     const obj = info.object as any;
     const text = (value: unknown): string => escapeHtml(String(value ?? ''));
 
+    const numericLabel = (value: unknown, digits?: number): string => {
+      const number = value == null || value === '' ? NaN : Number(value);
+      return Number.isFinite(number) ? text(digits == null ? number.toLocaleString() : number.toFixed(digits)) : '—';
+    };
+
     switch (layerId) {
       case 'hotspots-layer':
         return { html: `<div class="deckgl-tooltip"><strong>${text(obj.name)}</strong><br/>${text(obj.subtext)}</div>` };
       case 'earthquakes-layer':
-        return { html: `<div class="deckgl-tooltip"><strong>M${(obj.magnitude || 0).toFixed(1)} ${t('components.deckgl.tooltip.earthquake')}</strong><br/>${text(obj.place)}</div>` };
+        return { html: `<div class="deckgl-tooltip"><strong>M${numericLabel(obj.magnitude, 1)} ${t('components.deckgl.tooltip.earthquake')}</strong><br/>${text(obj.place)}</div>` };
       case 'military-vessels-layer':
         return { html: renderMilitaryVesselTooltipHtml(obj, t) };
       case 'military-flights-layer':
         return { html: `<div class="deckgl-tooltip"><strong>${text(obj.callsign || obj.registration || t('components.deckgl.tooltip.militaryAircraft'))}</strong><br/>${text(obj.type)}</div>` };
       case 'military-vessel-clusters-layer':
-        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.name || t('components.deckgl.tooltip.vesselCluster'))}</strong><br/>${obj.vesselCount || 0} ${t('components.deckgl.tooltip.vessels')}<br/>${text(obj.activityType)}</div>` };
+        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.name || t('components.deckgl.tooltip.vesselCluster'))}</strong><br/>${numericLabel(obj.vesselCount)} ${t('components.deckgl.tooltip.vessels')}<br/>${text(obj.activityType)}</div>` };
       case 'military-flight-clusters-layer':
-        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.name || t('components.deckgl.tooltip.flightCluster'))}</strong><br/>${obj.flightCount || 0} ${t('components.deckgl.tooltip.aircraft')}<br/>${text(obj.activityType)}</div>` };
+        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.name || t('components.deckgl.tooltip.flightCluster'))}</strong><br/>${numericLabel(obj.flightCount)} ${t('components.deckgl.tooltip.aircraft')}<br/>${text(obj.activityType)}</div>` };
       case 'protests-layer':
         return { html: `<div class="deckgl-tooltip"><strong>${text(obj.title)}</strong><br/>${text(obj.country)}</div>` };
       case 'protest-clusters-layer':
@@ -4956,29 +5001,29 @@ export class DeckGLMap {
           const item = obj.items?.[0];
           return { html: `<div class="deckgl-tooltip"><strong>${text(item?.title || t('components.deckgl.tooltip.protest'))}</strong><br/>${text(item?.city || item?.country || '')}</div>` };
         }
-        return { html: `<div class="deckgl-tooltip"><strong>${t('components.deckgl.tooltip.protestsCount', { count: String(obj.count) })}</strong><br/>${text(obj.country)}</div>` };
+        return { html: `<div class="deckgl-tooltip"><strong>${text(t('components.deckgl.tooltip.protestsCount', { count: numericLabel(obj.count) }))}</strong><br/>${text(obj.country)}</div>` };
       case 'tech-hq-clusters-layer':
         if (obj.count === 1) {
           const hq = obj.items?.[0];
           return { html: `<div class="deckgl-tooltip"><strong>${text(hq?.company || '')}</strong><br/>${text(hq?.city || '')}</div>` };
         }
-        return { html: `<div class="deckgl-tooltip"><strong>${t('components.deckgl.tooltip.techHQsCount', { count: String(obj.count) })}</strong><br/>${text(obj.city)}</div>` };
+        return { html: `<div class="deckgl-tooltip"><strong>${text(t('components.deckgl.tooltip.techHQsCount', { count: numericLabel(obj.count) }))}</strong><br/>${text(obj.city)}</div>` };
       case 'tech-event-clusters-layer':
         if (obj.count === 1) {
           const ev = obj.items?.[0];
           return { html: `<div class="deckgl-tooltip"><strong>${text(ev?.title || '')}</strong><br/>${text(ev?.location || '')}</div>` };
         }
-        return { html: `<div class="deckgl-tooltip"><strong>${t('components.deckgl.tooltip.techEventsCount', { count: String(obj.count) })}</strong><br/>${text(obj.location)}</div>` };
+        return { html: `<div class="deckgl-tooltip"><strong>${text(t('components.deckgl.tooltip.techEventsCount', { count: numericLabel(obj.count) }))}</strong><br/>${text(obj.location)}</div>` };
       case 'datacenter-clusters-layer':
         if (obj.count === 1) {
           const dc = obj.items?.[0];
           return { html: `<div class="deckgl-tooltip"><strong>${text(dc?.name || '')}</strong><br/>${text(dc?.owner || '')}</div>` };
         }
-        return { html: `<div class="deckgl-tooltip"><strong>${t('components.deckgl.tooltip.dataCentersCount', { count: String(obj.count) })}</strong><br/>${text(obj.country)}</div>` };
+        return { html: `<div class="deckgl-tooltip"><strong>${text(t('components.deckgl.tooltip.dataCentersCount', { count: numericLabel(obj.count) }))}</strong><br/>${text(obj.country)}</div>` };
       case 'bases-layer':
         return { html: `<div class="deckgl-tooltip"><strong>${text(obj.name)}</strong><br/>${text(obj.country)}${obj.kind ? ` · ${text(obj.kind)}` : ''}</div>` };
       case 'bases-cluster-layer':
-        return { html: `<div class="deckgl-tooltip"><strong>${obj.count} bases</strong></div>` };
+        return { html: `<div class="deckgl-tooltip"><strong>${numericLabel(obj.count)} bases</strong></div>` };
       case 'nuclear-layer':
         return { html: `<div class="deckgl-tooltip"><strong>${text(obj.name)}</strong><br/>${text(obj.type)}</div>` };
       case 'datacenters-layer':
@@ -5026,11 +5071,11 @@ export class DeckGLMap {
       case 'natural-events-layer':
         return { html: `<div class="deckgl-tooltip"><strong>${text(obj.title)}</strong><br/>${text(obj.category || t('components.deckgl.tooltip.naturalEvent'))}</div>` };
       case 'storm-centers-layer':
-        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.stormName || obj.title)}</strong><br/>${text(obj.classification || '')} ${obj.windKt ? obj.windKt + ` kt${obj.windAveragingPeriodMinutes ? ` (${obj.windAveragingPeriodMinutes}-minute mean)` : ''}` : ''}</div>` };
+        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.stormName || obj.title)}</strong><br/>${text(obj.classification || '')} ${obj.windKt ? numericLabel(obj.windKt) + ` kt${obj.windAveragingPeriodMinutes ? ` (${numericLabel(obj.windAveragingPeriodMinutes)}-minute mean)` : ''}` : ''}</div>` };
       case 'storm-forecast-track-layer':
         return { html: `<div class="deckgl-tooltip"><strong>${text(obj.stormName)}</strong><br/>${t('popups.naturalEvent.classification')}: Forecast Track</div>` };
       case 'storm-past-track-layer':
-        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.stormName)}</strong><br/>Past Track (${obj.windKt} kt)</div>` };
+        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.stormName)}</strong><br/>Past Track (${numericLabel(obj.windKt)} kt)</div>` };
       case 'storm-cone-layer':
         return { html: `<div class="deckgl-tooltip"><strong>${text(obj.stormName)}</strong><br/>Forecast cone of uncertainty<br/><small>Not an observed storm footprint</small></div>` };
       case 'storm-imd-wind-radii-layer':
@@ -5065,7 +5110,7 @@ export class DeckGLMap {
         const item = (obj as { item: DiseaseOutbreakItem }).item;
         if (!item) return null;
         const lvlColor = item.alertLevel === 'alert' ? '#e74c3c' : item.alertLevel === 'warning' ? '#e67e22' : '#f1c40f';
-        const casesHtml = item.cases ? ` | ${item.cases} case${item.cases !== 1 ? 's' : ''}` : '';
+        const casesHtml = item.cases ? ` | ${text(item.cases)} case${item.cases !== 1 ? 's' : ''}` : '';
         const dateStr = new Date(item.publishedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
         const metaHtml = `<br/><span style="opacity:.6;font-size:calc(11px * var(--wm-panel-effective-scale, 1))">${text(item.sourceName || '')} | ${dateStr}${casesHtml}</span>`;
         const summaryHtml = item.summary ? `<br/><span style="opacity:.75">${text(item.summary.slice(0, 100))}${item.summary.length > 100 ? '…' : ''}</span>` : '';
@@ -5089,7 +5134,7 @@ export class DeckGLMap {
       case 'notam-overlay-layer':
         return { html: `<div class="deckgl-tooltip"><strong style="color:#ff2828;">&#9888; NOTAM CLOSURE</strong><br/>${text(obj.name)} (${text(obj.iata)})<br/><span style="opacity:.7">${text((obj.reason || '').slice(0, 100))}</span></div>` };
       case 'aircraft-positions-layer':
-        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.callsign || obj.icao24)}</strong><br/>${obj.altitudeFt?.toLocaleString() ?? 0} ft · ${obj.groundSpeedKts ?? 0} kts · ${Math.round(obj.trackDeg ?? 0)}°</div>` };
+        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.callsign || obj.icao24)}</strong><br/>${numericLabel(obj.altitudeFt)} ft · ${numericLabel(obj.groundSpeedKts)} kts · ${numericLabel(obj.trackDeg, 0)}°</div>` };
       case 'apt-groups-layer':
         return { html: `<div class="deckgl-tooltip"><strong>${text(obj.name)}</strong><br/>${text(obj.aka)}<br/>${t('popups.sponsor')}: ${text(obj.sponsor)}</div>` };
       case 'minerals-layer':
@@ -5112,8 +5157,20 @@ export class DeckGLMap {
       }
       case 'ais-disruptions-layer':
         return { html: `<div class="deckgl-tooltip"><strong>AIS ${text(obj.type || t('components.deckgl.tooltip.disruption'))}</strong><br/>${text(obj.severity)} ${t('popups.severity')}<br/>${text(obj.description)}</div>` };
+      case 'cross-border-points-layer': {
+        const change = obj.change !== null && obj.change !== 0
+          ? `<br/>${obj.change > 0 ? '+' : ''}${numericLabel(obj.change)} ${t('components.deckgl.tooltip.sinceDate', { date: text(obj.changeSince) })}`
+          : '';
+        const lastMonth = obj.lastMonth !== null ? `<br/>${numericLabel(obj.lastMonth)} ${t('components.deckgl.tooltip.lastMonth')}` : '';
+        const accelerating = obj.accelerating ? `<br/><strong>${t('components.displacement.accelerating')}</strong>` : '';
+        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.country)}</strong><br/>${text(obj.label)}: ${numericLabel(obj.individuals)}${lastMonth}${change}${accelerating}<br/>${text(obj.situation)} · ${text(obj.date)}<br/>${t('components.deckgl.tooltip.sourceUnhcrOdp')}</div>` };
+      }
+      case 'internal-displacement-regions-layer':
+        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.name)}, ${text(obj.countryName)}</strong><br/>${numericLabel(obj.idps)} ${t('components.deckgl.tooltip.internallyDisplaced')}<br/>${text(obj.operation)} · ${text(obj.reportingDate)}<br/>${t('components.deckgl.tooltip.sourceIomDtm')}</div>` };
+      case 'internal-displacement-routes-layer':
+        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.originName)} → ${text(obj.destinationName)}</strong><br/>${numericLabel(obj.idps)} ${t('components.deckgl.tooltip.internallyDisplaced')}<br/>${text(obj.operation)} · ${text(obj.reportingDate)}<br/>${t('components.deckgl.tooltip.sourceIomDtm')}</div>` };
       case 'gps-jamming-layer':
-        return { html: `<div class="deckgl-tooltip"><strong>GPS Jamming</strong><br/>${text(obj.level)} · aircraft affected: ${Number(obj.pct).toFixed(1)}%<br/>H3: ${text(obj.h3)}</div>` };
+        return { html: `<div class="deckgl-tooltip"><strong>GPS Jamming</strong><br/>${text(obj.level)} · aircraft affected: ${numericLabel(obj.pct, 1)}%<br/>H3: ${text(obj.h3)}</div>` };
       case 'cable-advisories-layer': {
         const cableName = UNDERSEA_CABLES.find(c => c.id === obj.cableId)?.name || obj.cableId;
         return { html: `<div class="deckgl-tooltip"><strong>${text(cableName)}</strong><br/>${text(obj.severity || t('components.deckgl.tooltip.advisory'))}<br/>${text(obj.description)}</div>` };
@@ -5153,16 +5210,18 @@ export class DeckGLMap {
       case 'traffic-anomalies-layer':
         return { html: `<div class="deckgl-tooltip"><strong>${text(obj.type || 'Traffic Anomaly')}</strong><br/>${text(obj.locationName || obj.asnName || '')}</div>` };
       case 'ddos-locations-layer':
-        return { html: `<div class="deckgl-tooltip"><strong>DDoS: ${text(obj.countryName)}</strong><br/>${text(obj.percentage ? obj.percentage.toFixed(1) + '%' : '')}</div>` };
+        return { html: `<div class="deckgl-tooltip"><strong>DDoS: ${text(obj.countryName)}</strong><br/>${text(obj.percentage ? numericLabel(obj.percentage, 1) + '%' : '')}</div>` };
       case 'cyber-threats-layer':
         return { html: `<div class="deckgl-tooltip"><strong>${t('popups.cyberThreat.title')}</strong><br/>${text(obj.severity || t('components.deckgl.tooltip.medium'))} · ${text(obj.country || t('popups.unknown'))}</div>` };
       case 'iran-events-layer':
         return { html: `<div class="deckgl-tooltip"><strong>${t('components.deckgl.layers.iranAttacks')}: ${text(obj.category || '')}</strong><br/>${text((obj.title || '').slice(0, 80))}</div>` };
-      case 'news-locations-layer':
-        return { html: `<div class="deckgl-tooltip"><strong>📰 ${t('components.deckgl.tooltip.news')}</strong><br/>${text(obj.title?.slice(0, 80) || '')}</div>` };
+      case 'news-locations-layer': {
+        const coverage = corroborationLabelHtml(obj.corroboration);
+        return { html: `<div class="deckgl-tooltip"><strong>📰 ${t('components.deckgl.tooltip.news')}</strong><br/>${text(obj.title?.slice(0, 80) || '')}${coverage ? `<br/>${coverage}` : ''}</div>` };
+      }
       case 'positive-events-layer': {
         const catLabel = obj.category ? obj.category.replace(/-/g, ' & ') : 'Positive Event';
-        const countInfo = obj.count > 1 ? `<br/><span style="opacity:.7">${obj.count} sources reporting</span>` : '';
+        const countInfo = obj.count > 1 ? `<br/><span style="opacity:.7">${numericLabel(obj.count)} sources reporting</span>` : '';
         return { html: `<div class="deckgl-tooltip"><strong>${text(obj.name)}</strong><br/><span style="text-transform:capitalize">${text(catLabel)}</span>${countInfo}</div>` };
       }
       case 'kindness-layer':
@@ -5171,16 +5230,16 @@ export class DeckGLMap {
         const hcName = obj.properties?.name ?? 'Unknown';
         const hcCode = obj.properties?.['ISO3166-1-Alpha-2'];
         const hcScore = hcCode ? this.happinessScores.get(hcCode as string) : undefined;
-        const hcScoreStr = hcScore != null ? hcScore.toFixed(1) : 'No data';
-        return { html: `<div class="deckgl-tooltip"><strong>${text(hcName)}</strong><br/>Happiness: ${hcScoreStr}/10${hcScore != null ? `<br/><span style="opacity:.7">${text(this.happinessSource)} (${this.happinessYear})</span>` : ''}</div>` };
+        const hcScoreStr = hcScore != null ? numericLabel(hcScore, 1) : 'No data';
+        return { html: `<div class="deckgl-tooltip"><strong>${text(hcName)}</strong><br/>Happiness: ${hcScoreStr}/10${hcScore != null ? `<br/><span style="opacity:.7">${text(this.happinessSource)} (${numericLabel(this.happinessYear, 0)})</span>` : ''}</div>` };
       }
       case 'cii-choropleth-layer': {
         const ciiName = obj.properties?.name ?? 'Unknown';
         const ciiCode = obj.properties?.['ISO3166-1-Alpha-2'];
         const ciiEntry = ciiCode ? this.ciiScoresMap.get(ciiCode as string) : undefined;
-        if (!ciiEntry) return { html: `<div class="deckgl-tooltip"><strong>${text(ciiName)}</strong><br/><span style="opacity:.7">No CII data</span></div>` };
+        if (!ciiEntry) return { html: `<div class="deckgl-tooltip"><strong>${text(ciiName)}</strong><br/><span style="opacity:.7">No country instability data</span></div>` };
         const levelColor = DeckGLMap.CII_LEVEL_HEX[ciiEntry.level] ?? '#888';
-        return { html: `<div class="deckgl-tooltip"><strong>${text(ciiName)}</strong><br/>CII: <span style="color:${levelColor};font-weight:600">${ciiEntry.score}/100</span><br/><span style="text-transform:capitalize;opacity:.7">${text(ciiEntry.level)}</span></div>` };
+        return { html: `<div class="deckgl-tooltip"><strong>${text(ciiName)}</strong><br/>Country instability: <span style="color:${levelColor};font-weight:600">${numericLabel(ciiEntry.score)}/100</span><br/><span style="text-transform:capitalize;opacity:.7">${text(ciiEntry.level)}</span></div>` };
       }
       case 'resilience-choropleth-layer': {
         const resilienceName = obj.properties?.name ?? 'Unknown';
@@ -5202,7 +5261,7 @@ export class DeckGLMap {
             ? '<br/><span style="opacity:.7">Outside headline ranking</span>'
             : '';
         return {
-          html: `<div class="deckgl-tooltip"><strong>${text(resilienceName)}</strong><br/>Resilience: <span style="color:${levelColor};font-weight:600">${resilienceEntry.overallScore.toFixed(1)}/100</span><br/><span style="text-transform:capitalize;opacity:.7">Visual band: ${text(visualBand)}</span><br/><span style="text-transform:capitalize;opacity:.7">API level: ${text(serverLevel)}</span>${confidenceNote}</div>`,
+          html: `<div class="deckgl-tooltip"><strong>${text(resilienceName)}</strong><br/>Resilience: <span style="color:${levelColor};font-weight:600">${numericLabel(resilienceEntry.overallScore, 1)}/100</span><br/><span style="text-transform:capitalize;opacity:.7">Visual band: ${text(visualBand)}</span><br/><span style="text-transform:capitalize;opacity:.7">API level: ${text(serverLevel)}</span>${confidenceNote}</div>`,
         };
       }
       case 'species-recovery-layer': {
@@ -5210,13 +5269,13 @@ export class DeckGLMap {
       }
       case 'renewable-installations-layer': {
         const riTypeLabel = obj.type ? String(obj.type).charAt(0).toUpperCase() + String(obj.type).slice(1) : 'Renewable';
-        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.name)}</strong><br/>${riTypeLabel} &middot; ${obj.capacityMW?.toLocaleString() ?? '?'} MW<br/><span style="opacity:.7">${text(obj.country)} &middot; ${obj.year}</span></div>` };
+        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.name)}</strong><br/>${text(riTypeLabel)} &middot; ${numericLabel(obj.capacityMW)} MW<br/><span style="opacity:.7">${text(obj.country)} &middot; ${numericLabel(obj.year, 0)}</span></div>` };
       }
       case 'gulf-investments-layer': {
         const inv = obj as GulfInvestment;
         const flag = inv.investingCountry === 'SA' ? '🇸🇦' : '🇦🇪';
         const usd = inv.investmentUSD != null
-          ? (inv.investmentUSD >= 1000 ? `$${(inv.investmentUSD / 1000).toFixed(1)}B` : `$${inv.investmentUSD}M`)
+          ? (inv.investmentUSD >= 1000 ? `$${(inv.investmentUSD / 1000).toFixed(1)}B` : `$${numericLabel(inv.investmentUSD)}M`)
           : t('components.deckgl.tooltip.undisclosed');
         const stake = inv.stakePercent != null ? `<br/>${text(String(inv.stakePercent))}% ${t('components.deckgl.tooltip.stake')}` : '';
         return {
@@ -5230,7 +5289,7 @@ export class DeckGLMap {
         };
       }
       case 'satellite-imagery-layer': {
-        let imgHtml = `<div class="deckgl-tooltip"><strong>&#128752; ${text(obj.satellite)}</strong><br/>${text(obj.datetime)}<br/>Res: ${Number(obj.resolutionM)}m \u00B7 ${text(obj.mode)}`;
+        let imgHtml = `<div class="deckgl-tooltip"><strong>&#128752; ${text(obj.satellite)}</strong><br/>${text(obj.datetime)}<br/>Res: ${numericLabel(obj.resolutionM)}m \u00B7 ${text(obj.mode)}`;
         if (isAllowedPreviewUrl(obj.previewUrl)) {
           const safeHref = escapeHtml(new URL(obj.previewUrl).href);
           imgHtml += `<br><img src="${safeHref}" referrerpolicy="no-referrer" style="max-width:180px;max-height:120px;margin-top:4px;border-radius:4px;" class="imagery-preview" alt="">`;
@@ -5240,7 +5299,7 @@ export class DeckGLMap {
       }
       case 'webcam-layer': {
         const label = 'count' in obj
-          ? `${obj.count} webcams`
+          ? `${numericLabel(obj.count)} webcams`
           : (obj.title || obj.name || 'Webcam');
         return { html: `<div class="deckgl-tooltip"><strong>${text(label)}</strong></div>` };
       }
@@ -5263,17 +5322,31 @@ export class DeckGLMap {
         const [lon, lat] = info.coordinate as [number, number];
         let country: { code: string; name: string } | null = null;
         if (isChoropleth && info.object?.properties) {
-          country = { code: info.object.properties['ISO3166-1-Alpha-2'] as string, name: info.object.properties.name as string };
+          const rawCode = info.object.properties['ISO3166-1-Alpha-2'] as string;
+          country = {
+            code: typeof rawCode === 'string' ? canonicalizeCountryCode(rawCode) : '',
+            name: info.object.properties.name as string,
+          };
         } else {
           country = resolveCountryForPointerInteraction(
-            { code: this.hoveredCountryIso2, name: this.hoveredCountryName },
+            {
+              code: this.hoveredCountryIso2
+                ? canonicalizeCountryCode(this.hoveredCountryIso2)
+                : this.hoveredCountryIso2,
+              name: this.hoveredCountryName,
+            },
             this.hoverQueryThrottle?.isPending() ?? false,
             () => this.resolveCountryFromCoordinate(lon, lat),
           );
         }
         // Only fire if we have a country — ocean/no-country clicks are silently ignored
         if (country?.code && country?.name) {
-          this.onCountryClick({ lat, lon, code: country.code, name: country.name });
+          this.onCountryClick({
+            lat,
+            lon,
+            code: canonicalizeCountryCode(country.code),
+            name: country.name,
+          });
         }
       }
       return;
@@ -5281,6 +5354,11 @@ export class DeckGLMap {
 
     const rawClickLayerId = info.layer?.id || '';
     const layerId = rawClickLayerId.endsWith('-ghost') ? rawClickLayerId.slice(0, -6) : rawClickLayerId;
+
+    if (layerId === 'news-locations-layer') {
+      this.onNewsClick?.(info.object as NewsLocationMarker);
+      return;
+    }
 
     // Hotspots show popup with related news
     if (layerId === 'hotspots-layer') {
@@ -5555,7 +5633,7 @@ export class DeckGLMap {
 
   /**
    * Layer-level webcam pick. Returns true so deck.gl consumes the event and the
-   * global MapboxOverlay handler does not run a second time (#3877 / #4230).
+   * global MapLibreOverlay handler does not run a second time (#3877 / #4230).
    * Clusters zoom in instead of opening a tab per camera.
    */
   private handleWebcamLayerClick(info: PickingInfo): boolean {
@@ -5878,6 +5956,7 @@ export class DeckGLMap {
           this.state.layers[layer] = enabled;
           if (layer === 'military' && !enabled) this.clearFlightTrails();
           if (layer === 'flights') this.manageAircraftTimer(enabled);
+          if (layer === 'bases' && enabled) this.debouncedFetchBases();
           if (this.state.layers.weather && !prevRadar) this.startWeatherRadar();
           else if (!this.state.layers.weather && prevRadar) this.stopWeatherRadar();
           if (this.state.layers.cyberThreats && !prevCyber && !this.aptGroupsLoaded) this.loadAptGroups();
@@ -6223,7 +6302,7 @@ export class DeckGLMap {
     ciiLegend.id = 'ciiChoroplethLegend';
     ciiLegend.style.display = this.state.layers.ciiChoropleth ? 'block' : 'none';
     setTrustedHtml(ciiLegend, trustedHtml(`
-      <span class="legend-label-title" style="font-size:calc(9px * var(--wm-panel-effective-scale, 1));letter-spacing:0.5px;">CII SCALE</span>
+      <span class="legend-label-title" style="font-size:calc(9px * var(--wm-panel-effective-scale, 1));letter-spacing:0.5px;">INSTABILITY SCALE</span>
       <div style="display:flex;align-items:center;gap:2px;margin-top:2px;">
         <div style="width:100%;height:8px;border-radius:3px;background:linear-gradient(to right,#28b33e,#dcc030,#e87425,#dc2626,#7f1d1d);"></div>
       </div>
@@ -6517,9 +6596,11 @@ export class DeckGLMap {
     }
     const prevRadar = this.state.layers.weather;
     const prevCyber = this.state.layers.cyberThreats;
+    const prevBases = this.state.layers.bases;
     this.state.layers = normalizeExclusiveChoropleths(next, this.state.layers);
     if (!this.state.layers.military) this.clearFlightTrails();
     this.manageAircraftTimer(this.state.layers.flights);
+    if (this.state.layers.bases && !prevBases) this.debouncedFetchBases();
     if (this.state.layers.weather && !prevRadar) this.startWeatherRadar();
     else if (!this.state.layers.weather && prevRadar) this.stopWeatherRadar();
     if (this.state.layers.cyberThreats && !prevCyber && !this.aptGroupsLoaded) this.loadAptGroups();
@@ -6592,6 +6673,67 @@ export class DeckGLMap {
       widthMinPixels: 1,
       widthMaxPixels: 8,
       pickable: false,
+    });
+  }
+
+  // UNHCR people who crossed into each receiving country. Area scales with the
+  // count; an accelerating country gets a thicker ring.
+  private createCrossBorderPointsLayer(points: CrossBorderPoint[]): ScatterplotLayer<CrossBorderPoint> {
+    const light = getCurrentTheme() === 'light';
+    const fill = (d: CrossBorderPoint): [number, number, number, number] => {
+      if (d.kind === 'return') return light ? [30, 130, 80, 110] : [80, 210, 140, 100];
+      if (d.kind === 'arrival') return light ? [20, 110, 170, 120] : [70, 180, 240, 110];
+      return light ? [120, 60, 170, 110] : [180, 130, 255, 100];
+    };
+    return new ScatterplotLayer<CrossBorderPoint>({
+      id: 'cross-border-points-layer',
+      data: points,
+      getPosition: (d) => [d.lon, d.lat],
+      getRadius: (d) => Math.sqrt(d.individuals) * 70,
+      radiusMinPixels: 4,
+      radiusMaxPixels: 46,
+      getFillColor: fill,
+      getLineColor: (d) => (d.accelerating ? [255, 70, 70, 240] : light ? [60, 60, 60, 160] : [230, 230, 240, 160]),
+      getLineWidth: (d) => (d.accelerating ? 3 : 1),
+      lineWidthUnits: 'pixels',
+      stroked: true,
+      pickable: true,
+    });
+  }
+
+  // IOM DTM internally displaced people by region. Area scales with the count.
+  private createInternalDisplacementRegionsLayer(regions: InternalDisplacementRegion[]): ScatterplotLayer<InternalDisplacementRegion> {
+    const light = getCurrentTheme() === 'light';
+    return new ScatterplotLayer<InternalDisplacementRegion>({
+      id: 'internal-displacement-regions-layer',
+      data: regions,
+      getPosition: (d) => [d.lon, d.lat],
+      getRadius: (d) => Math.sqrt(d.idps) * 60,
+      radiusMinPixels: 3,
+      radiusMaxPixels: 40,
+      getFillColor: light ? [190, 90, 20, 120] : [255, 150, 60, 110],
+      getLineColor: light ? [150, 60, 10, 220] : [255, 190, 120, 200],
+      stroked: true,
+      lineWidthMinPixels: 1,
+      pickable: true,
+    });
+  }
+
+  private createInternalDisplacementRoutesLayer(routes: InternalDisplacementRoute[]): ArcLayer<InternalDisplacementRoute> {
+    const top = routes.slice(0, 150);
+    const maxCount = Math.max(1, ...top.map((d) => d.idps));
+    const light = getCurrentTheme() === 'light';
+    return new ArcLayer<InternalDisplacementRoute>({
+      id: 'internal-displacement-routes-layer',
+      data: top,
+      getSourcePosition: (d) => [d.originLon, d.originLat],
+      getTargetPosition: (d) => [d.destinationLon, d.destinationLat],
+      getSourceColor: light ? [150, 60, 10, 200] : [255, 190, 120, 170],
+      getTargetColor: light ? [190, 90, 20, 230] : [255, 120, 40, 210],
+      getWidth: (d) => Math.max(1, (d.idps / maxCount) * 6),
+      widthMinPixels: 1,
+      widthMaxPixels: 6,
+      pickable: true,
     });
   }
 
@@ -7102,6 +7244,11 @@ export class DeckGLMap {
     this.render();
   }
 
+  public setAircraftEmergencies(markers: import('../../shared/aircraft-emergencies').EmergencyMapMarker[]): void {
+    this.emergencyMarkers = markers;
+    this.render();
+  }
+
   public toggleFlightTrail(hexCode: string): void {
     const key = hexCode.toLowerCase();
     if (this.activeFlightTrails.has(key)) {
@@ -7132,6 +7279,11 @@ export class DeckGLMap {
   }
 
   private fetchServerBases(): void {
+    const fetchSeq = ++this.serverBasesFetchSeq;
+    this.serverBases = [];
+    this.serverBaseClusters = [];
+    this.serverBasesLoaded = false;
+    this.render();
     if (!this.maplibreMap) return;
     const mapLayers = this.state.layers;
     if (!mapLayers.bases) return;
@@ -7141,7 +7293,15 @@ export class DeckGLMap {
     const sw = bounds.getSouthWest();
     const ne = bounds.getNorthEast();
     fetchMilitaryBases(sw.lat, sw.lng, ne.lat, ne.lng, zoom).then((result) => {
-      if (!result) return;
+      if (!result || this.destroyed || fetchSeq !== this.serverBasesFetchSeq || !this.maplibreMap || !this.state.layers.bases) return;
+      const currentBounds = this.maplibreMap.getBounds();
+      const currentSw = currentBounds.getSouthWest();
+      const currentNe = currentBounds.getNorthEast();
+      if (this.maplibreMap.getZoom() !== zoom
+        || currentSw.lat !== sw.lat || currentSw.lng !== sw.lng
+        || currentNe.lat !== ne.lat || currentNe.lng !== ne.lng) return;
+      // Empty-200 / error payloads are not loaded coverage; keep bundled fallback.
+      if (result.bases.length === 0 && result.clusters.length === 0 && result.totalInView === 0) return;
       this.serverBases = result.bases;
       this.serverBaseClusters = result.clusters;
       this.serverBasesLoaded = true;
@@ -7258,6 +7418,16 @@ export class DeckGLMap {
     this.render();
   }
 
+  public setCrossBorderArrivals(data: CrossBorderData): void {
+    this.crossBorderArrivals = data;
+    this.render();
+  }
+
+  public setInternalDisplacement(data: InternalDisplacementData): void {
+    this.internalDisplacement = data;
+    this.render();
+  }
+
   public setClimateAnomalies(anomalies: ClimateAnomaly[]): void {
     this.climateAnomalies = anomalies;
     this.render();
@@ -7309,7 +7479,7 @@ export class DeckGLMap {
     this.render();
   }
 
-  public setNewsLocations(data: Array<{ lat: number; lon: number; title: string; threatLevel: string; timestamp?: Date }>): void {
+  public setNewsLocations(data: NewsLocationMarker[]): void {
     const now = Date.now();
     for (const d of data) {
       if (!this.newsLocationFirstSeen.has(d.title)) {
@@ -7568,6 +7738,10 @@ export class DeckGLMap {
     this.render(); // Debounced
   }
 
+  public setOnNewsClick(callback: (item: Pick<NewsLocationMarker, 'article' | 'title'>) => void): void {
+    this.onNewsClick = callback;
+  }
+
   public setOnHotspotClick(callback: (hotspot: Hotspot) => void): void {
     this.onHotspotClick = callback;
   }
@@ -7704,6 +7878,7 @@ export class DeckGLMap {
       if (layer === 'weather') this.startWeatherRadar();
       if (layer === 'cyberThreats' && !this.aptGroupsLoaded) this.loadAptGroups();
       if (layer === 'flights') this.manageAircraftTimer(true);
+      if (layer === 'bases') this.debouncedFetchBases();
       this.render();
       this.updateLegend();
       this.onLayerChange?.(layer, true, 'programmatic');
@@ -7738,6 +7913,7 @@ export class DeckGLMap {
     else if (!this.state.layers.weather && prevRadar) this.stopWeatherRadar();
     if (this.state.layers.cyberThreats && !prevCyber && !this.aptGroupsLoaded) this.loadAptGroups();
     if (layer === 'flights') this.manageAircraftTimer(this.state.layers.flights);
+    if (layer === 'bases' && this.state.layers.bases) this.debouncedFetchBases();
     this.render();
     this.updateLegend();
     this.onLayerChange?.(layer, this.state.layers[layer], 'programmatic');
@@ -7944,7 +8120,7 @@ export class DeckGLMap {
       const features = this.maplibreMap.queryRenderedFeatures(point, { layers: ['country-interactive'] });
       const properties = (features?.[0]?.properties ?? {}) as Record<string, unknown>;
       const code = typeof properties['ISO3166-1-Alpha-2'] === 'string'
-        ? properties['ISO3166-1-Alpha-2'].trim().toUpperCase()
+        ? canonicalizeCountryCode(properties['ISO3166-1-Alpha-2'])
         : '';
       const name = typeof properties.name === 'string'
         ? properties.name.trim()
@@ -8074,7 +8250,10 @@ export class DeckGLMap {
         if (!map.getLayer('country-interactive')) return;
         const features = map.queryRenderedFeatures(point, { layers: ['country-interactive'] });
         const props = features?.[0]?.properties;
-        const iso2 = props?.['ISO3166-1-Alpha-2'] as string | undefined;
+        const rawIso2 = props?.['ISO3166-1-Alpha-2'] as string | undefined;
+        // Keep MapLibre filters on the feature's property value (rewritten to
+        // ISO2 on geometry load) while storing the canonical code for clicks.
+        const iso2 = typeof rawIso2 === 'string' ? canonicalizeCountryCode(rawIso2) : undefined;
         const name = props?.['name'] as string | undefined;
 
         if (iso2 && iso2 !== hoveredIso2) {
@@ -8125,11 +8304,11 @@ export class DeckGLMap {
   }
 
   public highlightCountry(code: string): void {
-    this.highlightedCountryCode = code;
+    this.highlightedCountryCode = canonicalizeCountryCode(code);
     if (!this.maplibreMap || !this.countryGeoJsonLoaded) return;
     try {
       if (!this.maplibreMap.getLayer('country-highlight-fill')) return;
-      const filter = ['==', ['get', 'ISO3166-1-Alpha-2'], code] as maplibregl.FilterSpecification;
+      const filter = ['==', ['get', 'ISO3166-1-Alpha-2'], this.highlightedCountryCode] as maplibregl.FilterSpecification;
       this.maplibreMap.setFilter('country-highlight-fill', filter);
       this.maplibreMap.setFilter('country-highlight-border', filter);
       this.pulseCountryHighlight();
