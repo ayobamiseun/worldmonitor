@@ -1,5 +1,6 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import ts from 'typescript';
 
 /**
  * Derive the sebuf RPC routes whose handler only READS seed-owned Redis and
@@ -17,60 +18,103 @@ import { join } from 'node:path';
  * with the user's keys) is never forced to the cloud.
  */
 
-// Redis read helpers exported by server/_shared/redis.ts.
-const REDIS_READ = /getCachedJson|readCachedJson|getCachedJsonBatch|readCachedJsonList|getCachedEnvelopeJson|readCachedEnvelopeJson|getRawJson|getLargeRawJson|getCachedRawString|getHashFieldsBatch/;
+// Redis read helpers exported by server/_shared/redis.ts, plus
+// readRequiredSeed (server/_shared/required-seed.ts), which wraps them.
+const REDIS_READ = /getCachedJson|readCachedJson|getCachedJsonBatch|readCachedJsonList|getCachedEnvelopeJson|readCachedEnvelopeJson|getRawJson|getLargeRawJson|getCachedRawString|getHashFieldsBatch|readRequiredSeed/;
 
 // Anything that can leave the process: fetch and every helper spelled
-// `xFetch…(`/`fetch…(` (wtoFetch, fredFetchJson, cachedFetchJson), relay and
-// proxy helpers, LLM calls, URL construction, and literal URLs. `fetchedAt`
-// fields are excluded by the (?!ed) lookahead.
-const OUTBOUND = /(?<![A-Za-z])fetch(?!ed)[A-Za-z]*\(|[a-z]Fetch(?!ed)[A-Za-z]*\(|cachedFetchJson|getRelayBaseUrl|getRelayHeaders|relay|proxy|callLlm|new URL\(|https?:\/\//i;
+// `xFetch…(`/`fetch…(` (wtoFetch, fredFetchJson, lazyFetchBilateralHs4,
+// fetchJson<T>(…)), cachedFetchJson, the relay URL/header helpers, LLM calls,
+// URL construction, and literal URLs. `fetchedAt` fields are excluded by the
+// (?!ed) lookahead. Matched against comment-stripped source, so a comment
+// that mentions "ais-relay" or a proxy does not make a handler live.
+const OUTBOUND = /(?<![A-Za-z])fetch(?!ed)[A-Za-z0-9_]*(?:<[^<>()]*>)?\(|[a-z]Fetch(?!ed)[A-Za-z0-9_]*(?:<[^<>()]*>)?\(|cachedFetchJson|getRelayBaseUrl|getRelayHeaders|callLlm|new URL\(|https?:\/\//i;
+
+const printer = ts.createPrinter({ removeComments: true });
+
+/** Source text with every comment removed; string and regex literals stay intact. */
+export function stripComments(source) {
+  const file = ts.createSourceFile('handler.ts', source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+  return printer.printFile(file);
+}
 
 export function classifyRpcHandler(source) {
-  const reads = REDIS_READ.test(source);
-  const outbound = OUTBOUND.test(source);
+  const code = stripComments(source);
+  const reads = REDIS_READ.test(code);
+  const outbound = OUTBOUND.test(code);
   return { seedOnly: reads && !outbound, reads, outbound };
 }
 
+/** `[{ path, method }]` for every route a generated service_server.ts serves. */
+export function readGeneratedRoutes(serviceServerSource) {
+  const segments = serviceServerSource.split(/\bpath: "/).slice(1);
+  return segments.map((segment) => {
+    const path = segment.slice(0, segment.indexOf('"'));
+    const call = segment.match(/\bhandler\.([A-Za-z0-9_]+)\(/);
+    if (!call) throw new Error(`no handler call follows generated path ${path}`);
+    return { path, method: call[1] };
+  });
+}
+
+/** Map each RPC method name a domain handler.ts imports to the file that implements it. */
+function readHandlerImports(handlerSource) {
+  const byMethod = new Map();
+  for (const m of handlerSource.matchAll(/^import\s+\{([^}]+)\}\s+from\s+'\.\/([^']+)';/gm)) {
+    for (const spec of m[1].split(',').map((s) => s.trim()).filter(Boolean)) {
+      const [imported, local = imported] = spec.split(/\s+as\s+/);
+      byMethod.set(local, m[2].endsWith('.ts') ? m[2] : `${m[2]}.ts`);
+    }
+  }
+  return byMethod;
+}
+
 /**
- * @returns {{ routes: Array<{ route: string, domain: string, file: string, seedOnly: boolean }>, byDomain: Map<string, { total: number, seedOnly: number }> }}
+ * Every RPC route the generated servers declare, mapped through each domain's
+ * handler.ts to the file that implements it, and classified.
+ *
+ * @returns {{ routes: Array<{ route: string, prefix: string, method: string, file: string, seedOnly: boolean }>, byPrefix: Map<string, { total: number, seedOnly: number }> }}
  */
 export function scanRpcHandlers(repoRoot) {
   const root = join(repoRoot, 'server', 'worldmonitor');
   const routes = [];
-  const byDomain = new Map();
+  const byPrefix = new Map();
+  const classified = new Map();
   for (const domain of readdirSync(root).sort()) {
     const domainDir = join(root, domain);
     if (!statSync(domainDir).isDirectory()) continue;
     for (const version of readdirSync(domainDir).sort()) {
       if (!/^v\d+$/.test(version)) continue;
       const versionDir = join(domainDir, version);
-      for (const file of readdirSync(versionDir).sort()) {
-        if (!file.endsWith('.ts') || file.startsWith('_') || file === 'handler.ts' || file.includes('.test.')) continue;
-        const source = readFileSync(join(versionDir, file), 'utf8');
-        const { seedOnly } = classifyRpcHandler(source);
-        // The v1 gateways live at api/{domain}/v1/[rpc].ts; a versioned family
-        // lives at api/v{N}/{domain}/[rpc].ts (api/v2/shipping), so its URL is
-        // /api/v2/shipping/…, not /api/shipping/v2/… (#5907).
-        const route = existsSync(join(repoRoot, 'api', domain, version, '[rpc].ts'))
-          ? `/api/${domain}/${version}/${file.slice(0, -3)}`
-          : `/api/${version}/${domain}/${file.slice(0, -3)}`;
-        routes.push({ route, domain, file: `server/worldmonitor/${domain}/${version}/${file}`, seedOnly });
-        const tally = byDomain.get(domain) ?? { total: 0, seedOnly: 0 };
+      const handlerSource = readFileSync(join(versionDir, 'handler.ts'), 'utf8');
+      // The generated directory is snake_case (supply_chain) while the handler
+      // directory is kebab-case (supply-chain); handler.ts names it exactly.
+      const generated = handlerSource.match(/from '((?:\.\.\/)+src\/generated\/server\/[^']+\/service_server)'/);
+      if (!generated) throw new Error(`${relative(repoRoot, versionDir)}/handler.ts does not import a generated service_server`);
+      const generatedSource = readFileSync(join(versionDir, `${generated[1]}.ts`), 'utf8');
+      const imports = readHandlerImports(handlerSource);
+      for (const { path, method } of readGeneratedRoutes(generatedSource)) {
+        const implFile = imports.get(method);
+        if (!implFile) throw new Error(`${relative(repoRoot, versionDir)}/handler.ts does not import ${method} for ${path}`);
+        const file = relative(repoRoot, join(versionDir, implFile));
+        if (!classified.has(file)) classified.set(file, classifyRpcHandler(readFileSync(join(repoRoot, file), 'utf8')).seedOnly);
+        const seedOnly = classified.get(file);
+        const prefix = path.slice(0, path.lastIndexOf('/') + 1);
+        routes.push({ route: path, prefix, method, file, seedOnly });
+        const tally = byPrefix.get(prefix) ?? { total: 0, seedOnly: 0 };
         tally.total += 1;
         if (seedOnly) tally.seedOnly += 1;
-        byDomain.set(domain, tally);
+        byPrefix.set(prefix, tally);
       }
     }
   }
-  return { routes, byDomain };
+  return { routes, byPrefix };
 }
 
-/** Domains where EVERY handler is seed-only (safe to cloud-prefer by prefix). */
-export function wholeSeedOnlyDomains(byDomain) {
-  return [...byDomain.entries()]
+/** Route prefixes where EVERY route is seed-only (safe to cloud-prefer by prefix). */
+export function wholeSeedOnlyPrefixes(byPrefix) {
+  return [...byPrefix.entries()]
     .filter(([, t]) => t.total > 0 && t.seedOnly === t.total)
-    .map(([domain]) => domain)
+    .map(([prefix]) => prefix)
     .sort();
 }
 
@@ -79,7 +123,8 @@ export function readSidecarCloudPreferred(sidecarSource) {
   const list = (name, open, close) => {
     const m = sidecarSource.match(new RegExp(`const ${name} = ${open}([\\s\\S]*?)${close}`));
     if (!m) throw new Error(`${name} not found in sidecar source`);
-    return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+    // Entries never contain `//`, so dropping line comments cannot cut one.
+    return [...m[1].replace(/\/\/.*$/gm, '').matchAll(/'([^']+)'/g)].map((x) => x[1]);
   };
   return {
     relayGatedPrefixes: list('cloudPreferredPrefixes', '!process\\.env\\.WS_RELAY_URL\\s*\\?\\s*\\[', '\\]'),
@@ -93,13 +138,4 @@ export function isAlwaysCloudPreferred(route, decl) {
   return decl.exact.includes(route)
     || decl.alwaysPrefixes.some((p) => route.startsWith(p))
     || decl.seedOnlyPrefixes.some((p) => route.startsWith(p));
-}
-
-/** server/worldmonitor handler file behind an exact route, in either URL shape; null when the route is not an RPC. */
-export function handlerFileForRoute(route) {
-  const v1 = route.match(/^\/api\/([^/]+)\/(v\d+)\/([^/]+)$/);
-  if (v1) return `server/worldmonitor/${v1[1]}/${v1[2]}/${v1[3]}.ts`;
-  const versioned = route.match(/^\/api\/(v\d+)\/([^/]+)\/([^/]+)$/);
-  if (versioned) return `server/worldmonitor/${versioned[2]}/${versioned[1]}/${versioned[3]}.ts`;
-  return null;
 }

@@ -830,15 +830,16 @@ const cloudPreferredPrefixes = !process.env.WS_RELAY_URL
 // These routes read seed-owned Redis snapshots that the local sidecar does not
 // hold. They must stay cloud-preferred even when a desktop configures WS relay;
 // relay availability does not provide Upstash credentials to local handlers.
-// Seed-only handlers in domains that also have live handlers (#5906); the
-// whole-domain cases are in cloudPreferredSeedOnlyPrefixes below.
+// Seed-only RPC routes in families that also have live handlers (#5906); the
+// whole-family cases are in cloudPreferredSeedOnlyPrefixes below.
+// tests/sidecar-cloud-preferred-seed-only.test.mjs derives this set from the
+// generated route tables and fails when an entry is not a real RPC path, when
+// its handler reaches an upstream itself, or when a seed-only route is missing.
 const cloudPreferredExact = new Set([
   '/api/bootstrap',
-  '/api/conflict/v1/get-humanitarian-summary',
-  '/api/conflict/v1/get-humanitarian-summary-batch',
-  '/api/conflict/v1/list-acled-events',
-  '/api/conflict/v1/list-iran-events',
+  '/api/aviation/v1/get-airport-ops-summary',
   '/api/displacement/v1/get-displacement-summary',
+  '/api/displacement/v1/get-internal-displacement',
   '/api/economic/v1/get-bis-credit',
   '/api/economic/v1/get-bis-exchange-rates',
   '/api/economic/v1/get-bis-policy-rates',
@@ -858,11 +859,16 @@ const cloudPreferredExact = new Set([
   '/api/economic/v1/get-fao-food-price-index',
   '/api/economic/v1/get-fred-series',
   '/api/economic/v1/get-fred-series-batch',
+  '/api/economic/v1/get-government-yield-curve',
   '/api/economic/v1/get-macro-signals',
   '/api/economic/v1/get-nat-gas-storage',
   '/api/economic/v1/get-national-debt',
   '/api/economic/v1/get-oil-inventories',
   '/api/economic/v1/get-oil-stocks-analysis',
+  '/api/economic/v1/get-us-cpi-monthly',
+  '/api/economic/v1/get-us-interest-rates',
+  '/api/economic/v1/get-us-treasury-par-yield-curve',
+  '/api/economic/v1/get-world-cpi-monthly',
   '/api/economic/v1/list-bigmac-prices',
   '/api/economic/v1/list-fuel-prices',
   '/api/economic/v1/list-global-tenders',
@@ -872,11 +878,10 @@ const cloudPreferredExact = new Set([
   '/api/forecast/v1/get-simulation-package',
   '/api/infrastructure/v1/get-bootstrap-data',
   '/api/infrastructure/v1/get-temporal-baseline',
-  '/api/infrastructure/v1/list-ddos-attacks',
+  '/api/infrastructure/v1/list-internet-ddos-attacks',
   '/api/infrastructure/v1/list-internet-outages',
-  '/api/infrastructure/v1/list-traffic-anomalies',
-  '/api/intelligence/v1/brief-story-context',
-  '/api/intelligence/v1/chat-analyst-context',
+  '/api/infrastructure/v1/list-internet-traffic-anomalies',
+  '/api/infrastructure/v1/list-temporal-anomalies',
   '/api/intelligence/v1/compute-energy-shock',
   '/api/intelligence/v1/get-china-decision-signals',
   '/api/intelligence/v1/get-country-energy-profile',
@@ -901,28 +906,31 @@ const cloudPreferredExact = new Set([
   '/api/market/v1/get-market-breadth-history',
   '/api/market/v1/get-physical-divergence-index',
   '/api/market/v1/get-physical-premiums',
+  '/api/market/v1/get-sector-summary',
   '/api/market/v1/list-ai-tokens',
   '/api/market/v1/list-commodity-quotes',
   '/api/market/v1/list-crypto-sectors',
   '/api/market/v1/list-defi-tokens',
   '/api/market/v1/list-earnings-calendar',
+  '/api/market/v1/list-etf-flows',
+  '/api/market/v1/list-gulf-quotes',
   '/api/market/v1/list-other-tokens',
-  '/api/market/v1/premium-stock-store',
   '/api/military/v1/get-defense-industrial-base',
+  '/api/military/v1/get-theater-posture',
+  '/api/military/v1/get-usni-fleet-report',
   '/api/military/v1/list-defense-patents',
-  '/api/news/v1/get-summarize-article-cache',
+  '/api/news/v1/summarize-article-cache',
   '/api/research/v1/list-arxiv-papers',
   '/api/research/v1/list-hackernews-items',
   '/api/research/v1/list-trending-repos',
   '/api/resilience/v1/get-demographics-capability',
   '/api/resilience/v1/get-food-stocks',
-  '/api/resilience/v1/get-resilience-runtime-manifest',
+  '/api/resilience/v1/get-runtime-manifest',
   '/api/sanctions/v1/list-sanctions-pressure',
   '/api/scenario/v1/get-scenario-status',
-  '/api/v2/shipping/route-intelligence',
   '/api/supply-chain/v1/get-bypass-options',
   '/api/supply-chain/v1/get-chokepoint-dependencies',
-  '/api/supply-chain/v1/get-country-chokepoint-index',
+  '/api/supply-chain/v1/get-chokepoint-history',
   '/api/supply-chain/v1/get-country-vulnerabilities',
   '/api/supply-chain/v1/get-fuel-shortage-detail',
   '/api/supply-chain/v1/get-mineral-production',
@@ -936,39 +944,36 @@ const cloudPreferredExact = new Set([
   '/api/supply-chain/v1/list-pipelines',
   '/api/supply-chain/v1/list-storage-facilities',
   '/api/supply-chain/v1/list-vulnerability-rankings',
+  '/api/trade/v1/get-customs-revenue',
+  '/api/trade/v1/get-tariff-trends',
+  '/api/trade/v1/get-trade-barriers',
+  '/api/trade/v1/get-trade-flows',
+  '/api/trade/v1/get-trade-restrictions',
+  '/api/trade/v1/list-comtrade-flows',
+  '/api/v2/shipping/route-intelligence',
   '/api/webcam/v1/list-webcams',
-  // 2026-09-25 rebase: climate, cyber, seismology and unrest each gained a
-  // live handler on main, so their seed-only routes moved from a domain
-  // prefix to exact entries, and these seed-only handlers are new.
-  '/api/aviation/v1/get-airport-ops-summary',
-  '/api/climate/v1/get-co2-monitoring',
-  '/api/climate/v1/get-ocean-ice-data',
-  '/api/climate/v1/list-air-quality-data',
-  '/api/climate/v1/list-climate-disasters',
-  '/api/climate/v1/list-climate-news',
-  '/api/economic/v1/get-government-yield-curve',
-  '/api/economic/v1/get-us-cpi-monthly',
-  '/api/economic/v1/get-us-interest-rates',
-  '/api/economic/v1/get-us-treasury-par-yield-curve',
-  '/api/economic/v1/get-world-cpi-monthly',
 ]);
-// Domains whose EVERY handler only reads seed-owned Redis (#5906). The sidecar
-// never holds Upstash credentials (UPSTASH_* is not in ALLOWED_ENV_KEYS), a
-// Redis miss degrades to an empty 200, and an empty 200 never trips the
-// `!response.ok` cloud fallback — so served locally these domains render blank
-// panels with no error anywhere. Always cloud, WS_RELAY_URL or not.
-// tests/sidecar-cloud-preferred-seed-only.test.mjs derives this list from
-// server/worldmonitor and fails when a seed-only route is not covered here.
+// Route families whose EVERY handler only reads seed-owned Redis (#5906). The
+// sidecar never holds Upstash credentials (UPSTASH_* is not in
+// ALLOWED_ENV_KEYS), a Redis miss degrades to an empty 200, and an empty 200
+// never trips the `!response.ok` cloud fallback — so served locally these
+// families render blank panels with no error anywhere. Always cloud,
+// WS_RELAY_URL or not. A family that gains a live handler moves to exact
+// entries; the contract test above enforces that.
 const cloudPreferredSeedOnlyPrefixes = [
+  '/api/climate/v1/',
+  '/api/conflict/v1/',
   '/api/consumer-prices/v1/',
+  '/api/cyber/v1/',
   '/api/health/v1/',
   '/api/natural/v1/',
   '/api/positive-events/v1/',
   '/api/prediction/v1/',
   '/api/radiation/v1/',
   '/api/safety/v1/',
+  '/api/seismology/v1/',
   '/api/thermal/v1/',
-  '/api/trade/v1/',
+  '/api/unrest/v1/',
   '/api/wildfire/v1/',
 ];
 const cloudPreferredAlwaysPrefixes = ['/api/scorecard/v1/'];
