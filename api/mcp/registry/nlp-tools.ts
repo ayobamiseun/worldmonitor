@@ -1,6 +1,7 @@
 /**
  * On-demand NLP intelligence utilities (issue #5697): classify_event,
- * extract_entities, get_news_clusters, get_keyword_spikes.
+ * extract_entities, get_news_clusters, get_keyword_spikes, and verify_claim
+ * (#9092), which matches a claim to the same digest clusters.
  *
  * Split out of rpc-tools.ts so the registry file stays a registry: these four
  * tools carry real domain logic — a digest anti-corruption layer, entity
@@ -25,12 +26,27 @@ import { clusterNewsCore, protoThreatLevelToLabel, topClusterKeywords } from '..
 import type { NewsItemCore } from '../../../shared/news-clustering-core.js';
 import { getSourceProvenanceState } from '../../../shared/source-provenance.js';
 import { computeCredibilityScore } from '../../../shared/news-credibility.js';
-import { getSourceTier } from '../../../server/_shared/source-tiers';
+import { declaredSourceTier, getSourceTier } from '../../../server/_shared/source-tiers';
+import {
+  CORROBORATION_OUTPUT_SCHEMA,
+  DECLARED_TIER_SCHEMA,
+  PUBLISHER_ROSTER_OUTPUT_PROPERTIES,
+  assessCorroboration,
+  evidenceFromCluster,
+  publisherRoster,
+  toCorroborationJson,
+  toPublisherRosterJson,
+} from '../../../server/_shared/corroboration';
+import { CLAIM_CARD_MAX_HEADLINES, CLAIM_CARD_STATES, CLAIM_MAX_CHARS, buildClaimCard } from '../../../server/_shared/claim-match';
+import { FACT_CHECK_CAVEAT, FACT_CHECK_LABEL } from '../../../server/_shared/fact-checks';
+import { lookupFactChecks, type FactCheckLookup } from '../../../server/_shared/fact-check-search';
+import { searchClaimPool } from '../../../server/worldmonitor/news/v1/search-claim-headlines';
 import { buildAuthHeaders } from '../auth';
+import { fetchMcpDownstream } from '../downstream';
 import { assertToolFetchOk } from '../billing-denial';
 import { argStr, ciIncludes } from '../filters';
 import { McpSourceUnavailableError } from '../source-unavailable';
-import type { ToolDef } from '../types';
+import type { ToolDef, McpToolExecutionContext } from '../types';
 
 // ── #5697 on-demand NLP intelligence utilities ──────────────────────────────
 // Four deterministic (classify_event excepted — enum-validated LLM) utilities
@@ -50,9 +66,24 @@ const CLASSIFY_SEVERITIES = [
 const EXTRACT_TEXT_MAX_CHARS = 2048; // issue #5697's 2 KB arbitrary-text cap
 const NLP_DIGEST_TIMEOUT_MS = 6_000;
 const NLP_UA = 'worldmonitor-mcp-edge/1.0';
+/** verify_claim's published fact-checks (#9094): cited ratings, never a WorldMonitor verdict. */
+type FactCheckBlock = { state: FactCheckLookup['state']; label: string; caveat: string; items: FactCheckLookup['factChecks'] };
+
+/**
+ * Published fact-checks for the claim: the same lookup SearchFactChecks
+ * serves /verify, run in-process so it is not a second billed downstream
+ * request. Never fails the tool: a lookup that did not run is `unavailable`
+ * or `not-configured`, which says nothing about whether a fact-check exists.
+ */
+async function factCheckBlock(claim: string): Promise<FactCheckBlock> {
+  const { state, factChecks } = await lookupFactChecks(claim);
+  return { state, label: FACT_CHECK_LABEL, caveat: FACT_CHECK_CAVEAT, items: factChecks };
+}
 const NLP_DIGEST_SOURCE_MAX_BYTES = 160;
 const NLP_DIGEST_TITLE_MAX_BYTES = 512;
 const NLP_DIGEST_LINK_MAX_BYTES = 2_048;
+// Lead text for same-copy detection (#9095): it compares the first ~60 words.
+const NLP_DIGEST_SNIPPET_MAX_BYTES = 2_048;
 const NLP_DIGEST_METADATA_MAX_BYTES = 64;
 const NLP_DIGEST_NOTE_MAX_BYTES = 2_048;
 const KEYWORD_SPIKE_BASELINE_MS = 48 * 60 * 60 * 1000; // digest:accumulator retention
@@ -71,7 +102,7 @@ type NlpDigestVariant = typeof NLP_DIGEST_VARIANTS[number];
 const FULL_DIGEST_CATEGORIES = [
   'politics', 'us', 'europe', 'middleeast', 'tech', 'ai', 'finance',
   'commodities', 'gov', 'africa', 'latam', 'asia', 'energy', 'thinktanks',
-  'crisis', 'layoffs', 'intel',
+  'crisis', 'layoffs', 'science', 'intel',
 ] as const;
 const TECH_DIGEST_CATEGORIES = [
   'tech', 'ai', 'startups', 'vcblogs', 'regionalStartups', 'unicorns',
@@ -91,13 +122,19 @@ const DIGEST_CATEGORY_DESC =
   '. Echoed as `category` in the result; an unknown value yields headlineCount 0 and a `note` listing categories present in the current digest.';
 
 const SOURCE_PROVENANCE_REQUIRED = [
-  'risk', 'type', 'riskDeclared', 'typeDeclared', 'riskReviewed', 'typeReviewed',
+  'risk', 'type', 'riskDeclared', 'typeDeclared', 'riskReviewed', 'typeReviewed', 'knownBiases', 'summary',
 ];
 const SOURCE_PROVENANCE_PROPERTIES = {
   risk: { type: 'string' }, type: { type: 'string' },
   riskDeclared: { type: 'boolean' }, typeDeclared: { type: 'boolean' },
   riskReviewed: { type: 'boolean' }, typeReviewed: { type: 'boolean' },
   stateAffiliated: { type: 'string' }, note: { type: 'string' },
+  knownBiases: {
+    type: 'array',
+    items: { type: 'string' },
+    description: 'Curated perspective labels. Recorded for few sources: empty means not assessed, not neutral.',
+  },
+  summary: { type: 'string', description: 'Every provenance fact as short fixed-order clauses in one string; includes "Perspective: none recorded." when no label exists.' },
 };
 
 function nlpTruncateUtf8(value: string, maxBytes: number): string {
@@ -134,8 +171,8 @@ function patternEntityKind(value: string): 'cve' | 'apt' | 'fin' | 'leader' {
 
 type NlpDigestCategoryGroup = {
   items?: Array<{
-    source?: string; title?: string; link?: string; publishedAt?: number;
-    isAlert?: boolean; credibilityScore?: number;
+    source?: string; title?: string; snippet?: string; link?: string; publishedAt?: number;
+    isAlert?: boolean; credibilityScore?: number; corroborationCount?: number;
     threat?: { level?: string; category?: string; confidence?: number; source?: string };
   }>;
 };
@@ -185,7 +222,7 @@ const NLP_DIGEST_COVERAGE_OUTPUT_SCHEMA = {
     },
     staleReason: {
       type: 'string',
-      description: 'Why retained content is served: empty-rebuild or build-error. Empty when fresh.',
+      description: 'Why retained content is served: empty-rebuild, build-error, or gate-held. Empty when fresh.',
     },
   },
 } as const;
@@ -219,7 +256,7 @@ type NlpDigestFetch = {
      * — 90 seconds and 6 hours warrant different conclusions.
      */
     staleAgeSeconds: number;
-    /** #7084: why stale content is served — empty-rebuild | build-error ('' when fresh). */
+    /** #7084/#8361: why stale content is served — empty-rebuild | build-error | gate-held ('' when fresh). */
     staleReason: string;
   };
 };
@@ -235,8 +272,8 @@ type NlpDigestFetch = {
 /**
  * Recent-headline corpus for the no-text extract_entities mode and
  * get_news_clusters: the selected full/en or tech/en feed digest.
- * Digest items carry no per-source tier, so every item gets a neutral tier
- * and the shared algorithm's primary selection falls back to recency.
+ * Digest items carry no tier; get_news_clusters resolves it from the source
+ * tables, as the dashboard does, so primary selection is tier-first.
  *
  * When `category` is set, only that digest bucket is scanned. A miss
  * (typo or pre-deploy cache) returns zero items plus a `note` that lists
@@ -247,14 +284,18 @@ async function fetchNlpDigestItems(
   base: string,
   context: Parameters<typeof buildAuthHeaders>[0],
   variant: NlpDigestVariant,
-  category = '',
+  category: string,
+  // Required-but-nullable, matching fetchMcpDownstream: a caller that forgets
+  // the execution context fails typecheck instead of silently dropping the
+  // self-hosted transport token.
+  execution: McpToolExecutionContext | undefined,
 ): Promise<NlpDigestFetch> {
   const digestUrl = `${base}/api/news/v1/list-feed-digest?variant=${variant}&lang=en`;
   const auth = await buildAuthHeaders(context, 'GET', digestUrl, null);
-  const res = await fetch(digestUrl, {
+  const res = await fetchMcpDownstream(digestUrl, {
     headers: { ...auth, 'User-Agent': NLP_UA },
     signal: AbortSignal.timeout(NLP_DIGEST_TIMEOUT_MS),
-  });
+  }, execution);
   await assertToolFetchOk(res, 'list-feed-digest');
   const body = await res.json() as {
     categories?: Record<string, NlpDigestCategoryGroup>;
@@ -357,13 +398,20 @@ async function fetchNlpDigestItems(
       items.push({
         source,
         title,
+        // #9095: without the lead, same-copy detection cannot merge reprints and
+        // max(seen, reported) restores the count the digest already lowered.
+        ...(typeof raw.snippet === 'string' && raw.snippet.trim() !== ''
+          ? { snippet: nlpTruncateUtf8(raw.snippet, NLP_DIGEST_SNIPPET_MAX_BYTES) }
+          : {}),
         link,
         pubDate: new Date(Number(raw.publishedAt) || 0),
         isAlert: raw.isAlert === true,
         credibilityScore: Number.isFinite(raw.credibilityScore)
           ? nlpClampInt(raw.credibilityScore, 0, 100, 0)
           : undefined,
-        tier: 3,
+        ...(Number.isFinite(raw.corroborationCount) && (raw.corroborationCount as number) >= 1
+          ? { corroborationCount: Math.floor(raw.corroborationCount as number) }
+          : {}),
         threat: raw.threat ? {
           level: protoThreatLevelToLabel(raw.threat.level),
           category: nlpTruncateUtf8(
@@ -435,8 +483,9 @@ function nlpRegistryEntities(titles: string[], limit: number) {
 export const NLP_TOOLS: ToolDef[] = [
   {
     name: 'classify_event',
+    title: 'Classify a news event',
     _outputBudgetBytes: 4096,
-    description: 'Classify a supplied news headline or short text into a threat category and severity via the enum-validated WorldMonitor event classifier (temperature-0, 24h-cached per title, never free-form LLM output). Input is capped at 500 characters. classification is null when the classifier cannot produce an enum-valid result.',
+    description: 'Classify one supplied headline or short text (1-500 characters) into {category, level, severity, confidence} with the enum-validated WorldMonitor event classifier (temperature 0, cached 24 h per title, never free-form LLM output). classification is null when the classifier cannot produce an enum-valid result; longer input is rejected, not truncated. Operates only on the text passed in; no news lookup. Requires a paid plan; one downstream request, weight 2 on API plans. Read-only.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -469,7 +518,7 @@ export const NLP_TOOLS: ToolDef[] = [
       },
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    _execute: async (params, base, context) => {
+    _execute: async (params, base, context, execution) => {
       const text = typeof params.text === 'string' ? params.text.trim() : '';
       if (!text) return { classification: null, error: 'text is required (a non-empty string of at most 500 characters)' };
       if (text.length > CLASSIFY_TEXT_MAX_CHARS) {
@@ -477,13 +526,13 @@ export const NLP_TOOLS: ToolDef[] = [
       }
       const url = `${base}/api/intelligence/v1/classify-event?title=${encodeURIComponent(text)}`;
       const auth = await buildAuthHeaders(context, 'GET', url, null);
-      const res = await fetch(url, {
+      const res = await fetchMcpDownstream(url, {
         headers: { ...auth, 'User-Agent': NLP_UA },
         // Matches the classify-event handler's own UPSTREAM_TIMEOUT_MS (25s)
         // and the sibling LLM tools below. A shorter client budget would abort
         // slow-but-successful cache-miss classifications the handler completes.
         signal: AbortSignal.timeout(25_000),
-      });
+      }, execution);
       await assertToolFetchOk(res, 'classify-event');
       const result = await res.json() as {
         classification?: { category?: string; subcategory?: string; severity?: string; confidence?: number };
@@ -515,6 +564,7 @@ export const NLP_TOOLS: ToolDef[] = [
   },
   {
     name: 'extract_entities',
+    title: 'Extract named entities',
     _outputBudgetBytes: 16384,
     description: 'Extract named entities deterministically — registry entities (companies, indices, commodities, crypto, sectors, countries) plus pattern entities (CVE IDs, APT/FIN threat-group designators, tracked world leaders). Supply text (max 2 KB), or omit text to aggregate headlines from the full digest (default) or tech digest with variant/category filters. Headline mode includes digestCoverage so agents can distinguish complete, partial, stale, and unavailable input. No LLM involved.',
     inputSchema: {
@@ -565,7 +615,7 @@ export const NLP_TOOLS: ToolDef[] = [
       },
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    _execute: async (params, base, context) => {
+    _execute: async (params, base, context, execution) => {
       // Validation failures keep every outputSchema-required member present so
       // schema-validating clients can parse the envelope (classify_event does
       // the same with `classification: null`).
@@ -611,7 +661,7 @@ export const NLP_TOOLS: ToolDef[] = [
         };
       }
       const category = argStr(params.category);
-      const digest = await fetchNlpDigestItems(base, context, variant, category);
+      const digest = await fetchNlpDigestItems(base, context, variant, category, execution);
       const aggregated = nlpRegistryEntities(digest.items.map(item => item.title), limit);
       return {
         mode: 'headlines',
@@ -630,11 +680,12 @@ export const NLP_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_news_clusters',
+    title: 'Current news topic clusters',
     // At limit=25, each cluster can carry eight fail-closed provenance
     // records plus a separate primary record. Keep the dispatcher budget
     // aligned with that supported maximum instead of rejecting valid output.
     _outputBudgetBytes: 262144,
-    description: 'Current topic clusters over the live headline digest, computed with the same Jaccard clustering the dashboard uses. Select the full digest (default) or tech digest with variant, then optionally restrict by category such as commodities, vcblogs, or accelerators. Each cluster reports its primary headline, member count, distinct sources with fail-closed provenance, top keywords, threat level, time span, and credibilityScore (0-100 source reliability, distinct from importance). The result includes digestCoverage so agents can distinguish complete, partial, stale, and unavailable input. Deterministic — no LLM.',
+    description: 'Current topic clusters over the live headline digest, computed with the same Jaccard clustering the dashboard uses. Select the full digest (default) or tech digest with variant, then optionally restrict by category such as commodities, vcblogs, or accelerators. Each cluster reports its primary headline, member count, distinct sources with fail-closed provenance and declared tier, top keywords, threat level, time span, credibilityScore (0-100 source reliability, distinct from importance), corroboration, and the publishers roster with each publisher\'s declared tier; corroboration.state (single-publisher, tier4-only, corroborated, unknown) describes coverage, not accuracy. The result includes digestCoverage so agents can distinguish complete, partial, stale, and unavailable input. Deterministic — no LLM.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -662,10 +713,10 @@ export const NLP_TOOLS: ToolDef[] = [
           type: 'array',
           items: {
             type: 'object',
-            required: ['primarySourceProvenance', 'sourceProvenance', 'credibilityScore'],
+            required: ['primarySourceProvenance', 'sourceProvenance', 'credibilityScore', 'corroboration', 'publishers', 'publishersUnlisted'],
             properties: {
               id: { type: 'string' },
-              title: { type: 'string', description: 'Primary headline. Server-side primary selection is recency-based: digest items carry no per-source tier.' },
+              title: { type: 'string', description: 'Primary headline: the best-tier member, newest first among equals, as on the dashboard.' },
               primarySource: { type: 'string' }, link: { type: 'string' },
               primarySourceProvenance: {
                 type: 'object',
@@ -673,16 +724,17 @@ export const NLP_TOOLS: ToolDef[] = [
                 properties: SOURCE_PROVENANCE_PROPERTIES,
               },
               memberCount: { type: 'number', description: 'Headlines in this cluster (one outlet can contribute several).' },
-              distinctSourceCount: { type: 'number', description: 'Distinct outlets covering the cluster — the corroboration signal min_sources filters on.' },
+              distinctSourceCount: { type: 'number', description: 'Distinct publisher families among this cluster\'s own member outlets — the corroboration signal min_sources filters on. corroboration.publishers can be higher: it also takes the digest\'s origin-aware count, which sees publishers whose items are not members of this cluster.' },
               sources: { type: 'array', items: { type: 'string' }, description: 'Distinct source names (up to 8).' },
               sourceProvenance: {
                 type: 'array',
-                description: 'Fail-closed provenance for each source returned in `sources`, including state affiliation when declared.',
+                description: 'Fail-closed provenance for each source returned in `sources`, including state affiliation and tier when declared.',
                 items: {
                   type: 'object',
-                  required: ['source', ...SOURCE_PROVENANCE_REQUIRED],
+                  required: ['source', 'tier', ...SOURCE_PROVENANCE_REQUIRED],
                   properties: {
                     source: { type: 'string' },
+                    tier: DECLARED_TIER_SCHEMA,
                     ...SOURCE_PROVENANCE_PROPERTIES,
                   },
                 },
@@ -695,6 +747,8 @@ export const NLP_TOOLS: ToolDef[] = [
                 type: 'number',
                 description: '0-100 source-reliability score for the primary outlet, distinct from importance. Built from source tier, propaganda risk, and independent corroboration.',
               },
+              corroboration: CORROBORATION_OUTPUT_SCHEMA,
+              ...PUBLISHER_ROSTER_OUTPUT_PROPERTIES,
             },
           },
         },
@@ -709,7 +763,7 @@ export const NLP_TOOLS: ToolDef[] = [
       },
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    _execute: async (params, base, context) => {
+    _execute: async (params, base, context, execution) => {
       const limit = nlpClampInt(params.limit, 1, 25, 10);
       const minSources = nlpClampInt(params.min_sources, 1, 10, 1);
       const variant = resolveNlpDigestVariant(params.variant);
@@ -725,8 +779,8 @@ export const NLP_TOOLS: ToolDef[] = [
       }
       const category = argStr(params.category);
       const query = argStr(params.query);
-      const digest = await fetchNlpDigestItems(base, context, variant, category);
-      const clusters = clusterNewsCore(digest.items, () => 3);
+      const digest = await fetchNlpDigestItems(base, context, variant, category, execution);
+      const clusters = clusterNewsCore(digest.items, getSourceTier);
       const selectedClusters = clusters
         .map(cluster => ({
           cluster,
@@ -752,6 +806,8 @@ export const NLP_TOOLS: ToolDef[] = [
       const projected = selectedClusters.map(({ cluster, sources, distinctPublishers }) => {
         const projectedSources = sources.slice(0, 8);
         const digestCredibilityScore = cluster.credibilityScore;
+        const evidence = evidenceFromCluster(cluster);
+        const verdict = assessCorroboration(evidence);
         const provenanceBySource = new Map(
           [...new Set([cluster.primarySource, ...projectedSources])]
             .map(source => [source, getSourceProvenanceState(source)] as const),
@@ -771,6 +827,7 @@ export const NLP_TOOLS: ToolDef[] = [
           sources: projectedSources,
           sourceProvenance: projectedSources.map((source) => ({
             source,
+            tier: declaredSourceTier(source),
             ...provenanceBySource.get(source)!,
           })),
           topKeywords: topClusterKeywords(cluster, 5),
@@ -786,6 +843,8 @@ export const NLP_TOOLS: ToolDef[] = [
               propagandaRisk: provenanceBySource.get(cluster.primarySource)!.risk,
               independentCorroborationCount: distinctPublishers,
             }),
+          corroboration: toCorroborationJson(verdict),
+          ...toPublisherRosterJson(publisherRoster(evidence), verdict),
         };
       });
       return {
@@ -804,7 +863,138 @@ export const NLP_TOOLS: ToolDef[] = [
     ],
   },
   {
+    name: 'verify_claim',
+    title: 'Check a claim against news coverage',
+    _outputBudgetBytes: 65536,
+    description: 'Return an evidence card for a claim or headline: the live-digest clusters reporting the same event, a result state (corroborated, single-publisher, tier4-only, unknown, or not-found when the digest was searched and nothing reports it; unknown when there were no headlines to search), WorldMonitor\'s coverage verdict over the matched clusters, the publishers roster with declared tiers, matched headlines with fail-closed source provenance, a figure check (numbers and dates in the claim that no matched headline states) and first/last sighting. found=false means the claim was not matched, never that it is false; this is coverage, not accuracy. factChecks quotes ratings IFCN-verified fact-checkers published about a similar claim, each with checker, date and link; the rating is theirs and never changes state. Deterministic, no LLM. Requires a paid plan; one downstream search, weight 2 on API plans. claim is up to 300 characters; variant picks the full or tech digest. Read-only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        claim: { type: 'string', minLength: 1, maxLength: CLAIM_MAX_CHARS, description: `The claim or headline to check, up to ${CLAIM_MAX_CHARS} characters.` },
+        variant: {
+          type: 'string',
+          enum: [...NLP_DIGEST_VARIANTS],
+          description: 'Headline digest variant to search. Defaults to full.',
+        },
+      },
+      required: ['claim'],
+    },
+    outputSchema: {
+      type: 'object',
+      required: ['claim', 'found', 'state', 'corroboration', 'publishers', 'publishersUnlisted', 'matchedClusters', 'headlines', 'figures', 'caveat', 'generatedAt'],
+      properties: {
+        claim: { type: 'string', description: 'The claim as checked (trimmed, capped).' },
+        found: { type: 'boolean', description: 'True when at least one digest cluster reports the same event. False means no match: not in WorldMonitor\'s current sources when state is not-found, or nothing searched when state is unknown. Never false.' },
+        state: { type: 'string', enum: [...CLAIM_CARD_STATES], description: 'not-found when the digest was searched and no cluster reports the claim (not in WorldMonitor\'s sources, never false); unknown when the digest had no headlines to search (see digestCoverage); otherwise corroboration.state.' },
+        corroboration: CORROBORATION_OUTPUT_SCHEMA,
+        ...PUBLISHER_ROSTER_OUTPUT_PROPERTIES,
+        matchedClusters: { type: 'number', description: 'Digest clusters about this event (one event often spans several).' },
+        credibilityScore: { type: ['number', 'null'], description: '0-100 source-reliability score of the best-matched cluster\'s primary outlet, distinct from importance; null when not found.' },
+        firstSeen: { type: ['string', 'null'], description: 'Earliest matched headline (ISO 8601); null when not found.' },
+        lastUpdated: { type: ['string', 'null'], description: 'Latest matched headline (ISO 8601); null when not found.' },
+        headlines: {
+          type: 'array',
+          description: `Matched headlines, best match first (up to ${CLAIM_CARD_MAX_HEADLINES}).`,
+          items: {
+            type: 'object',
+            required: ['title', 'source', 'link', 'publishedAt', 'tier', ...SOURCE_PROVENANCE_REQUIRED],
+            properties: {
+              title: { type: 'string' },
+              source: { type: 'string' },
+              link: { type: 'string' },
+              publishedAt: { type: 'string' },
+              tier: DECLARED_TIER_SCHEMA,
+              ...SOURCE_PROVENANCE_PROPERTIES,
+            },
+          },
+        },
+        figures: {
+          type: 'object',
+          required: ['claimed', 'grounded', 'ungrounded'],
+          description: 'Numbers and dates in the claim checked against matched headlines with the brief grounding rule. Ungrounded means no matched headline states the figure, not that it is wrong.',
+          properties: {
+            claimed: { type: 'array', items: { type: 'string' } },
+            grounded: { type: 'array', items: { type: 'string' } },
+            ungrounded: { type: 'array', items: { type: 'string' } },
+          },
+        },
+        caveat: { type: 'string', description: 'Fixed reminder that the verdict describes coverage, not accuracy.' },
+        factChecks: {
+          type: 'object',
+          required: ['state', 'label', 'caveat', 'items'],
+          description: 'Published fact-checks of a similar claim (#9094), cited with attribution. Strong text matches only, from IFCN-verified fact-checkers, English, newest first; disagreeing ratings are all listed. The ratings are the fact-checkers\' own and never change state or corroboration.',
+          properties: {
+            state: { type: 'string', enum: ['ok', 'unavailable', 'not-configured'], description: 'ok when the lookup ran (an empty list then means no published fact-check of a similar claim was found); unavailable or not-configured when it did not run.' },
+            label: { type: 'string', description: 'How to introduce each item: a fact-check of a similar claim, never of this claim.' },
+            caveat: { type: 'string' },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['publisher', 'site', 'rating', 'reviewedAt', 'url', 'title', 'claimReviewed'],
+                properties: {
+                  publisher: { type: 'string', description: 'The fact-checker.' },
+                  site: { type: 'string', description: 'Its IFCN-allowlisted domain.' },
+                  rating: { type: 'string', description: 'The fact-checker\'s own rating, verbatim.' },
+                  reviewedAt: { type: 'string', description: 'When the fact-check was published (ISO 8601).' },
+                  url: { type: 'string' },
+                  title: { type: 'string' },
+                  claimReviewed: { type: 'string', description: 'The claim the fact-checker rated (similar, not necessarily identical).' },
+                },
+              },
+            },
+          },
+        },
+        generatedAt: { type: 'string' },
+        variant: { type: 'string', enum: [...NLP_DIGEST_VARIANTS] },
+        digestCoverage: NLP_DIGEST_COVERAGE_OUTPUT_SCHEMA,
+        error: { type: 'string', description: 'Present when the claim or variant is invalid.' },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    _execute: async (params, base, context, execution) => {
+      // Not argStr: it lowercases, and the card echoes the claim as given.
+      const claim = (typeof params.claim === 'string' ? params.claim : '').trim().slice(0, CLAIM_MAX_CHARS);
+      const empty = { ...buildClaimCard(claim, []), generatedAt: '' };
+      const variant = resolveNlpDigestVariant(params.variant);
+      if (!claim) return { ...empty, error: 'claim is required' };
+      if (!variant) return { ...empty, error: `variant must be one of: ${NLP_DIGEST_VARIANTS.join(', ')}` };
+
+      // full searches every fresh headline in the feed caches, in-process like
+      // the fact-checks, not only the ~280 the digest serves. Other variants,
+      // and a search that could not run, use the variant's digest.
+      const [search, factChecks] = await Promise.all([
+        variant === 'full' ? searchClaimPool(claim).catch(() => null) : null,
+        factCheckBlock(claim),
+      ]);
+      if (search && search.state !== 'unavailable') {
+        return {
+          ...buildClaimCard(claim, search.candidates, search.searchedHeadlines),
+          factChecks,
+          generatedAt: search.readAt,
+          variant,
+        };
+      }
+      const digest = await fetchNlpDigestItems(base, context, variant, '', execution);
+      return {
+        ...buildClaimCard(claim, digest.items),
+        factChecks,
+        generatedAt: digest.generatedAt,
+        variant: digest.variant,
+        ...(digest.digestCoverage ? { digestCoverage: digest.digestCoverage } : {}),
+      };
+    },
+    // search-fact-checks and search-claim-headlines: covered by the same
+    // in-process lookups they serve.
+    _apiPaths: [
+      'GET /api/news/v1/list-feed-digest',
+      'GET /api/news/v1/search-fact-checks',
+      'GET /api/news/v1/search-claim-headlines',
+    ],
+  },
+  {
     name: 'get_keyword_spikes',
+    title: 'Keyword and threat spikes',
     _outputBudgetBytes: 32768,
     description: 'Keyword/CVE/APT spikes vs baseline, each with sourceNames and {title, source, link}. Uses the dashboard term-candidacy and spike-decision math. sourceNames are curated publisher names, or the original feed label when unmapped. sampleHeadlines are up to 3 newest recent-window stories; sourceNames is the complete publisher set. Baseline derives from the 48-hour story accumulator (per-window story rate), not the dashboard\'s incremental 7-day client history. Results are cached for 10 minutes. Deterministic — no LLM.',
     inputSchema: {

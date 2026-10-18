@@ -4,15 +4,17 @@ import { SITE_VARIANT } from '@/config/variant';
 import { installLcpAttributionDebug } from '@/bootstrap/lcp-attribution';
 import { markLcpDebug } from '@/utils/lcp-debug';
 import { registerWebMcpTools, type WebMcpAppBindings } from '@/services/webmcp';
-import { safeStorageGet, safeStorageRemove, safeStorageSet } from '@/utils/safe-storage';
+import { safeStorageRemove } from '@/utils/safe-storage';
 import { enqueueSentryCall, installPreInitErrorQueue, scheduleSentryInit } from '@/bootstrap/sentry-defer';
 import { registerClsReporting } from '@/bootstrap/cls-report';
 import { registerInpReporting } from '@/bootstrap/inp-report';
 import { registerLcpReporting } from '@/bootstrap/lcp-report';
-import { initVercelAnalytics } from '@/bootstrap/secondary-startup';
+import { initVercelAnalytics, stripSensitiveParamsFromUrl } from '@/bootstrap/secondary-startup';
 import { loadVariantThemeStylesheet } from '@/bootstrap/variant-theme';
 import { installUtmInterceptor } from './utils/utm';
 import { captureContentAttributionFromUrl } from '../shared/content-attribution';
+import { captureAgentRefFromSearch } from '../shared/agent-client-source';
+import { agentRefStorage } from '@/services/agent-ref';
 
 if (SITE_VARIANT === 'happy') {
   // Keeps happy-theme.css off other variants' eager CSS graph. On happy, the
@@ -283,8 +285,8 @@ function shouldSuppressCspViolation(
       // `div.show` — an origin-only frame (no path) that appears nowhere in our
       // source, repeated across many users over months. The injector is not
       // identified, but it does not need to be: frame-src is a BOUNDED
-      // allowlist — named hosts plus five vendor wildcard subdomains
-      // (*.clerk.accounts.dev, *.vercel.app, *.dodopayments.com and two more) —
+      // allowlist — named hosts plus four vendor wildcard subdomains
+      // (*.clerk.accounts.dev, *.dodopayments.com and two more) —
       // and div.show falls under none of them, so it can only have been framed
       // into the page from outside. That safety argument depends on frame-src
       // staying bounded — pinned by "CSP frame-src stays a bounded host
@@ -319,6 +321,18 @@ function shouldSuppressCspViolation(
   if (/manifest\.webmanifest$/.test(blockedURI)) return true;
   // Third-party injectors: Google Translate, Facebook Pixel.
   if (/gstatic\.com\/_\/translate/.test(blockedURI) || /facebook\.net/.test(blockedURI)) return true;
+  // Meta Pixel's form-post beacon. An injected server-side GTM tag (stape.io
+  // collect breadcrumbs) submitted a form to https://www.facebook.com/tr/
+  // (WORLDMONITOR-12G: 23 events from one user). The app ships no Meta Pixel,
+  // and the dashboard's form-action admits only 'self' and api.worldmonitor.app,
+  // so the post is never ours. Exact host, /tr path and form-action only: other
+  // facebook.com form targets and /tr under other directives still report.
+  if (directive === 'form-action') {
+    try {
+      const url = new URL(blockedURI);
+      if (url.protocol === 'https:' && url.host === 'www.facebook.com' && /^\/tr\/?$/.test(url.pathname)) return true;
+    } catch { /* scheme-only values fall through */ }
+  }
   // ---- font-src: one invariant, not a host list.
   //
   // The app ships `font-src 'self' data:` (vercel.json, the catch-all route that
@@ -538,11 +552,18 @@ import { initAnalytics, trackContentHandoff } from '@/services/analytics';
 import { clearChunkReloadGuard, installChunkReloadGuard } from '@/bootstrap/chunk-reload';
 import { initDebugBearRum } from '@/bootstrap/debugbear-rum';
 import { installStaleBundleCheck } from '@/bootstrap/stale-bundle-check';
+import { installBetaConsoleToggle } from '@/bootstrap/beta-console-toggle';
 import { installSwUpdateHandler, readServiceWorkerContainer } from '@/bootstrap/sw-update';
 import { scheduleAfterFirstPaint } from '@/utils/after-paint';
 
 // Auto-reload on stale chunk 404s after deployment (Vite fires this for modulepreload failures).
 const chunkReloadStorageKey = installChunkReloadGuard(__BUILD_HASH__);
+
+// First-touch agent link (`?ref=agent-claude`). Read before App.ts referral
+// capture strips `ref` from the URL; recorded as the sign-up source on the
+// Convex user row (users.ensureRecord), which new API keys inherit.
+// Best-effort: blocked cookies mean "no attribution".
+captureAgentRefFromSearch(window.location.search, agentRefStorage());
 
 // Product analytics are secondary startup work; RUM starts once the trusted
 // dashboard entry executes so it can observe page-load vitals.
@@ -553,6 +574,9 @@ if (capturedContentAttribution) {
   // reload does not duplicate the landing handoff.
   trackContentHandoff();
 }
+// Drop unread secrets (email, license_key) from the live URL before any
+// telemetry vendor initializes.
+stripSensitiveParamsFromUrl();
 void initAnalytics();
 initVercelAnalytics();
 initDebugBearRum();
@@ -668,19 +692,7 @@ if (urlParams.get('settings') === '1') {
   count: getCellCount,
 };
 
-// Beta mode toggle: type `beta=true` / `beta=false` in console
-Object.defineProperty(window, 'beta', {
-  get() {
-    const on = safeStorageGet('worldmonitor-beta-mode') === 'true';
-    console.log(`[Beta] ${on ? 'ON' : 'OFF'}`);
-    return on;
-  },
-  set(v: boolean) {
-    if (v) safeStorageSet('worldmonitor-beta-mode', 'true');
-    else safeStorageRemove('worldmonitor-beta-mode');
-    location.reload();
-  },
-});
+installBetaConsoleToggle(window);
 
 // Suppress native WKWebView context menu in Tauri — allows custom JS context menus
 if ('__TAURI_INTERNALS__' in window || '__TAURI__' in window) {
