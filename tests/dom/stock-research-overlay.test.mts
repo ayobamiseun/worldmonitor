@@ -41,6 +41,10 @@ const {
 
 function analysis(headlines: Array<Record<string, unknown>> = []) {
   return {
+    available: true,
+    fallback: false,
+    provider: 'openrouter',
+    model: '',
     ratingSummary: 'Rating summary',
     summary: 'Summary',
     newsSentiment: 0.25,
@@ -220,7 +224,7 @@ describe('stock research overlay discloses AI-vs-template provenance (#5498)', (
   });
 
   it('treats provider "rules" as a fallback even if the flag is missing', async () => {
-    analyzeStock.mockResolvedValue({ ...analysis(), provider: 'rules' });
+    analyzeStock.mockResolvedValue({ ...analysis(), provider: 'rules', fallback: undefined });
     await openStockResearchOverlay('AAPL');
     expect(analyzeSection()?.dataset.analysisProvenance).toBe('rules-fallback');
   });
@@ -242,6 +246,29 @@ describe('stock research overlay discloses AI-vs-template provenance (#5498)', (
 
     expect(analyzeSection()?.querySelector('img, script')).toBeNull();
     expect(provenance()?.textContent).toContain('<img src=x onerror=alert(1)>');
+  });
+
+  it('renders an unavailable state, not a template label, when the server computed nothing', async () => {
+    // buildEmptyAnalysisResponse: Yahoo history timeout, a no-history symbol,
+    // or an empty symbol. It carries fallback: true, but no indicators were
+    // computed, so "assembled from the indicators" would be false.
+    analyzeStock.mockResolvedValue({
+      available: false,
+      fallback: true,
+      provider: '',
+      model: '',
+      summary: '',
+      ratingSummary: '',
+      headlines: [],
+    });
+    await openStockResearchOverlay('AAPL');
+
+    expect(analyzeSection()?.dataset.analyzeState).toBe('unavailable');
+    expect(analyzeSection()?.dataset.analysisProvenance).toBeUndefined();
+    expect(document.querySelector('[data-analysis-provenance]')).toBeNull();
+    expect(analyzeSection()?.textContent).not.toContain('Rules-based template');
+    expect(analyzeSection()?.textContent).not.toContain('No analysis summary.');
+    expect(analyzeSection()?.textContent).toContain('No analysis is available for AAPL right now.');
   });
 
   it('renders no provenance line in the locked or error states', async () => {

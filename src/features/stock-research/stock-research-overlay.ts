@@ -203,7 +203,18 @@ export async function openStockResearchOverlay(rawSymbol: string, stock?: Market
     );
     // A superseded open (or a close) must not paint over the live overlay.
     if (generation !== openGeneration || !analyzeHost.isConnected) return;
-    const headlines = (analysis.headlines ?? []).slice(0, 3).map((headline) => {
+    // available: false is the server's empty response (history timeout, a
+    // symbol with no history, an empty symbol). It also carries fallback: true,
+    // but no indicators were computed, so it must not be labelled a template.
+    if (analysis.available === false) {
+      analyzeHost.dataset.analyzeState = 'unavailable';
+      analyzeHost.replaceChildren();
+      analyzeHost.append(Object.assign(document.createElement('p'), {
+        textContent: `No analysis is available for ${symbol} right now.`,
+      }));
+      return;
+    }
+    const headlines =(analysis.headlines ?? []).slice(0, 3).map((headline) => {
       const aligned = headline.alignedTradingDate
         ? ` aligned ${escapeHtml(headline.alignedTradingDate)}`
         : '';
@@ -227,7 +238,7 @@ export async function openStockResearchOverlay(rawSymbol: string, stock?: Market
     // genuine either way; only the narrative framing changes.
     const isRulesFallback = analysis.fallback === true || analysis.provider === 'rules';
     const provenance = isRulesFallback
-      ? '<p class="stock-research-provenance" data-analysis-provenance="rules-fallback">Rules-based template: the AI commentary was unavailable for this run, so the summary below is assembled from the indicators alone.</p>'
+      ? '<p class="stock-research-provenance" data-analysis-provenance="rules-fallback">Rules-based template: AI commentary was unavailable when this analysis was generated, so the summary below is assembled from the indicators alone.</p>'
       : `<p class="stock-research-provenance" data-analysis-provenance="model">AI commentary${analysis.provider ? ` · ${escapeHtml(analysis.provider)}` : ''}${analysis.model ? ` (${escapeHtml(analysis.model)})` : ''}</p>`;
     analyzeHost.dataset.analyzeState = 'ready';
     analyzeHost.dataset.analysisProvenance = isRulesFallback ? 'rules-fallback' : 'model';
