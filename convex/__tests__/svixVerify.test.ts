@@ -48,14 +48,13 @@ describe("decodeSvixSecret", () => {
     expect(decodeSvixSecret(SECRET_BODY)).toEqual(SECRET_BYTES);
   });
 
-  test("does not strip the prefix from inside the body (the unanchored replace bug)", () => {
-    // `"whsec_"` sits after a real prefix; an unanchored replace would remove
-    // the leading one and leave a body that is not base64, while the anchored
-    // strip removes exactly one leading prefix. Both then hand the remaining
-    // string to atob, so the observable difference is which string it sees.
-    const doubled = `whsec_${SECRET_BODY}`;
-    expect(decodeSvixSecret(doubled)).toEqual(SECRET_BYTES);
-    expect(() => decodeSvixSecret("whsec_whsec_AAAA")).toThrow();
+  test("strips exactly one leading prefix and never one from inside the string", () => {
+    // A valid base64 body cannot contain "_", so the unanchored-replace bug
+    // cannot corrupt a real secret; what anchoring guarantees is that only a
+    // leading prefix is removed. A prefix anywhere else stays in the string
+    // and fails decoding instead of being silently cut out.
+    expect(() => decodeSvixSecret(`${SECRET_BODY}whsec_`)).toThrow();
+    expect(() => decodeSvixSecret(`whsec_whsec_${SECRET_BODY}`)).toThrow();
   });
 });
 
