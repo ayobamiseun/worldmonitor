@@ -1383,7 +1383,7 @@ export class PanelLayoutManager implements AppModule {
       const initial: PanelTab = {
         id: generateTabId(),
         name: t('dashboardTabs.defaultName'),
-        ...this.captureCurrentTabState(),
+        ...this.captureCurrentTabState().snapshot,
       };
       state = { activeTabId: initial.id, tabs: [initial] };
       saveTabsState(state);
@@ -1395,9 +1395,15 @@ export class PanelLayoutManager implements AppModule {
     this.unregisterExportFlush?.();
     this.unregisterExportFlush = registerSettingsExportFlush(() => {
       if (!this.tabsState) return;
-      this.snapshotActiveTab();
-      saveTabsState(this.tabsState);
-    });
+      if (!this.snapshotActiveTab().persisted || !saveTabsState(this.tabsState).persisted) {
+        throw new Error('Settings export could not save the current dashboard layout');
+      }
+    }, [
+      `worldmonitor-tabs-v1:${SITE_VARIANT}`,
+      STORAGE_KEYS.panels,
+      this.ctx.PANEL_ORDER_KEY,
+      this.ctx.PANEL_ORDER_KEY + '-bottom-set',
+    ]);
     // Clamp stored snapshots to the current free-tier cap so a workspace saved
     // while Pro (or persisted before the cap existed) can't re-enable an
     // over-cap layout when the user later switches to it. Skips itself while
@@ -1950,22 +1956,30 @@ export class PanelLayoutManager implements AppModule {
   }
 
   /** Capture the live panel state (settings + order) for a tab snapshot. */
-  private captureCurrentTabState(): Pick<PanelTab, 'panelSettings' | 'panelOrder' | 'bottomSet'> {
+  private captureCurrentTabState(): {
+    snapshot: Pick<PanelTab, 'panelSettings' | 'panelOrder' | 'bottomSet'>;
+    persisted: boolean;
+  } {
     // Persist the live DOM order first so the snapshot reflects any drags.
-    this.savePanelOrder();
+    const { persisted } = this.savePanelOrder();
     return {
-      panelSettings: JSON.parse(JSON.stringify(this.ctx.panelSettings)) as Record<string, PanelConfig>,
-      panelOrder: [...this.resolvedPanelOrder],
-      bottomSet: Array.from(this.bottomSetMemory),
+      snapshot: {
+        panelSettings: JSON.parse(JSON.stringify(this.ctx.panelSettings)) as Record<string, PanelConfig>,
+        panelOrder: [...this.resolvedPanelOrder],
+        bottomSet: Array.from(this.bottomSetMemory),
+      },
+      persisted,
     };
   }
 
   /** Refresh the active tab's snapshot from live state (called on switch-away). */
-  private snapshotActiveTab(): void {
-    if (!this.tabsState) return;
+  private snapshotActiveTab(): TabsPersistReceipt {
+    if (!this.tabsState) return { persisted: false };
     const active = this.tabsState.tabs.find((t) => t.id === this.tabsState!.activeTabId);
-    if (!active) return;
-    Object.assign(active, this.captureCurrentTabState());
+    if (!active) return { persisted: false };
+    const { snapshot, persisted } = this.captureCurrentTabState();
+    Object.assign(active, snapshot);
+    return { persisted };
   }
 
   private switchToTab(tabId: string): TabsPersistReceipt {

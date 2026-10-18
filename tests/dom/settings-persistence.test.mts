@@ -151,7 +151,7 @@ describe('dashboard tabs in the settings backup (#9372)', () => {
   it('runs registered flush hooks before reading storage, until they unregister', async () => {
     localStorage.setItem('worldmonitor-tabs-v1:full', JSON.stringify({ ...tabsState, activeTabId: 'tab-a-1' }));
     const flush = vi.fn(() => localStorage.setItem('worldmonitor-tabs-v1:full', JSON.stringify(tabsState)));
-    const unregister = registerSettingsExportFlush(flush);
+    const unregister = registerSettingsExportFlush(flush, ['worldmonitor-tabs-v1:full']);
     expect((await exportToObject()).data['worldmonitor-tabs-v1:full']).toBe(JSON.stringify(tabsState));
     expect(flush).toHaveBeenCalledTimes(1);
     unregister();

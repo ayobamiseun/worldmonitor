@@ -60,11 +60,11 @@ function isSettingsKey(key: string): boolean {
 // while on a tab captured the layout as it was at the last switch, not as it
 // is now. Owners register here; the standalone settings window has no owner
 // and exports whatever storage holds.
-const exportFlushHooks = new Set<() => void>();
+const exportFlushHooks = new Map<() => void, ReadonlySet<string>>();
 
-/** Register a hook that writes live state to storage before an export reads it. */
-export function registerSettingsExportFlush(flush: () => void): () => void {
-  exportFlushHooks.add(flush);
+/** Flush live state before export, until an import replaces one of its stored keys. */
+export function registerSettingsExportFlush(flush: () => void, persistedKeys: readonly string[]): () => void {
+  exportFlushHooks.set(flush, new Set(persistedKeys));
   return () => { exportFlushHooks.delete(flush); };
 }
 
@@ -194,7 +194,7 @@ export const __testing__ = { isSettingsKey };
 export function exportSettings(): void {
   const data: Record<string, string> = {};
 
-  for (const flush of exportFlushHooks) flush();
+  for (const flush of exportFlushHooks.keys()) flush();
 
   // Storage that cannot be read has no settings to export, and handing the
   // user a downloadable file anyway is worse than failing: the caller in
@@ -256,6 +256,11 @@ export function importSettings(file: File): Promise<ImportResult> {
 
         applyLocalPreferenceImport(entries);
         const importedKeys = entries.map(([key]) => key);
+        // Imported layouts take effect on reload. Their previous live owners
+        // must not replace them if the user exports before reloading.
+        for (const [flush, persistedKeys] of exportFlushHooks) {
+          if (importedKeys.some(key => persistedKeys.has(key))) exportFlushHooks.delete(flush);
+        }
         invalidatePanelStorageCacheForKeys(importedKeys);
         invalidateFrameworkCache();
         const keysImported = entries.length;
