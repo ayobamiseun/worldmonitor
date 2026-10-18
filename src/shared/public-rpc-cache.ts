@@ -88,6 +88,12 @@ function isNewsDigestShape(params: URLSearchParams): boolean {
     && NEWS_LANGUAGES.has(params.get('lang') ?? '');
 }
 
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 1 && value.charCodeAt(end - 1) === 47) end -= 1;
+  return end === value.length ? value : value.slice(0, end);
+}
+
 export function isPublicSharedRpcRequest(urlLike: string | URL, method = 'GET'): boolean {
   const normalizedMethod = method.toUpperCase();
   if (normalizedMethod !== 'GET' && normalizedMethod !== 'HEAD') return false;
@@ -101,7 +107,7 @@ export function isPublicSharedRpcRequest(urlLike: string | URL, method = 'GET'):
     return false;
   }
 
-  const pathname = url.pathname.length > 1 ? url.pathname.replace(/\/+$/, '') : url.pathname;
+  const pathname = stripTrailingSlashes(url.pathname);
   if (!PUBLIC_SHARED_RPC_PATHS.has(pathname)) return false;
 
   // Shape-check the caller's query, not the router's echo of the path segment.

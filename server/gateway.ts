@@ -997,6 +997,12 @@ export function hasCredentialBearingHeader(request: Request): boolean {
   return CREDENTIAL_BEARING_HEADERS.some((header) => Boolean(request.headers.get(header)));
 }
 
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 1 && value.charCodeAt(end - 1) === 47) end -= 1;
+  return end === value.length ? value : value.slice(0, end);
+}
+
 async function isResilienceRankingSeedRefreshRequest(request: Request, pathname: string): Promise<boolean> {
   if (pathname !== '/api/resilience/v1/get-resilience-ranking') return false;
   const expected = process.env.WORLDMONITOR_SEED_REFRESH_KEY?.trim() ?? '';
@@ -1057,7 +1063,7 @@ export function createDomainGateway(
 
     let request = stripClientTrustedHeaders(originalRequest);
     const rawPathname = new URL(request.url).pathname;
-    const pathname = rawPathname.length > 1 ? rawPathname.replace(/\/+$/, '') : rawPathname;
+    const pathname = stripTrailingSlashes(rawPathname);
     const t0 = Date.now();
 
     // Usage-telemetry identity inputs — accumulated as gateway auth resolution progresses.
