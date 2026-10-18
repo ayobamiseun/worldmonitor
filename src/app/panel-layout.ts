@@ -127,6 +127,7 @@ import type { Panel } from '@/components/Panel';
 import type { SupplyChainPanel } from '@/components/SupplyChainPanel';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
 import { loadPanelCollapsed, loadPanelColSpans, loadPanelSpans } from '@/utils/panel-storage';
+import { registerSettingsExportFlush } from '@/utils/settings-persistence';
 import { measure, mutate } from '@/utils/layout-batch';
 import { applyPanelFontScale } from '@/services/font-scale-settings';
 import {
@@ -466,6 +467,7 @@ export class PanelLayoutManager implements AppModule {
   private mobileMapCollapseBtn: HTMLButtonElement | null = null;
   private panelTabBar: PanelTabBar | null = null;
   private tabsState: TabsState | null = null;
+  private unregisterExportFlush: (() => void) | null = null;
   private aviationCommandBar: AviationCommandBar | null = null;
   private readonly applyTimeRangeFilterDebounced: (() => void) & { cancel(): void };
   private unsubscribeRuntimeConfig: (() => void) | null = null;
@@ -867,6 +869,8 @@ export class PanelLayoutManager implements AppModule {
     this.mobileMapCollapseBtn = null;
     this.panelTabBar?.destroy();
     this.panelTabBar = null;
+    this.unregisterExportFlush?.();
+    this.unregisterExportFlush = null;
     // Clean up happy variant panels
     destroyOnce(this.ctx.tvMode);
     this.ctx.tvMode = null;
@@ -1385,6 +1389,15 @@ export class PanelLayoutManager implements AppModule {
       saveTabsState(state);
     }
     this.tabsState = state;
+    // A settings export reads storage, where the active tab's snapshot is only
+    // refreshed on switch-away. Write the live layout into it first so the
+    // backup carries the tab as it is now, not as it was at the last switch.
+    this.unregisterExportFlush?.();
+    this.unregisterExportFlush = registerSettingsExportFlush(() => {
+      if (!this.tabsState) return;
+      this.snapshotActiveTab();
+      saveTabsState(this.tabsState);
+    });
     // Clamp stored snapshots to the current free-tier cap so a workspace saved
     // while Pro (or persisted before the cap existed) can't re-enable an
     // over-cap layout when the user later switches to it. Skips itself while
