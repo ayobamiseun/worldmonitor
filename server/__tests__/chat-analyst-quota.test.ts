@@ -145,6 +145,26 @@ describe("api/chat-analyst direct LLM quota lifecycle", () => {
     expect(quotaCounter).toBe(1);
   });
 
+  test("an operator key reserves on its per-key bucket, never under a null userId", async () => {
+    resolvePremiumCallerIdentity.mockResolvedValue({
+      isPremium: true,
+      userId: null,
+      kind: "enterprise",
+      quotaExempt: false,
+      quotaUserId: "wm:0123456789abcdef0123456789abcdef",
+      alarmPrincipal: "hashed-operator",
+      directLlmDailyLimit: 5_000,
+    });
+
+    const response = await handler(analystRequest(JSON.stringify({ query: "What changed?" })));
+
+    expect(response.status).toBe(200);
+    expect(reserveDirectLlmQuota).toHaveBeenCalledWith(expect.objectContaining({
+      userId: "wm:0123456789abcdef0123456789abcdef",
+      limit: 5_000,
+    }));
+  });
+
   test("an upstream failure after reservation rolls quota back", async () => {
     callLlmReasoningStream.mockReturnValue(llmEvents([{ error: "llm_unavailable" }]));
 
@@ -195,6 +215,39 @@ describe("api/chat-analyst direct LLM quota lifecycle", () => {
 
     expect(cancelCalled).toBe(true);
     expect(quotaCounter).toBe(0);
+  });
+
+  // GHSA-cgm2-fpj5-427h: cancelling after a provider accepted the request but
+  // before answer content refunded work the provider had already taken on.
+  test("a client abort after a provider accepted the request keeps the quota charge", async () => {
+    let cancelCalled = false;
+    callLlmReasoningStream.mockImplementation((opts: { onProviderAccepted?: () => void }) =>
+      new ReadableStream<Uint8Array>({
+        start() {
+          opts.onProviderAccepted?.();
+        },
+        cancel() {
+          cancelCalled = true;
+        },
+      }));
+
+    const response = await handler(analystRequest(JSON.stringify({ query: "What changed?" })));
+    await response.body?.cancel("client disconnected");
+
+    expect(cancelCalled).toBe(true);
+    expect(quotaCounter).toBe(1);
+  });
+
+  test("an accepted request that ends without an answer keeps the quota charge", async () => {
+    callLlmReasoningStream.mockImplementation((opts: { onProviderAccepted?: () => void }) => {
+      opts.onProviderAccepted?.();
+      return llmEvents([{ error: "llm_unavailable" }]);
+    });
+
+    const response = await handler(analystRequest(JSON.stringify({ query: "What changed?" })));
+    await response.text();
+
+    expect(quotaCounter).toBe(1);
   });
 
   test("a client abort after answer content keeps the quota charge", async () => {

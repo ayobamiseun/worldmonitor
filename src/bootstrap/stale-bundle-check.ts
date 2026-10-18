@@ -20,13 +20,15 @@
 // remembered in `pendingReload` and the module stops fetching; every later
 // trigger retries the reload against the live DOM until one lands. What counts
 // as blocking is `findReloadBlockingModal`, shared with the service-worker
-// updater — an overlay may opt out via `RELOAD_SAFE_ATTR` when it holds no
-// state a reload would destroy (WORLDMONITOR-15X: the onboarding popover
-// auto-opens for every preset-less user and was deferring reloads for a broad
-// population, not the sign-up case this guard is for).
+// updater — every first-party overlay declares its reload contract with
+// `declareOverlay`, and 'safe' surfaces (a read-only display, a prompt that
+// re-appears on the next load) do not hold the reload off. Silence blocks, and
+// a silent surface that auto-opens with no auto-dismiss wedges the tab for the
+// session (WORLDMONITOR-15X/15Z: first the onboarding popover, then the
+// SignalModal, neither of which is the sign-up case this guard is for).
 
 import { enqueueSentryCall } from '@/bootstrap/sentry-defer';
-import { findReloadBlockingModal, type ModalDocumentLike } from '@/utils/open-modal';
+import { findReloadBlockingModal, type ModalDocumentLike, type ReloadBlocker } from '@/utils/open-modal';
 
 interface EventTargetLike {
   addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
@@ -68,7 +70,7 @@ interface StaleBundleCheckOptions {
   /**
    * Called when an open modal holds off a reload: once when an episode
    * starts, and once more if it survives `wedgeAfterDeferrals` triggers.
-   * Default reports to Sentry. A wedged tab (an overlay that never closes)
+   * The default reports only the suspected wedge to Sentry. A wedged tab (an overlay that never closes)
    * would otherwise keep a stale bundle with no signal anywhere but the
    * user's own console, which is the failure mode this suppression risks.
    */
@@ -102,6 +104,13 @@ export interface DeferralReport {
   readonly deployedHash: string;
   /** Which overlay held the reload off, for telemetry. */
   readonly blockedBy: string;
+  /**
+   * Whether that overlay declared itself blocking or was silent. Every
+   * first-party overlay is declared, so 'undeclared' with a non-`cl-` label is
+   * a lint-gate escape, and 'blocking' with a wedge is a declared judgment to
+   * revisit. The two need different fixes, which is why both ride into Sentry.
+   */
+  readonly reloadPolicy: ReloadBlocker['policy'];
   /** Triggers deferred so far in this episode, starting at 1. */
   readonly deferrals: number;
   readonly phase: 'started' | 'suspected-wedge';
@@ -152,12 +161,14 @@ export function installStaleBundleCheck(options: StaleBundleCheckOptions = {}): 
   const setIntervalImpl = options.setInterval ?? ((cb: () => void, ms: number) => globalThis.setInterval(cb, ms));
   const reload = options.reload ?? (() => window.location.reload());
   const now = options.now ?? Date.now;
+  // Only a suspected wedge reaches Sentry. A modal open when a deploy lands is
+  // the state this guard exists for, so reporting every episode start kept
+  // WORLDMONITOR-15X open with no failure behind it; the console line remains.
   const reportDeferral = options.reportDeferral ?? ((report: DeferralReport) => {
+    if (report.phase !== 'suspected-wedge') return;
     enqueueSentryCall((Sentry) => {
       Sentry.captureMessage(
-        report.phase === 'suspected-wedge'
-          ? '[stale-bundle] reload still deferred, modal never closed'
-          : '[stale-bundle] reload deferred, modal open',
+        '[stale-bundle] reload still deferred, modal never closed',
         {
           level: 'warning',
           tags: {
@@ -165,6 +176,7 @@ export function installStaleBundleCheck(options: StaleBundleCheckOptions = {}): 
             current_hash: report.currentHash,
             deployed_hash: report.deployedHash,
             blocked_by: report.blockedBy,
+            reload_policy: report.reloadPolicy,
             deferrals: String(report.deferrals),
           },
         },
@@ -205,8 +217,8 @@ export function installStaleBundleCheck(options: StaleBundleCheckOptions = {}): 
    * #3466's safety property wins that tie.
    */
   const reloadOrDefer = (deployedHash: string): void => {
-    const blockedBy = documentTarget ? findReloadBlockingModal(documentTarget) : null;
-    if (blockedBy !== null) {
+    const blocker = documentTarget ? findReloadBlockingModal(documentTarget) : null;
+    if (blocker !== null) {
       deferrals += 1;
       // Two reports per episode at most: one naming the overlay, and one if
       // the overlay outlasts any plausible email-code wait.
@@ -217,8 +229,15 @@ export function installStaleBundleCheck(options: StaleBundleCheckOptions = {}): 
           : null;
       if (phase !== null) {
         // eslint-disable-next-line no-console
-        console.warn('[stale-bundle] reload deferred, modal open:', blockedBy, currentHash, '→', deployedHash);
-        reportDeferral({ currentHash, deployedHash, blockedBy, deferrals, phase });
+        console.warn('[stale-bundle] reload deferred, modal open:', blocker.label, currentHash, '→', deployedHash);
+        reportDeferral({
+          currentHash,
+          deployedHash,
+          blockedBy: blocker.label,
+          reloadPolicy: blocker.policy,
+          deferrals,
+          phase,
+        });
       }
       pendingReload = deployedHash;
       return;

@@ -49,6 +49,7 @@
  * A literal is the one form that works everywhere.
  */
 const PUBLISHER_FAMILY_DATA = {
+  'miit': { publisher: "MIIT (China)", labels: [] },
   'a16z': { publisher: "Andreessen Horowitz", labels: ["a16z Blog", "a16z Insights", "a16z Podcast"] },
   'acquired': { publisher: "Acquired", labels: ["Acquired Episodes", "Acquired Podcast"] },
   'ap-news': { publisher: "Associated Press", labels: ["AP Mexico", "AP News"] },
@@ -66,7 +67,10 @@ const PUBLISHER_FAMILY_DATA = {
       "BBC Mundo",
       "BBC Persian",
       "BBC Russian",
+      "BBC Northern Ireland",
+      "BBC Science",
       "BBC Turkce",
+      "BBC UK",
       "BBC World",
     ],
   },
@@ -111,6 +115,7 @@ const PUBLISHER_FAMILY_DATA = {
       "Guardian Caribbean",
       "Guardian ME",
       "Guardian Pacific",
+      "Guardian Science",
       "Guardian World",
     ],
   },
@@ -128,6 +133,7 @@ const PUBLISHER_FAMILY_DATA = {
     ],
   },
   'ndtv': { publisher: "NDTV", labels: ["NDTV", "NDTV India"] },
+  'new-york-times': { publisher: "The New York Times", labels: ["Hard Fork (NYT)", "New York Times World"] },
   'nikkei': { publisher: "Nikkei", labels: ["Nikkei Asia", "Nikkei Tech"] },
   'pivot': { publisher: "Pivot (Vox Media)", labels: ["Pivot (Vox)", "Pivot Podcast"] },
   'politico': { publisher: "Politico", labels: ["Politico", "Politico Tech"] },
@@ -144,6 +150,7 @@ const PUBLISHER_FAMILY_DATA = {
       "Reuters LatAm",
       "Reuters Markets",
       "Reuters Nasdaq Futures",
+      "Reuters Science",
       "Reuters US",
       "Reuters World",
     ],
@@ -157,6 +164,9 @@ const PUBLISHER_FAMILY_DATA = {
       "Seeking Alpha Tech",
     ],
   },
+  // Two titles, one owner: Sightline Media Group (owned by Regent) publishes
+  // both Defense News and Military Times, per each site's About page.
+  'sightline-media': { publisher: "Sightline Media", labels: ["Defense News", "Military Times"] },
   'sp-global': { publisher: "S&P Global", labels: ["S&P Global Commodity", "S&P Global Platts"] },
   'techcrunch': {
     publisher: "TechCrunch",
@@ -210,6 +220,7 @@ export const PUBLISHER_FAMILIES = Object.freeze(PUBLISHER_FAMILY_DATA);
  * that several publishers share cannot name one.
  */
 const PUBLISHER_FAMILY_DOMAINS = Object.freeze({
+  'miit': ['miit.gov.cn'],
   'a16z': ['a16z.com'],
   'ap-news': ['apnews.com'],
   'arxiv': ['arxiv.org'],
@@ -234,11 +245,13 @@ const PUBLISHER_FAMILY_DOMAINS = Object.freeze({
   'marketwatch': ['marketwatch.com'],
   'mit-technology-review': ['technologyreview.com'],
   'ndtv': ['ndtv.com'],
+  'new-york-times': ['nytimes.com'],
   'nikkei': ['nikkei.com'],
   'politico': ['politico.com', 'politico.eu'],
   'reuters': ['reuters.com'],
-  'rt': ['rt.com'],
+  'rt': ['rt.com', 'rt-english.com'],
   'seeking-alpha': ['seekingalpha.com'],
+  'sightline-media': ['defensenews.com', 'militarytimes.com'],
   'sp-global': ['spglobal.com'],
   'techcrunch': ['techcrunch.com'],
   'the-verge': ['theverge.com'],

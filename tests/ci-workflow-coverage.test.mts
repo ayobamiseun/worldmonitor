@@ -27,6 +27,75 @@ const lintCodeWorkflow = read(resolve(workflowsDir, 'lint-code.yml'));
 const protoCheckWorkflow = read(resolve(workflowsDir, 'proto-check.yml'));
 const playwrightConfig = read(resolve(root, 'playwright.config.ts'));
 
+describe('root dependency cache (#8710)', () => {
+  const actionPath = resolve(root, '.github/actions/install-root-deps/action.yml');
+  const readAction = () => {
+    assert.ok(existsSync(actionPath), 'root installs must share the dependency cache action');
+    return YAML.parse(read(actionPath));
+  };
+
+  it('uses an exact install-input, platform and Node key without partial restores', () => {
+    const action = readAction();
+    assert.equal(action.runs.using, 'composite');
+    const cache = action.runs.steps.find((step) => step.id === 'node-modules');
+    assert.match(cache.uses, /^actions\/cache\/restore@[a-f0-9]{40}$/);
+    assert.equal(cache.with.path, 'node_modules');
+    assert.equal(cache.with.key, "node-modules-v2-${{ runner.os }}-${{ runner.arch }}-node24-${{ hashFiles('package-lock.json', 'package.json', '.npmrc', 'vendor/braces/**', 'vendor/stream-json/**') }}");
+    assert.equal(cache.with['restore-keys'], undefined);
+  });
+
+  it('saves the clean install immediately on a successful miss, before consumers run', () => {
+    const steps = readAction().runs.steps;
+    const restore = steps.find((step) => step.id === 'node-modules');
+    const installIndex = steps.findIndex((step) => step.run === 'npm ci');
+    const save = steps[installIndex + 1];
+    assert.equal(save?.uses, restore.uses.replace('/restore@', '/save@'));
+    assert.match(save.uses, /^actions\/cache\/save@[a-f0-9]{40}$/);
+    assert.equal(save.if, "steps.node-modules.outputs.cache-hit != 'true'");
+    assert.equal(save.with.path, restore.with.path);
+    assert.equal(save.with.key, '${{ steps.node-modules.outputs.cache-primary-key }}');
+    assert.equal(steps[installIndex]['continue-on-error'], undefined);
+    assert.equal(steps.some((step) => step.uses?.startsWith('actions/cache@')), false);
+  });
+
+  it('installs on a miss and regenerates repository inventory on an exact hit', () => {
+    const steps = readAction().runs.steps;
+    const cacheIndex = steps.findIndex((step) => step.id === 'node-modules');
+    const install = steps.find((step) => step.run === 'npm ci');
+    const inventory = steps.find((step) => step.run === 'npm run inventory:facts');
+    assert.equal(install?.if, "steps.node-modules.outputs.cache-hit != 'true'");
+    assert.equal(inventory?.if, "steps.node-modules.outputs.cache-hit == 'true'");
+    assert.equal(packageScripts.postinstall, inventory.run);
+    for (const step of [install, inventory]) {
+      assert.equal(step.shell, 'bash');
+      assert.ok(steps.indexOf(step) > cacheIndex);
+    }
+  });
+
+  for (const [workflowText, jobIds] of [
+    [testWorkflow, ['docs-stats', 'unit-shards', 'unit-built-output', 'sidecar', 'convex-tests', 'dom-tests', 'variant-smoke-shards', 'variant-smoke-pro-webmcp', 'resilience-validation-smoke']],
+    [read(resolve(workflowsDir, 'perf-style-layout-budget.yml')), ['measure']],
+    [lintCodeWorkflow, ['biome', 'markdown']],
+    [read(resolve(workflowsDir, 'typecheck.yml')), ['typecheck']],
+  ] as const) {
+    for (const jobId of jobIds) {
+      it(`${jobId} uses the shared action after Node 24 setup with npm fallback`, () => {
+        // A `parallel:` group holds its steps in a list; expand it in place so
+        // the action is still found, and the order check still holds.
+        const steps = YAML.parse(workflowText).jobs[jobId].steps
+          .flatMap((step: { parallel?: unknown[] }) => step.parallel ?? [step]);
+        const setup = steps.find((step) => step.uses?.startsWith('actions/setup-node@'));
+        const install = steps.find((step) => step.uses === './.github/actions/install-root-deps');
+        assert.ok(install, `${jobId} must use the shared root dependency action`);
+        assert.equal(setup.with['node-version'], '24');
+        assert.equal(setup.with.cache, 'npm');
+        assert.ok(steps.indexOf(setup) < steps.indexOf(install));
+        assert.equal(steps.some((step) => step.run === 'npm ci'), false);
+      });
+    }
+  }
+});
+
 describe('browser-loss artifact capture (#6501, #7880)', () => {
   for (const exitCode of [0, 17]) {
     it(`retains logs after output cleanup and preserves smoke exit ${exitCode}`, () => {
@@ -99,8 +168,10 @@ const REQUIRED_CI_SMOKE_SPECS = [
   'e2e/dashboard-lcp-attribution.spec.ts',
   'e2e/keyword-spike-flow.spec.ts',
   'e2e/breaking-news-banner-provenance.spec.ts',
+  'e2e/dompurify-regression.spec.ts',
   'e2e/a11y-axe-scan.spec.ts',
   'e2e/map-overlay-marker-budget.spec.ts',
+  'e2e/mcp-market-built.spec.ts',
 ] as const;
 
 const REQUIRED_TEST_JOBS = [
@@ -153,6 +224,7 @@ const GATE_CHECK_EXEMPTIONS: Record<string, { workflow: string; coveredBy: strin
   'audit-lockfile': { workflow: 'Security Audit', coveredBy: 'security-audit' },
   'audit-rust': { workflow: 'Security Audit', coveredBy: 'security-audit' },
   'unit-shards': { workflow: 'Test', coveredBy: 'unit' },
+  'unit-built-output': { workflow: 'Test', coveredBy: 'unit' },
   'variant-smoke-shards': { workflow: 'Test', coveredBy: 'variant-smoke-full' },
   'variant-smoke-pro-webmcp': { workflow: 'Test', coveredBy: 'variant-smoke-full' },
 };
@@ -441,10 +513,14 @@ function collectDockerfiles(): string[] {
     .sort();
 }
 
-function securityAuditMatrixLockfiles(): string[] {
-  return Array.from(securityAuditWorkflow.matchAll(/^\s+lockfile:\s+(.+)$/gm), ([, value]) =>
-    value.trim().replace(/^['"]|['"]$/g, ''),
-  ).sort();
+function securityAuditSteps() {
+  const job = YAML.parse(securityAuditWorkflow).jobs['audit-lockfile'];
+  assert.equal(job.strategy, undefined, 'lockfile audits must share one job without matrix fan-out');
+  return job.steps.filter((step: { run?: string }) => step.run?.includes('node .github/scripts/audit-production-dependencies.mjs'));
+}
+
+function securityAuditLockfiles(): string[] {
+  return securityAuditSteps().map((step: { run: string }) => step.run.match(/--lockfile "([^"]+)"/)?.[1]).sort();
 }
 
 describe('MCP live smoke — the production detection net', () => {
@@ -557,7 +633,7 @@ describe('live cache sweep deployment timing', () => {
       ['schedule', '', '', '', true],
       ['workflow_dispatch', '', '', '', true],
     ]) {
-      const github = { event_name: event, event: event === 'deployment_status' ? {
+      const github = { event_name: event, repository: 'koala73/worldmonitor', event: event === 'deployment_status' ? {
         deployment_status: { state },
         deployment: { environment, creator: { login: creator } },
       } : {} };
@@ -792,7 +868,7 @@ describe('CI workflow coverage', () => {
     );
     assert.match(
       openPrStep,
-      /git commit -m "chore\(corpus\): refresh[^\n]+\n[\s\S]*npm run build:sitemap\n\s+git add public\/sitemap\.xml public\/sitemap-main\.xml\n[\s\S]*git commit -m "chore\(corpus\): align[^\n]+\n[\s\S]*node scripts\/build-sitemap\.mjs --check\n\s+git push/,
+      /git commit -m "chore\(corpus\): refresh[^\n]+\n[\s\S]*npm run build:sitemap\n\s+git add public\/sitemap\.xml public\/sitemap-main\.xml\n[\s\S]*git commit -m "chore\(corpus\): align[^\n]+\n[\s\S]*node --import tsx scripts\/build-sitemap\.mjs --check\n\s+git push/,
       'publish the sitemap only after regenerating its dates from committed material sources',
     );
   });
@@ -814,10 +890,19 @@ describe('CI workflow coverage', () => {
       assert.match(
         workflowStepBlock(pulseWorkflow, stepName),
         /^\s+if: \$\{\{ !cancelled\(\) && steps\.build\.outcome == 'success' \}\}$/m,
-        `${stepName} must run after a failed verification but never after a rejected build`,
+        `${stepName} requires a successful build and must not run after cancellation`,
       );
     }
     const openPrStep = workflowStepBlock(pulseWorkflow, 'Open the weekly pulse PR');
+    const pruneStep = workflowStepBlock(pulseWorkflow, 'Prune superseded pulse snapshots');
+    assert.ok(pulseWorkflow.indexOf(pruneStep) > pulseWorkflow.indexOf(buildStep));
+    assert.ok(
+      pulseWorkflow.indexOf(verifyStep) > pulseWorkflow.indexOf(pruneStep),
+      'verify the pruned snapshot set that the PR will publish',
+    );
+    assert.ok(pulseWorkflow.indexOf(openPrStep) > pulseWorkflow.indexOf(verifyStep));
+    assert.match(verifyStep, /tests\/brief-relevance\.test\.mjs/);
+    assert.match(verifyStep, /tests\/ci-workflow-coverage\.test\.mts/);
     assert.match(openPrStep, /VERIFY_OUTCOME: \$\{\{ steps\.verify\.outcome \}\}/);
     assert.match(openPrStep, /if \[ "\$VERIFY_OUTCOME" != "success" \]; then\n\s+draft=\(--draft\)/);
     assert.match(openPrStep, /gh pr create[\s\S]*"\$\{draft\[@\]\}"/);
@@ -931,7 +1016,17 @@ describe('CI workflow coverage', () => {
       [...REQUIRED_CI_SMOKE_SPECS].sort(),
       'test:e2e:ci-smoke must contain exactly the pinned smoke-spec inventory',
     );
-    const shardSpecs = ['test:e2e:ci-smoke:1', 'test:e2e:ci-smoke:2'].map((script) => {
+    // One script per CI shard, read from the matrix so adding a shard without
+    // its spec list (or the reverse) fails here.
+    const smokeShards: number[] = YAML.parse(testWorkflow).jobs['variant-smoke-shards'].strategy.matrix.shard;
+    assert.deepEqual(smokeShards, smokeShards.map((_, i) => i + 1), 'smoke shard indices must be 1..N');
+    const shardScripts = Object.keys(packageScripts).filter((name) => /^test:e2e:ci-smoke:\d+$/.test(name));
+    assert.deepEqual(
+      shardScripts.sort(),
+      smokeShards.map((n) => `test:e2e:ci-smoke:${n}`).sort(),
+      'package.json must define exactly one test:e2e:ci-smoke:<n> script per CI smoke shard',
+    );
+    const shardSpecs = smokeShards.map((n) => `test:e2e:ci-smoke:${n}`).map((script) => {
       const command = packageScripts[script] ?? '';
       const tokens = shellArgvTokens(command);
       assert.deepEqual(
@@ -944,10 +1039,11 @@ describe('CI workflow coverage', () => {
       assert.equal(new Set(specs).size, specs.length, `${script} must not repeat a spec`);
       return specs;
     });
-    const intersection = shardSpecs[0].filter((spec) => shardSpecs[1].includes(spec));
-    assert.deepEqual(intersection, [], 'ci-smoke shards must be disjoint');
+    const allShardSpecs = shardSpecs.flat();
+    assert.equal(new Set(allShardSpecs).size, allShardSpecs.length, 'ci-smoke shards must be disjoint');
+    assert.ok(shardSpecs.every((specs) => specs.length > 0), 'no ci-smoke shard may be empty');
     assert.deepEqual(
-      [...shardSpecs[0], ...shardSpecs[1]].sort(),
+      [...allShardSpecs].sort(),
       [...REQUIRED_CI_SMOKE_SPECS].sort(),
       'the ci-smoke shard union must equal the pinned smoke-spec inventory',
     );
@@ -976,10 +1072,39 @@ describe('CI workflow coverage', () => {
         job,
         /id: playwright-install-deps[\s\S]*timeout-minutes: 8[\s\S]*continue-on-error: true[\s\S]*npx playwright install-deps chromium/,
       );
+      // install-deps runs only when ldd finds a library a Playwright browser
+      // cannot resolve. An unconditional install would download ~32 MB of
+      // fonts and Mesa upgrades on every run.
+      const installDeps = YAML.parse(testWorkflow).jobs[jobName].steps
+        .flatMap((step: { parallel?: unknown[] }) => step.parallel ?? [step])
+        .find((step: { id?: string }) => step.id === 'playwright-install-deps');
+      assert.match(installDeps.run, /ldd "\$browser" \| grep 'not found'[\s\S]*exit 0[\s\S]*npx playwright install-deps chromium/);
+      assert.match(installDeps.run, /missing="no Playwright browser binary found"/, 'a missing browser binary must fall through to install-deps');
       assert.match(
         job,
         /steps\.playwright-install-deps\.outcome == 'failure'[\s\S]*pkill -9 apt-get[\s\S]*npx playwright install --with-deps chromium/,
       );
+    }
+  });
+
+  it('installs the locale font subset from a package cache in every browser job', () => {
+    const action = YAML.parse(read(resolve(root, '.github/actions/install-browser-fonts/action.yml')));
+    const steps = action.runs.steps;
+    const download = steps.find((step: { name?: string }) => step.name === 'Download browser font packages on cache miss');
+    const packages = download.run.match(/packages=\(([^)]+)\)/)[1].trim().split(/\s+/);
+    assert.deepEqual(packages, ['fonts-wqy-zenhei', 'fonts-tlwg-loma-otf', 'fonts-lohit-deva']);
+    const keyStep = steps.find((step: { id?: string }) => step.id === 'font-key');
+    for (const pkg of packages) {
+      assert.ok(keyStep.run.includes(pkg), `the font cache key must change when ${pkg} leaves the list`);
+    }
+    assert.equal(download.if, "steps.font-debs.outputs.cache-hit != 'true'");
+    assert.equal(steps.find((step: { uses?: string }) => step.uses?.startsWith('actions/cache/save@')).if, download.if);
+    for (const jobName of ['variant-smoke-shards', 'variant-smoke-pro-webmcp']) {
+      const fonts = YAML.parse(testWorkflow).jobs[jobName].steps
+        .flatMap((step: { parallel?: unknown[] }) => step.parallel ?? [step])
+        .find((step: { uses?: string }) => step.uses === './.github/actions/install-browser-fonts');
+      assert.ok(fonts, `${jobName} must install the browser fonts`);
+      assert.equal(fonts['continue-on-error'], true, `${jobName}: a font install failure must not fail the job`);
     }
   });
 
@@ -1280,6 +1405,57 @@ describe('CI workflow coverage', () => {
     );
   });
 
+  it('coalesces completion events before any writer starts without evicting recovery runs (#8726)', () => {
+    const workflow = YAML.parse(deployGateWorkflow);
+    const admission = workflow.concurrency;
+    assert.ok(admission, 'completion bursts need workflow-level admission control');
+    assert.equal(admission.queue, 'single');
+    assert.equal(admission['cancel-in-progress'], false, 'never interrupt an active workflow');
+    assert.equal(admission.group, 'deploy-gate-events-${{ github.event_name == \'workflow_run\' && github.event.workflow_run.head_sha || github.run_id }}');
+
+    const group = (event: string, id: number, sha?: string) => admission.group.replace(
+      /\$\{\{(.*?)\}\}/g,
+      (_: string, expression: string) => String(runInNewContext(expression, {
+        github: { event_name: event, run_id: id, event: sha ? { workflow_run: { head_sha: sha } } : {} },
+      }, { timeout: 1000 })),
+    );
+    const sha = 'a'.repeat(40);
+    assert.equal(group('workflow_run', 1, sha), group('workflow_run', 2, sha));
+    assert.notEqual(group('workflow_run', 1, sha), group('workflow_run', 2, 'b'.repeat(40)));
+    assert.notEqual(group('workflow_run', 1, sha), `deploy-gate-${sha}`, 'admission must not acquire its own writer lock');
+    for (const event of ['schedule', 'workflow_dispatch']) {
+      assert.notEqual(group(event, 1), group(event, 2), `${event} runs must not replace each other`);
+      assert.notEqual(group(event, 1), group('workflow_run', 1, sha));
+    }
+  });
+
+  it('routes completion events through one writer job and retains recovery phases (#8726)', () => {
+    const { jobs } = YAML.parse(deployGateWorkflow);
+    const direct = jobs['evaluate-direct'];
+    assert.ok(direct, 'completion events must not run planner and aggregate jobs');
+    assert.equal(direct.needs, undefined);
+    assert.deepEqual(direct.strategy.matrix, { sha: ['${{ github.event.workflow_run.head_sha }}'] });
+    const evaluate = direct.steps.find((step: { run?: string }) => step.run === 'bash -e .github/scripts/deploy-gate.sh evaluate');
+    assert.equal(evaluate.env.SHA, '${{ matrix.sha }}');
+    assert.equal(evaluate.env.CHECK_ATTEMPTS, 2, 'retain the stale-read retry');
+    const checkout = direct.steps.find((step: { uses?: string }) => step.uses?.startsWith('actions/checkout@'));
+    assert.equal(checkout.with['fetch-depth'], 0, 'base drift requires the full commit graph');
+    assert.equal(checkout.with.filter, 'blob:none');
+
+    for (const event of ['workflow_run', 'schedule', 'workflow_dispatch']) {
+      const completion = event === 'workflow_run';
+      const needs = {
+        discover: { result: completion ? 'skipped' : 'success', outputs: { count: '0' } },
+        recover: { result: completion ? 'skipped' : 'success', outputs: { count: '1' } },
+      };
+      const admitted = Object.entries(jobs).filter(([, job]) => {
+        const expression = (job as { if: string }).if.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+        return runInNewContext(expression, { github: { event_name: event, repository: 'koala73/worldmonitor' }, needs, always: () => true });
+      }).map(([name]) => name);
+      assert.deepEqual(admitted, completion ? ['evaluate-direct'] : ['discover', 'recover', 'evaluate', 'gate'], event);
+    }
+  });
+
   it('serializes every deploy-gate writer by SHA behind the sweep phase barriers', () => {
     const workflow = YAML.parse(deployGateWorkflow) as {
       concurrency?: unknown;
@@ -1293,23 +1469,27 @@ describe('CI workflow coverage', () => {
     };
     const jobs = workflow.jobs ?? {};
 
-    assert.equal(workflow.concurrency, undefined, 'the controller must not hold a writer lock');
+    assert.match(
+      (workflow.concurrency as { group: string }).group,
+      /^deploy-gate-events-/,
+      'workflow admission must use a separate namespace from the SHA writer lock',
+    );
     assert.deepEqual(jobs.recover?.needs, ['discover', 'invalidate']);
     assert.equal(jobs.evaluate?.needs, 'recover');
     assert.deepEqual(jobs.gate?.needs, ['discover', 'invalidate', 'recover', 'evaluate']);
     assert.match(jobs.recover?.if ?? '', /always\(\).*needs\.discover\.result == 'success'/);
     assert.match(jobs.evaluate?.if ?? '', /always\(\).*needs\.recover\.result == 'success'.*outputs\.count != '0'/);
     assert.match(jobs.invalidate?.if ?? '', /needs\.discover\.result == 'success'.*outputs\.count != '0'/);
-    assert.equal(jobs.gate?.if, '${{ always() }}');
+    assert.equal(jobs.gate?.if, "${{ (always() && github.event_name != 'workflow_run') && (github.event_name != 'schedule' || github.repository == 'koala73/worldmonitor') }}");
 
-    for (const name of ['invalidate', 'evaluate']) {
+    for (const name of ['invalidate', 'evaluate', 'evaluate-direct']) {
       assert.equal(jobs[name]?.concurrency?.group, 'deploy-gate-${{ matrix.sha }}', `${name} must own the SHA lock`);
       assert.equal(jobs[name]?.concurrency?.queue, 'max', `${name} must not replace older pending writers`);
       assert.equal(jobs[name]?.concurrency?.['cancel-in-progress'], false, `${name} must not interrupt an active writer`);
       assert.equal(jobs[name]?.strategy?.['fail-fast'], false, `${name} must finish unrelated SHA work`);
     }
 
-    for (const name of ['discover', 'invalidate', 'recover', 'evaluate']) {
+    for (const name of ['discover', 'invalidate', 'recover', 'evaluate', 'evaluate-direct']) {
       const checkout = jobs[name]?.steps?.find((step) => step.uses?.startsWith('actions/checkout@'));
       assert.equal(checkout?.with?.ref, '${{ github.workflow_sha }}', `${name} must execute trusted workflow code`);
       assert.equal(checkout?.with?.['persist-credentials'], false);
@@ -1395,7 +1575,7 @@ describe('CI workflow coverage', () => {
       assert.ok(!codeFilterSays(path), `${path} must not set code=true`);
     }
 
-    const unit = testJobBlock('unit-shards');
+    const unit = testJobBlock('unit-built-output');
     assert.match(
       unit,
       /^\s+run: node scripts\/openapi-capacity-report\.mjs --out "\$RUNNER_TEMP\/openapi-capacity\.json"\s*$/m,
@@ -1411,7 +1591,7 @@ describe('CI workflow coverage', () => {
     );
     assert.match(
       unit,
-      /name: openapi-capacity-\$\{\{ matrix\.shard \}\}-\$\{\{ github\.run_attempt \}\}/,
+      /name: openapi-capacity-\$\{\{ github\.run_attempt \}\}/,
       'the capacity artifact name must carry run_attempt — upload-artifact v6 rejects a duplicate name within a run, which collides on the re-run started to chase the failure',
     );
     assert.match(
@@ -1466,7 +1646,7 @@ describe('CI workflow coverage', () => {
     assert.match(markdownJob, /\n {4}needs: changes\n/);
     assert.match(
       markdownJob,
-      /\n {4}if: needs\.changes\.outputs\.markdown == 'true'\n/,
+      /\n {4}if: \$\{\{ \(needs\.changes\.outputs\.markdown == 'true'\) && \(github\.event_name != 'schedule' \|\| github\.repository == 'koala73\/worldmonitor'\) \}\}\n/,
       'markdown lint must skip on PRs that touch no markdown; the gate counts skipped as passing',
     );
     assert.match(markdownJob, /\n {6}- run: npm run lint:md\n/);
@@ -1667,7 +1847,7 @@ describe('CI workflow coverage', () => {
     // it back to a narrower path-gated job would silently re-open the
     // "bundle-breaking change with green PR CI" gap.
     assert.match(
-      testJobBlock('unit-shards'),
+      testJobBlock('unit-built-output'),
       /^\s+node scripts\/build-sidecar-handlers\.mjs\s*$/m,
       'unit job must run the sidecar handler bundle build',
     );
@@ -1681,7 +1861,7 @@ describe('CI workflow coverage', () => {
       'desktop-config job must run the desktop build env parity check',
     );
     assert.match(
-      testJobBlock('unit-shards'),
+      testJobBlock('unit-built-output'),
       /^\s+run: node scripts\/check-desktop-build-env\.mjs\s*$/m,
       'unit job must run the desktop build env parity check',
     );
@@ -1790,18 +1970,13 @@ describe('CI workflow coverage', () => {
     assert.match(securityAuditWorkflow, /\n {4}name: security-audit\n/, 'security-audit.yml must publish a security-audit check run');
     assert.match(
       securityAuditWorkflow,
-      /if:\s*\$\{\{\s*always\(\)\s*\}\}/,
+      /if:\s*\$\{\{\s*\(always\(\)\)\s*&&\s*\(github\.event_name != 'schedule' \|\| github\.repository == 'koala73\/worldmonitor'\)\s*\}\}/,
       'security-audit.yml must always publish the aggregate check',
     );
     assert.match(
       securityAuditWorkflow,
       /AUDIT_RESULT"\s*=\s*"cancelled"/,
-      'security-audit.yml must publish a failing aggregate check when the audit matrix is cancelled',
-    );
-    assert.match(
-      securityAuditWorkflow,
-      /--package-json "\$\{\{ matrix\.package_json \}\}"/,
-      'security-audit.yml must pass nonstandard package manifests to the audit gate',
+      'security-audit.yml must publish a failing aggregate check when the audit job is cancelled',
     );
     assert.match(
       securityAuditWorkflow,
@@ -1819,45 +1994,47 @@ describe('CI workflow coverage', () => {
       'the production dependency audit gate must fail on unbaselined high-severity production advisories',
     );
     assert.deepEqual(
-      securityAuditMatrixLockfiles(),
+      securityAuditLockfiles(),
       packageLockfiles,
       'security-audit.yml must cover exactly the repo package-lock.json files',
     );
 
-    for (const lockfile of packageLockfiles) {
-      assert.match(
-        securityAuditWorkflow,
-        new RegExp(`\\n\\s+lockfile:\\s+${escapeRegExp(lockfile)}\\n`),
-        `security-audit.yml must cover ${lockfile}`,
-      );
+    const auditSteps = securityAuditSteps();
+    const auditJob = YAML.parse(securityAuditWorkflow).jobs['audit-lockfile'];
+    assert.ok(
+      auditJob['timeout-minutes'] >= auditSteps.length * 10 + 5,
+      'the job must allow every audit its former budget plus setup and upload time',
+    );
+    for (const step of auditSteps) {
+      assert.equal(step['timeout-minutes'], 10, 'a stalled audit must not consume later audits budgets');
+      assert.equal(step.if, '${{ !cancelled() }}', 'later audits must run after a blocking finding');
+      assert.notEqual(step['continue-on-error'], true, 'blocking audits must still fail the job');
+      const lockfile = step.run.match(/--lockfile "([^"]+)"/)?.[1];
+      assert.ok(lockfile, 'audit step must name its lockfile');
+      assert.ok(step.run.includes(`--workspace "${dirname(lockfile)}"`), `audit must use the workspace for ${lockfile}`);
+      const manifest = lockfile.replace('package-lock.json', 'package.json');
+      assert.ok(step.run.includes(`--package-json "${manifest}"`), `audit must use the manifest for ${lockfile}`);
     }
   });
 
-  it('keeps the aggregate verdict list in step with the audit matrix', () => {
-    // The aggregate decides pass/fail by looking for one verdict file per matrix
-    // entry. If the two lists drift, a lockfile that never ran silently stops
-    // being counted and the aggregate reports success — a fail-open. Pin them
-    // to each other.
-    const matrixNames = Array.from(
-      securityAuditWorkflow.matchAll(/^\s+- name: (\S+)\n\s+path:/gm),
-      ([, value]) => value.trim(),
+  it('keeps the aggregate verdict list in step with the audit steps', () => {
+    const names = securityAuditSteps().map((step: { env: { AUDIT_STATUS_FILE: string } }) =>
+      step.env.AUDIT_STATUS_FILE.match(/audit-status\/([^/]+)\.txt$/)?.[1],
     ).sort();
     const aggregateNames = (securityAuditWorkflow.match(/^\s+AUDIT_NAMES:\s*'([^']+)'/m)?.[1] ?? '')
-      .split(/\s+/)
-      .filter(Boolean)
-      .sort();
-
-    assert.ok(matrixNames.length > 0, 'security-audit.yml must define audit matrix entries');
-    assert.deepEqual(
-      aggregateNames,
-      matrixNames,
-      'the security-audit aggregate must require a verdict from exactly the audit-lockfile matrix entries',
+      .split(/\s+/).filter(Boolean).sort();
+    assert.deepEqual(names, aggregateNames, 'every lockfile must publish a distinct required verdict');
+    const upload = YAML.parse(securityAuditWorkflow).jobs['audit-lockfile'].steps.find(
+      (step: { uses?: string }) => step.uses?.startsWith('actions/upload-artifact@'),
     );
+    assert.equal(upload.if, 'always()');
+    assert.equal(upload.with.name, 'audit-status-lockfiles');
+    assert.equal(upload.with.path, '${{ runner.temp }}/audit-status/*.txt');
   });
 
   it('separates an unaudited lockfile from a real dependency finding', () => {
     // A GitHub Actions outage (2026-08-06: "Failed to resolve action download
-    // info") kills the matrix job before it audits anything. The aggregate must
+    // info") kills the audit job before it audits anything. The aggregate must
     // report that as an incomplete run, not as "audits failed".
     assert.match(
       securityAuditWorkflow,
@@ -2160,5 +2337,39 @@ describe('gated workflows evict superseded PR runs (#8443)', () => {
       true,
       'PR-number-only plus ${{ true }} must still fail the helper — expression cancel is unconditional unless it is the PR-only form',
     );
+  });
+});
+
+describe('scheduled workflows run only in the upstream repository', () => {
+  // A public repo's forks inherit every cron. Forks that enable Actions then
+  // probe production on our schedule: one day of MCP smoke traffic came from
+  // ~1,600 runner IPs against ~17 upstream runs. Push, PR and manual runs in
+  // forks stay allowed; only the fork's own schedule is skipped.
+  const FORK_GUARD = "github.event_name != 'schedule' || github.repository == 'koala73/worldmonitor'";
+
+  it('every job in a scheduled workflow carries the fork guard', () => {
+    const missing: string[] = [];
+    for (const name of readdirSync(workflowsDir).filter((n) => n.endsWith('.yml') || n.endsWith('.yaml'))) {
+      const workflow = YAML.parse(read(resolve(workflowsDir, name)));
+      const on = workflow.on ?? workflow[true as unknown as string];
+      if (!on || typeof on !== 'object' || !('schedule' in on)) continue;
+      for (const [jobId, job] of Object.entries(workflow.jobs as Record<string, { if?: unknown }>)) {
+        if (!String(job.if ?? '').includes(FORK_GUARD)) missing.push(`${name}#${jobId}`);
+      }
+    }
+    assert.deepEqual(missing, [], `add \`(${FORK_GUARD})\` to the job-level if of: ${missing.join(', ')}`);
+  });
+
+  it('skips only a fork\'s own scheduled run', () => {
+    const cases: Array<[string, string, boolean]> = [
+      ['schedule', 'koala73/worldmonitor', true],
+      ['schedule', 'someone/worldmonitor', false],
+      ['push', 'someone/worldmonitor', true],
+      ['pull_request', 'someone/worldmonitor', true],
+      ['workflow_dispatch', 'someone/worldmonitor', true],
+    ];
+    for (const [event_name, repository, expected] of cases) {
+      assert.equal(runInNewContext(FORK_GUARD, { github: { event_name, repository } }), expected, `${event_name} in ${repository}`);
+    }
   });
 });

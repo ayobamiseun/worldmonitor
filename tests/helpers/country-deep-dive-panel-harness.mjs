@@ -192,8 +192,9 @@ async function loadCountryDeepDivePanel(options = {}) {
     `],
     ['export-stub', `
       const state = globalThis.__wmCountryDeepDiveTestState;
-      export function exportCountryEvidenceMarkdown(data) {
+      export function countryEvidenceMarkdownArtifact(data) {
         state.evidenceExports.push(data);
+        return { filename: 'fixture.md', mimeType: 'text/markdown;charset=utf-8', content: JSON.stringify(data) };
       }
     `],
     ['utils-stub', `
@@ -219,6 +220,8 @@ async function loadCountryDeepDivePanel(options = {}) {
       }
     `],
     ['supply-chain-stub', `
+      export function fetchMultiSectorExposure() { return Promise.resolve([]); }
+      export const SEEDED_HS2_CODES = [];
       export function fetchBypassOptions() { return Promise.resolve({ corridors: [] }); }
       export function getCountryChokepointIndex() { return null; }
       export function fetchChokepointStatus() { return Promise.resolve({ chokepoints: [], fetchedAt: '', upstreamUnavailable: false }); }
@@ -351,7 +354,17 @@ async function loadCountryDeepDivePanel(options = {}) {
     `],
   ]);
 
+  stubModules.set('atlas-detail-stub', `
+    export class PipelineStatusPanel {
+      constructor() { throw new Error('Hosted Atlas details require the compiled iframe fixture'); }
+    }
+    export { PipelineStatusPanel as StorageFacilityMapPanel, PipelineStatusPanel as FuelShortagePanel };
+  `);
+
   const aliasMap = new Map([
+    ['./PipelineStatusPanel', 'atlas-detail-stub'],
+    ['./StorageFacilityMapPanel', 'atlas-detail-stub'],
+    ['./FuelShortagePanel', 'atlas-detail-stub'],
     ['@/config/feeds', 'feeds-stub'],
     ['@/services/country-geometry', 'country-geometry-stub'],
     ['@/services/i18n', 'i18n-stub'],
@@ -491,8 +504,8 @@ export async function createCountryDeepDivePanelHarness(options = {}) {
     throw error;
   }
 
-  function createPanel() {
-    return new CountryDeepDivePanel(null);
+  function createPanel(download = async () => ({ state: 'attempted' })) {
+    return new CountryDeepDivePanel(null, undefined, download);
   }
 
   function getPanelRoot() {

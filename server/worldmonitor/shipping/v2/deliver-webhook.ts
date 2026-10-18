@@ -26,9 +26,28 @@ export interface WebhookDeliveryPayload {
   details?: Record<string, unknown>;
 }
 
+// `country.risk_surge` delivery body (X-WM-Event: country.risk_surge). The
+// registry entry shared/event-triggers.json#events.country.risk_surge and the
+// OpenAPI webhooks block mirror this shape; tests/openapi-webhooks-contract
+// pins them together.
+export interface RiskSurgeWebhookPayload {
+  subscriberId: string;
+  countryCode: string;
+  countryName?: string;
+  score: number;
+  previousScore?: number | null;
+  delta24h: number;
+  trend?: string;
+  advisoryLevel?: string | null;
+  triggeredAt: string;
+  reason: string;
+  details?: Record<string, unknown>;
+}
+
 export interface WebhookDeliveryOptions {
   event?: string;
   deliveryId?: string;
+  nowMs?: number;
   fetchImpl?: typeof fetch;
   resolveHostname?: (hostname: string) => Promise<string[]>;
 }
@@ -160,7 +179,7 @@ export async function assertWebhookDeliveryUrlSafe(
 
 export async function deliverShippingV2Webhook(
   record: WebhookRecord,
-  payload: WebhookDeliveryPayload,
+  payload: WebhookDeliveryPayload | RiskSurgeWebhookPayload,
   options: WebhookDeliveryOptions = {},
 ): Promise<WebhookDeliveryResult> {
   if (!record.active) {
@@ -172,13 +191,19 @@ export async function deliverShippingV2Webhook(
     options.resolveHostname,
   );
   const body = JSON.stringify(payload);
+  const timestamp = String(Math.floor((options.nowMs ?? Date.now()) / 1000));
+  const deliveryId = options.deliveryId ?? makeDeliveryId();
+  const event = options.event ?? 'chokepoint.disruption';
   const signature = createHmac('sha256', record.secret).update(body).digest('hex');
+  const signatureV2 = createHmac('sha256', record.secret).update(`${timestamp}.${deliveryId}.${event}.${body}`).digest('hex');
   const headers = {
     'content-type': 'application/json',
     'user-agent': 'WorldMonitor-ShippingV2-Webhooks/1.0',
     'x-wm-signature': `sha256=${signature}`,
-    'x-wm-delivery-id': options.deliveryId ?? makeDeliveryId(),
-    'x-wm-event': options.event ?? 'chokepoint.disruption',
+    'x-wm-signature-v2': `sha256=${signatureV2}`,
+    'x-wm-timestamp': timestamp,
+    'x-wm-delivery-id': deliveryId,
+    'x-wm-event': event,
   };
   const response = options.fetchImpl
     ? await options.fetchImpl(url, { method: 'POST', headers, body })

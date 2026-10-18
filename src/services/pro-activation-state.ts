@@ -530,8 +530,31 @@ export interface ActivationExistingConfig {
   hasWebPushChannel: boolean;
   /** The enabled current-variant rule includes the verified web-push channel. */
   hasWebPushDelivery: boolean;
-  /** The user has already used a Pro power feature (custom widget / MCP). */
+  /** The user has already used a Pro power feature (custom widget, or a connected MCP client — see resolveHasUsedPowerFeature). */
   hasUsedPowerFeature?: boolean;
+}
+
+/** The subset of an MCP client row this decision needs. */
+export interface PowerFeatureMcpClientLike {
+  revokedAt?: number | null;
+}
+
+/**
+ * Whether the subscriber has already used a Pro power feature. Two signals,
+ * OR-ed: a locally stored custom widget, or a connected MCP client that has not
+ * been revoked (#5612). Before this, only widgets counted, so a Pro user who
+ * had connected Claude Desktop or Cursor weeks earlier still saw the power
+ * step presented as unfinished work. `mcpClients` is optional: a caller that
+ * has not read the client list (a widget already answered, or the lookup
+ * failed) passes nothing and gets the widget-only answer.
+ */
+export function resolveHasUsedPowerFeature(
+  widgetCount: number,
+  mcpClients?: readonly PowerFeatureMcpClientLike[] | null,
+): boolean {
+  if (widgetCount > 0) return true;
+  if (!mcpClients) return false;
+  return mcpClients.some((client) => client.revokedAt == null);
 }
 
 /**

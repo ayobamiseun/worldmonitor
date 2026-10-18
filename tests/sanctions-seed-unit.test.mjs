@@ -2,7 +2,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { ingestSemaEntries, mergeSanctionEntries, parseSemaXml, SEMA_SOURCE } from '../scripts/_sema-sanctions.mjs';
+import { gzipSync, gunzipSync } from 'node:zlib';
+import { ingestSemaEntries, mergeSanctionEntries, parseSemaXml, SEMA_SOURCE, SANCTIONS_SOURCE_VERSION } from '../scripts/_sema-sanctions.mjs';
 
 // Normalize values produced inside a vm context to host-realm equivalents.
 // Needed because deepStrictEqual checks prototypes — vm Arrays ≠ host Arrays.
@@ -42,12 +43,13 @@ const fetchPressureSrc = seedSrc.slice(
   seedSrc.indexOf('\nfunction validate('),
 );
 
-async function partialPublication({ sources = ['CONSOLIDATED'], cached = [], semaJson } = {}) {
+async function partialPublication({ sources = ['CONSOLIDATED'], cached = [], snapshots = null, semaJson } = {}) {
   const context = vm.createContext({
     console: { log() {}, warn() {} },
-    SEMA_SOURCE,
+    SEMA_SOURCE, SANCTIONS_SOURCE_VERSION, Buffer, gzipSync, gunzipSync,
     mergeSanctionEntries,
     verifySeedKey: async (key) => key === 'sanctions:pressure:v1' ? { entries: cached } : null,
+    readSeedSnapshot: async () => snapshots,
     ingestSemaEntries: semaJson === undefined
       ? async () => ({ records: [], publishedAtMs: 0, error: 'SEMA_INVALID_RECORD' })
       : () => ingestSemaEntries({ fetchFn: async () => new Response(JSON.stringify(semaJson)) }),
@@ -74,8 +76,9 @@ describe('partial sanctions publication', () => {
     assert.ok(healthy.entries.some(row => row.id === 'sema-ca:russia:1-1:731'));
     const cached = healthy.entries.filter(row => row.sourceLists.includes(SEMA_SOURCE));
     cached.push({ ...cached[0], id: 'sema-ca:unspecified:unspecified:0', name: '1, Part 1' });
+    const snapshots = { version: 1, encoding: 'gzip-base64', data: gzipSync(JSON.stringify(healthy._sourceSnapshots)).toString('base64') };
     semaJson.data[1]['Item Number'] = '';
-    const failed = await partialPublication({ semaJson, cached });
+    const failed = await partialPublication({ semaJson, cached, snapshots });
     assert.equal(failed.semaError, 'SEMA_INVALID_RECORD');
     assert.equal(failed.semaCount, cached.length - 1);
     assert.equal(failed.sdnCount, 0);
@@ -115,13 +118,17 @@ describe('partial sanctions publication', () => {
     assert.equal(data.totalCount, 1);
     assert.ok(data.entries.every((e) => !e.sourceLists.includes(SEMA_SOURCE)));
     assert.ok(data._entityIndex.every((e) => !e.id.startsWith('sema-ca:')));
-    await assert.rejects(partialPublication({ sources: [], cached }), /all sanctions lists failed/);
+    assert.equal((await partialPublication({ sources: [], cached })).totalCount, 0);
   });
 
   it('retains valid undated cached identities with an optional schedule', async () => {
     const { records } = parseSemaXml('<record><Country>Russia</Country><Item>7</Item><LastName>Example</LastName></record>');
     const cached = records.map(({ _aliases, _identifiers, _publishedAt, _regime, ...entry }) => entry);
-    const data = await partialPublication({ cached });
+    const fetchedAt = Date.now() - 1000;
+    const snapshots = { version: 1, encoding: 'gzip-base64', data: gzipSync(JSON.stringify({
+      [SEMA_SOURCE]: { version: 1, fetchedAt, retainedUntil: fetchedAt + 48 * 3600000, publishedAt: 0, records: cached },
+    })).toString('base64') };
+    const data = await partialPublication({ snapshots });
     assert.equal(data.semaCount, 1);
     assert.equal(data.totalCount, 2);
     assert.equal(data.entries.find((e) => e.id === records[0].id).effectiveAt, '0');

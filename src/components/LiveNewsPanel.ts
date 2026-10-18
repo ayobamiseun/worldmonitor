@@ -15,6 +15,7 @@ import { track } from '@/services/analytics';
 import { createLiveMediaIdleNotice, trackLiveMediaIdleStop } from './live-media-idle-notice';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
 import { OPTIONAL_LIVE_CHANNELS, getDefaultLiveChannels, hasBuiltinStreams, liveVideoSourceFor, loadChannelsFromStorage, saveChannelsToStorage, type LiveChannel } from '@/services/live-channels';
+import { declareOverlay } from '@/utils/open-modal';
 export { getDefaultLiveChannels, loadChannelsFromStorage } from '@/services/live-channels';
 
 function offlineReasonText(reason: OfflineReason, name: string): string {
@@ -145,6 +146,8 @@ export class LiveNewsPanel extends Panel {
   private deferredInit = false;
   private lazyObserver: IntersectionObserver | null = null;
   private idleCallbackId: number | ReturnType<typeof setTimeout> | null = null;
+  /** Removes the open channel-management overlay and its document listener. Null while none is open. */
+  private dismissChannelManagementModal: (() => void) | null = null;
   // Play-all cascade: start this panel's channel, but never start a disabled or collapsed panel.
   private readonly boundPlayAllStarter = () => {
     if (this.canHostLiveMedia()) this.triggerInit();
@@ -545,6 +548,7 @@ export class LiveNewsPanel extends Panel {
     overlay.className = 'live-channels-modal-overlay';
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
+    declareOverlay(overlay, { reload: 'blocking' });
     overlay.setAttribute('aria-label', t('components.liveNews.manage') ?? 'Manage channels');
 
     const modal = document.createElement('div');
@@ -569,10 +573,14 @@ export class LiveNewsPanel extends Panel {
       await initLiveChannelsWindow(container);
     }).catch(console.error);
 
-    const close = () => {
+    const dismiss = () => {
       focusTrap.deactivate();
       overlay.remove();
       document.removeEventListener('keydown', onKey);
+      this.dismissChannelManagementModal = null;
+    };
+    const close = () => {
+      dismiss();
       this.refreshChannelsFromStorage();
     };
     const focusTrap = createFocusTrap(overlay);
@@ -585,6 +593,7 @@ export class LiveNewsPanel extends Panel {
       if (e.target === overlay) close();
     });
     document.addEventListener('keydown', onKey);
+    this.dismissChannelManagementModal = dismiss;
   }
 
   private refreshChannelSwitcher(): void {
@@ -937,6 +946,11 @@ export class LiveNewsPanel extends Panel {
   }
 
   public destroy(): void {
+    // The overlay is parented to document.body and hides only by unmounting
+    // (main.css toggles opacity, not display), so destroying the panel while
+    // it was open left it on screen holding every automatic reload off for
+    // the rest of the session, with a document keydown listener to match.
+    this.dismissChannelManagementModal?.();
     unregisterLiveMediaStarter('live-news', this.boundPlayAllStarter);
     releaseLiveMediaPlayback('live-news');
     this.destroyPlayer();

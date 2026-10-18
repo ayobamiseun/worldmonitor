@@ -7,7 +7,7 @@ import { resolveBearerToContext } from '../_oauth-token.js';
 // @ts-expect-error — JS module, no declaration file
 import { timingSafeIncludes } from '../_crypto.js';
 // @ts-expect-error — JS module, no declaration file
-import { getClientIp, hasCloudflareTransitProof } from '../_client-ip.js';
+import { getClientRateLimitKey, hasCloudflareTransitProof } from '../_client-ip.js';
 // @ts-expect-error — JS module, no declaration file
 import { captureSilentError } from '../_sentry-edge.js';
 import { redisPipeline as rawRedisPipeline } from '../_upstash-json.js';
@@ -84,6 +84,11 @@ function getMcpRatelimit(): Ratelimit | null {
  * value every plan below API Business sells anyway.
  */
 export const MCP_DEFAULT_BURST_PER_MINUTE = 60;
+// One 64-read panel can establish a fresh connection per read, with initialize,
+// initialized acknowledgment and one catalog/control request per connection.
+export const MCP_PROTOCOL_BURST_PER_MINUTE = 192;
+
+type McpMinuteScope = { kind: 'protocol' } | { kind: 'panel'; key: string };
 
 /**
  * The burst threshold a plan sells, from `planLimits.mcpBurstRequestsPerMinute`.
@@ -681,10 +686,13 @@ async function checkMcpEntitlementGate(
   const burstPerMinute = resolveMcpBurstPerMinute(ent?.features?.planLimits?.mcpBurstRequestsPerMinute);
   const passed = (): McpPreCheckResult => ({
     ok: true,
-    budget: resolveMcpBudget(
-      ent?.features?.planLimits?.mcpCallsPerDay,
-      ent?.features?.planLimits?.apiRequestsPerDay,
-    ),
+    budget: {
+      ...resolveMcpBudget(
+        ent?.features?.planLimits?.mcpCallsPerDay,
+        ent?.features?.planLimits?.apiRequestsPerDay,
+      ),
+      ...((ent?.features?.tier ?? 0) >= 3 ? { enterprisePlan: true as const } : {}),
+    },
     burstPerMinute,
   });
   // Single-source Pro MCP decision. A current fallback entitlement still wins
@@ -803,7 +811,8 @@ export async function runContextPreChecks(
     // caller who correctly has no entitlement.
     return { ok: true };
   }
-  // env_key: operator-owned, ungated, and never metered by the daily counter.
+  // env_key: operator-owned and ungated. Its daily ceiling is reserved per key
+  // in dispatch (OPERATOR_KEY_DAILY_CEILINGS), not through an entitlement.
   return { ok: true };
 }
 
@@ -811,9 +820,8 @@ export async function runContextPreChecks(
  *  the daily quota is the hard-cap fail-CLOSED gate. Returns null on success
  *  or pass-through, a Response on a real burst limit hit.
  *  `perMinute` is the caller's plan threshold, carried from the pre-check that
- *  already read the entitlement; it defaults to the catalog's common value for
- *  the one call site that has no pre-check to carry it (a credentialed caller
- *  on a PUBLIC method), which errs to the lower of the two ceilings sold.
+ *  already read the entitlement. Data-free protocol requests use a separate
+ *  fixed user bucket so connection setup cannot spend the data burst.
  *  user_key (#4859) shares the per-USER limiter with pro — the principal is
  *  the key OWNER, so a user with an OAuth connection and a dashboard key gets
  *  one combined budget instead of two stackable ones.
@@ -828,6 +836,7 @@ export async function applyPerMinuteLimit(
   headers: Record<string, string> = {},
   perMinute: number = MCP_DEFAULT_BURST_PER_MINUTE,
   id: unknown = null,
+  scope?: McpMinuteScope,
 ): Promise<Response | null> {
   if (context.kind === 'env_key') {
     const rl = getMcpRatelimit();
@@ -855,7 +864,7 @@ export async function applyPerMinuteLimit(
     // rate-limit bypass. The id is validated upstream, so this is defence in
     // depth for a future caller, not a live bug — but the limiter decision and
     // the response construction do not belong under one catch-all.
-    if (denied) return rpcError(id, -32029, `Rate limit exceeded. Max ${MCP_DEFAULT_BURST_PER_MINUTE} requests per minute per API key.`, headers);
+    if (denied) return rpcError(id, -32029, `Rate limit exceeded. Max ${MCP_DEFAULT_BURST_PER_MINUTE} requests per minute per API key.`, { ...headers, 'X-RateLimit-Limit': String(MCP_DEFAULT_BURST_PER_MINUTE), 'X-RateLimit-Remaining': '0' });
     return null;
   }
   if (context.kind === 'free') {
@@ -867,11 +876,15 @@ export async function applyPerMinuteLimit(
     // worse than useless — every free caller would share one bucket.
     return null;
   }
+  if (scope?.kind === 'protocol') perMinute = MCP_PROTOCOL_BURST_PER_MINUTE;
   const rl = getMcpProMinRatelimit(perMinute);
   if (!rl) return null;
   let denied = false;
   try {
-    const { success } = await rl.limit(`pro-user:${context.userId}`);
+    const principal = scope?.kind === 'panel'
+      ? `pro-panel:${hashKeySync(scope.key)}`
+      : `${scope?.kind === 'protocol' ? 'pro-protocol' : 'pro-user'}:${context.userId}`;
+    const { success } = await rl.limit(principal);
     if (!success) {
       // The emitted limit must be the one that actually rejected: the
       // `mcp_minute_burst` scanner query reads `observed_limit` from this
@@ -886,7 +899,8 @@ export async function applyPerMinuteLimit(
     }
   } catch { /* graceful degradation */ }
   // Outside the fail-open catch — see the env_key branch above.
-  if (denied) return rpcError(id, -32029, `Rate limit exceeded. Max ${perMinute} requests per minute per user.`, headers);
+  const bucket = scope?.kind === 'panel' ? 'panel' : scope?.kind === 'protocol' ? 'user protocol bucket' : 'user';
+  if (denied) return rpcError(id, -32029, `Rate limit exceeded. Max ${perMinute} requests per minute per ${bucket}.`, { ...headers, 'X-RateLimit-Limit': String(perMinute), 'X-RateLimit-Remaining': '0' });
   return null;
 }
 
@@ -909,7 +923,7 @@ export async function applyAnonDiscoveryLimit(
   if (!rl) return null;
   let denied = false;
   try {
-    const { success } = await rl.limit(`ip:${getClientIp(req)}`);
+    const { success } = await rl.limit(`ip:${getClientRateLimitKey(req)}`);
     denied = !success;
   } catch { /* graceful degradation */ }
   // Outside the fail-open catch — see `applyPerMinuteLimit`'s env_key branch.
@@ -1032,7 +1046,7 @@ export async function applyFreeTierLimit(
     return freeTierRateLimitDegradedResponse(id, headers);
   }
   try {
-    const result = await rl.limit(`ip:${getClientIp(req)}`);
+    const result = await rl.limit(`ip:${getClientRateLimitKey(req)}`);
     // @upstash/ratelimit can resolve a timeout as success:true rather than
     // rejecting. Treat that as unavailable, not as verified headroom.
     if (result.reason === 'timeout') {

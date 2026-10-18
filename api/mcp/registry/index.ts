@@ -6,7 +6,14 @@ import { compressDescription, utf8ByteLength } from '../utils';
 import { CACHE_TOOLS } from './cache-tools';
 import { NLP_TOOLS } from './nlp-tools';
 import { RPC_TOOLS } from './rpc-tools';
+import { COUNTRY_VIEW_TOOLS } from './country-view';
+import { NEWS_DASHBOARD_TOOLS } from './news-dashboard';
 import { SOURCE_TOOLS } from './source-tools';
+import { MACRO_TOOLS } from './macro-tools';
+import { STOCK_TOOLS } from './stock-tools';
+import { COST_SHOCK_TOOLS } from './cost-shock-tools';
+import { PUBLIC_DOMAIN_TOOLS } from './public-domain-tools';
+import { TARIFF_TOOLS } from './tariff-tools';
 
 // Merged tool registry — cache tools first (no `_execute`), then RPC tools
 // (with `_execute`), then the NLP utilities. Order is observable: `tools/list`
@@ -14,14 +21,14 @@ import { SOURCE_TOOLS } from './source-tools';
 // returns the available-list sorted before responding. NLP_TOOLS is appended
 // last so extracting it from rpc-tools.ts left every other tool's position
 // unchanged. SOURCE_TOOLS is appended after it for the same reason.
-export const TOOL_REGISTRY: ToolDef[] = [...CACHE_TOOLS, ...RPC_TOOLS, ...NLP_TOOLS, ...SOURCE_TOOLS];
+export const TOOL_REGISTRY: ToolDef[] = [...CACHE_TOOLS, ...RPC_TOOLS, ...NLP_TOOLS, ...SOURCE_TOOLS, ...NEWS_DASHBOARD_TOOLS, ...MACRO_TOOLS, ...STOCK_TOOLS, ...COST_SHOCK_TOOLS, ...PUBLIC_DOMAIN_TOOLS, ...COUNTRY_VIEW_TOOLS, ...TARIFF_TOOLS];
 export const FREE_TIER_TOOL_NAMES: ReadonlySet<string> = new Set(
   TOOL_REGISTRY.filter((tool) => tool._freeTier === true).map((tool) => tool.name),
 );
 
 /** Metadata reads stay authenticated but never spend an allowance or quota slot. */
 export function isQuotaExemptMetadataTool(tool: ToolDef): boolean {
-  return tool.name === 'describe_tool';
+  return tool.name === 'describe_tool' || tool.name === 'get_mcp_allowance';
 }
 
 /**
@@ -98,8 +105,12 @@ for (const tool of TOOL_REGISTRY) {
 // the public-shape fields (name, description, inputSchema, annotations).
 //
 // `opts.compressDescriptions` — when true (the tools/list call path),
-// the tool's top-level `description` is run through compressDescription.
-// When false (the describe_tool call path), full text is preserved.
+// the tool's top-level `description` is capped at TOOL_DESCRIPTION_MAX_BYTES
+// through compressDescription. Every registered description already fits
+// (tests/mcp-tools-list-description-budget.test.mjs), so on a passing build
+// both paths emit the same text; the cap is a runtime backstop, not a
+// second shape. When false (the describe_tool call path), text is passed
+// through untouched.
 export function buildPublicTool(
   tool: ToolDef,
   opts: { compressDescriptions: boolean },
@@ -135,6 +146,7 @@ export function buildPublicTool(
 
   const publicTool: PublicToolShape = {
     name: tool.name,
+    title: tool.title,
     description,
     inputSchema: {
       type: tool.inputSchema.type,
@@ -151,7 +163,9 @@ export function buildPublicTool(
     // Per-tool annotations declared on each registry entry (v1.7.0).
     // Deep-cloned so a mutating client can't poison the registry literal —
     // matches the inputSchema.properties + outputSchema treatment above.
-    annotations: structuredClone(tool.annotations),
+    // The spec's annotations.title repeats the top-level title: some hosts,
+    // including the Claude Connectors Directory, read only this one.
+    annotations: { title: tool.title, ...structuredClone(tool.annotations) },
     _meta: {
       'worldmonitor/access': toolAccess(tool),
       'worldmonitor/weight': toolWeight(tool),
@@ -167,6 +181,9 @@ export function buildPublicTool(
   if (tool._uiResourceUri) {
     publicTool._meta.ui = { resourceUri: tool._uiResourceUri };
     publicTool._meta['ui/resourceUri'] = tool._uiResourceUri;
+    if (tool._openaiEntrypoints) {
+      publicTool._meta['openai/ui'] = { entrypoints: structuredClone(tool._openaiEntrypoints) };
+    }
   }
 
   return publicTool;

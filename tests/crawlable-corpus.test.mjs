@@ -73,6 +73,7 @@ import {
   withSchemaContext,
 } from '../scripts/build-crawlable-corpus.mjs';
 import {
+  chokepointCoverageMetrics,
   chokepointEvidenceNarrative,
   MAX_FUTURE_SKEW_MS,
   MAX_LIVE_SNAPSHOT_AGE_MS,
@@ -100,6 +101,7 @@ import { buildSourceCatalog, sourceProviderDisplayName } from '../scripts/crawla
 import { resolveSourceOrigin, sourceOriginLabel } from '../scripts/source-origin.mjs';
 import { USE_CASES_CONTENT_VERSION } from '../scripts/build-use-cases.mjs';
 import { RELATED_READING_PATH } from '../scripts/related-reading.mjs';
+import { MAX_RELATED_COUNTRIES } from '../scripts/country-related-links.mjs';
 import { ACCURACY_CONTENT_VERSION } from '../scripts/build-accuracy-page.mjs';
 import { COMPARISONS_CONTENT_VERSION } from '../scripts/build-comparison-pages.mjs';
 import { shiftLivePulseDates } from './helpers/shift-live-pulse-dates.mjs';
@@ -107,6 +109,9 @@ import { rawCatalogProviderNames, rawManifestActiveEntries } from './helpers/raw
 import { validate as validateJsonSchema } from './helpers/json-schema-mini.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
+// data.sources keys whose files decide the related-country links on every
+// country page (scripts/country-related-links.mjs), so they move its lastmod.
+const COUNTRY_RELATED_LINK_SOURCES = ['crisisRegistry', 'tensionPairs', 'countryCentroids', 'countryBboxes'];
 
 // Synthetic story clock for direct buildMicrostateCoverageStory /
 // renderCountryAnalysis / countryDatasetDownload calls. The assertions on
@@ -183,11 +188,19 @@ function assertPulseCountryRecords(countries) {
       assertPulseRecordFields(headline, articleFields, `${path}.developments.headlines[${index}]`, { origin: 'string' });
     }
     if (developments.brief !== null) {
+      // Pre-migration briefs carry `model`; evidence-grounded freezes omit it
+      // and publish an `evidence` array instead (freeze-crawlable-live-pulse).
       assertPulseRecordFields(developments.brief, {
-        text: 'string', model: 'string', generatedAt: 'string', sources: 'array',
-      }, `${path}.developments.brief`);
+        text: 'string', generatedAt: 'string', sources: 'array',
+      }, `${path}.developments.brief`, { model: 'string', evidence: 'array' });
       for (const [index, source] of developments.brief.sources.entries()) {
         assertPulseRecordFields(source, articleFields, `${path}.developments.brief.sources[${index}]`, { origin: 'string' });
+      }
+      for (const [index, item] of (developments.brief.evidence ?? []).entries()) {
+        assertPulseRecordFields(item, {
+          id: 'string', kind: 'string', label: 'string', value: 'string',
+          factText: 'string', asOf: 'string',
+        }, `${path}.developments.brief.evidence[${index}]`, { url: 'string' });
       }
     }
     for (const [index, event] of (developments.timeline ?? []).entries()) {
@@ -1659,10 +1672,23 @@ describe('crawlable corpus generator', () => {
     assert.deepEqual(COMPARISON_PAGE_LASTMOD_PATHS, [
       'scripts/build-comparison-pages.mjs',
       'scripts/comparison-page-narratives.mjs',
+      'scripts/comparison-shortlist.mjs',
+      'shared/product-facts.generated.json',
+      'shared/product-catalog.generated.json',
+      'public/.well-known/mcp/server-card.json',
       'shared/source-attribution-manifest.json',
       'src/config/chokepoint-registry.ts',
       'scripts/data/related-reading.json',
     ]);
+  });
+
+  it('folds every JSON file the shortlist module reads into the compare lastmod clock', () => {
+    const source = readFileSync(join(repoRoot, 'scripts/comparison-shortlist.mjs'), 'utf8');
+    const reads = [...source.matchAll(/readRepoJson\('([^']+)'\)/g)].map(([, path]) => path);
+    assert.ok(reads.length >= 2, 'expected the shortlist module to read the product facts and catalog');
+    for (const path of reads) {
+      assert.ok(COMPARISON_PAGE_LASTMOD_PATHS.includes(path), `${path} feeds the shortlist page but not its lastmod`);
+    }
   });
 
   // laterDate is imported rather than re-implemented, so the family-clock
@@ -2184,6 +2210,10 @@ describe('crawlable corpus generator', () => {
         assert.match(html, /<p class="byline">/, `${page} must render a byline`);
         assert.match(html, /World Monitor research team/, `${page} must name who maintains it`);
         assert.match(html, /href="\/docs\/corrections"/, `${page} byline must link the corrections log`);
+        // #8603: /docs is a 307 to /docs/documentation, so the byline must name
+        // a 200 methodology page instead of the docs root.
+        assert.match(html, /href="\/docs\/algorithms"/, `${page} byline must link a 200 methodology page`);
+        assert.doesNotMatch(html, /href="\/docs"/, `${page} must not link the /docs redirect`);
       }
       // The families that pass their own footerBody still carry it.
       for (const page of ['use-cases/index.html', 'compare/index.html', 'sources/index.html']) {
@@ -2966,9 +2996,11 @@ describe('crawlable corpus generator', () => {
       assert.ok(ukraineResilienceDataset, 'CII country pages must retain the CRI Dataset');
       assert.ok(norway.includes(liveScriptTag), 'country live script must match the production CSP nonce');
       // Deep-link CTA into the live map (opens the maximized country brief). `&` is HTML-escaped.
-      // Carries utm_source (NOT ref= — that would be captured as an affiliate referral code).
-      assert.match(norway, /<a class="cta" href="https:\/\/www\.worldmonitor\.app\/dashboard\?country=NO&amp;expanded=1&amp;utm_source=seo-country">Open Norway on the live map/);
+      // Untagged: `ref=` would be captured as an affiliate referral code, and a
+      // utm_* tag is a 308 hop through the middleware index-noise strip (#8603).
+      assert.match(norway, /<a class="cta" href="https:\/\/www\.worldmonitor\.app\/dashboard\?country=NO&amp;expanded=1">Open Norway on the live map/);
       assert.doesNotMatch(norway, /[?&]ref=/, 'corpus CTAs must never use the affiliate ref= param');
+      assert.doesNotMatch(norway, /utm_source=/, 'corpus CTAs must not carry utm_source; middleware 308s it away');
       // Social preview + trust-link contracts.
       assert.match(norway, /<meta property="og:image" content="https:\/\/www\.worldmonitor\.app\/favico\/og-image\.png">/);
       assert.match(norway, /<meta name="twitter:card" content="summary_large_image">/);
@@ -3169,11 +3201,40 @@ describe('crawlable corpus generator', () => {
         const developmentsWordCount = words(
           countryDocument.querySelector('[data-country-developments]')?.textContent,
         ).length;
-        const basePageWordCeiling = country.headlineEligible === false ? 950 : 900;
-        const pageWordCeiling = basePageWordCeiling + developmentsWordCount;
+        // The related-country links and the Pro/API link are a navigation
+        // block with their own bound (scripts/country-related-links.mjs: at
+        // most five one-line links plus one CTA sentence), so they are counted
+        // like developments rather than eating the prose budget. The bounds
+        // below keep that block from becoming a second prose section. They are
+        // per part, not one total: the total grows with the country's name
+        // (Saint Vincent and the Grenadines appears three times), so a single
+        // cap sat a word or two above the longest names and a data-only crisis
+        // or tension edit would have broken it. Data-driven lines get a
+        // per-line cap; the fixed heading, intro and Pro/API sentence get a
+        // bound of the template plus three copies of the name.
+        const relatedLinksBlock = countryDocument.querySelector('[data-country-related-links]');
+        const relatedLinksWordCount = words(relatedLinksBlock?.textContent).length;
+        const relatedLinkItems = [...(relatedLinksBlock?.querySelectorAll('[data-related-countries] li') || [])];
         assert.ok(
-          pageWordCount >= 600 && pageWordCount <= pageWordCeiling,
-          `${route} main content must contain at least 600 words and no more than ${basePageWordCeiling} base words plus ${developmentsWordCount} developments words; got ${pageWordCount}`,
+          relatedLinkItems.length >= 1 && relatedLinkItems.length <= MAX_RELATED_COUNTRIES,
+          `${route} must list 1-${MAX_RELATED_COUNTRIES} related countries, got ${relatedLinkItems.length}`,
+        );
+        const relatedLinkItemWords = relatedLinkItems.map((item) => words(item.textContent).length);
+        for (const itemWords of relatedLinkItemWords) {
+          assert.ok(itemWords <= 30, `${route} related-country lines must stay one short line, got ${itemWords} words`);
+        }
+        const relatedLinksFrameWords = relatedLinksWordCount - relatedLinkItemWords.reduce((sum, count) => sum + count, 0);
+        assert.ok(
+          relatedLinksFrameWords > 0 && relatedLinksFrameWords <= 55 + 3 * words(country.name).length,
+          `${route} related-links heading, intro and Pro/API sentence must stay short, got ${relatedLinksFrameWords} words`,
+        );
+        const basePageWordCeiling = country.headlineEligible === false ? 950 : 900;
+        const pageWordCeiling = basePageWordCeiling + developmentsWordCount + relatedLinksWordCount;
+        assert.ok(
+          // The 600-word floor is for page content, so the navigation block
+          // does not count toward it.
+          pageWordCount - relatedLinksWordCount >= 600 && pageWordCount <= pageWordCeiling,
+          `${route} main content must contain at least 600 words besides the related links and no more than ${basePageWordCeiling} base words plus ${developmentsWordCount} developments words and ${relatedLinksWordCount} related-link words; got ${pageWordCount}`,
         );
       }
 
@@ -4421,8 +4482,9 @@ describe('crawlable corpus generator', () => {
       assert.equal(raceWindow.document.querySelectorAll('.source-result').length, 0, 'a late search response must not undo reset');
       raceWindow.close();
       assert.doesNotMatch(sourcesPage, /[?&]ref=/);
-      assert.match(sourcesPage, /href="\/docs\/data-sources\?utm_source=seo-sources#finance-%26-economics"/);
-      assert.match(sourcesPage, /href="\/docs\/source-attribution\?utm_source=seo-sources"/);
+      assert.match(sourcesPage, /href="\/docs\/data-sources#finance-%26-economics"/);
+      assert.match(sourcesPage, /href="\/docs\/source-attribution"/);
+      assert.doesNotMatch(sourcesPage, /utm_source=/, 'source-catalog links must not carry utm_source; middleware 308s it away');
 
       const hormuz = read(outDir, 'chokepoints/strait-of-hormuz/index.html');
       assert.match(hormuz, /<h1>Strait of Hormuz<\/h1>/);
@@ -4430,7 +4492,7 @@ describe('crawlable corpus generator', () => {
       assert.match(hormuz, /about 20% of the world.s seaborne crude oil/);
       assert.doesNotMatch(hormuz, /a very large share of the world.s seaborne crude oil/);
       // Deep-link CTA into the live map (pans to + opens the waterway popup).
-      assert.match(hormuz, /<a class="cta" href="https:\/\/www\.worldmonitor\.app\/dashboard\?chokepoint=hormuz_strait&amp;utm_source=seo-chokepoint">Open Strait of Hormuz on the live map/);
+      assert.match(hormuz, /<a class="cta" href="https:\/\/www\.worldmonitor\.app\/dashboard\?chokepoint=hormuz_strait">Open Strait of Hormuz on the live map/);
       assert.match(hormuz, /href="\/docs\/methodology\/chokepoints"/);
       // Human trade-route names replace the old raw route-id dump.
       assert.match(hormuz, /Persian Gulf → Europe \(Oil\)/);
@@ -4440,19 +4502,33 @@ describe('crawlable corpus generator', () => {
       assert.match(hormuz, /data-live-chokepoint data-chokepoint-id="hormuz_strait"/);
       assert.match(hormuz, /data-published-pulse/);
       // #7613: keep the open/closed query while answering only from the
-      // evidence this snapshot can support.
+      // evidence this snapshot can support. Read the score and band from the
+      // committed pulse rather than pinning one capture's wording: the
+      // 2026-10-12 refresh moved Hormuz from a partial pulse with no transit
+      // count to a full one, and the pinned sentences failed the refresh
+      // (#9115). The exact narrative of every chokepoint page is checked
+      // against chokepointEvidenceNarrative further down.
       assert.match(hormuz, /<h2>Is Strait of Hormuz open right now\?<\/h2>/);
+      const hormuzPulse = clock.livePulse.chokepoints.hormuz_strait;
+      const hormuzPassage = hormuz.match(/data-chokepoint-open-status>([^<]*)</)?.[1] ?? '';
       assert.match(
-        hormuz,
-        /data-chokepoint-open-status>As of [^<]*source coverage for the Strait of Hormuz is partial\. No transit count is published for this snapshot\. World Monitor cannot verify operational passage status from this snapshot\.</,
+        hormuzPassage,
+        /^As of .+ (?:World Monitor cannot verify operational passage status from this snapshot|The (?:Green|Yellow|Red) disruption score is a risk signal; it does not verify unrestricted passage or operational closure)\.$/,
+        'the passage answers from source coverage',
+      );
+      assert.doesNotMatch(
+        hormuzPassage,
+        /\b(?:is|remains)\s+(?:open|closed|reopened)\b/i,
+        'the passage must never state a closure verdict',
+      );
+      const hormuzDriver = hormuz.match(/data-chokepoint-score-driver>([^<]*)</)?.[1] ?? '';
+      assert.match(
+        hormuzDriver,
+        new RegExp(`^The score of ${hormuzPulse.disruptionScore} \\(${hormuzPulse.status}\\) has this evidence basis\\. Configured geopolitical baseline: `),
       );
       assert.match(
-        hormuz,
-        /data-chokepoint-score-driver>The score of 70 \(Red\) has this evidence basis\. Configured geopolitical baseline: Active conflict — Iran-Israel war/,
-      );
-      assert.match(
-        hormuz,
-        /Observed score inputs: 0 warnings; maximum AIS congestion severity Normal\. Context only \(not score inputs\): AIS event count \(0 AIS disruptions\); transit count unavailable\./,
+        hormuzDriver,
+        /Observed score inputs: .+\. Context only \(not score inputs\): AIS event count (?:\(.+\)|unavailable); transit count (?:\(.+\)|unavailable)\.$/,
       );
       assert.doesNotMatch(hormuz, /data-chokepoint-status-mapping/);
       assert.ok(hormuz.includes(liveScriptTag), 'chokepoint live script must match the production CSP nonce');
@@ -4462,29 +4538,47 @@ describe('crawlable corpus generator', () => {
       assert.doesNotMatch(hormuz, /data-chokepoint-band>Loading/);
       assert.match(hormuz, /<time data-live-updated datetime="20\d{2}-\d{2}-\d{2}T/);
       assert.match(hormuz, /data-chokepoint-score>\d/);
-      // #7457: the frozen pulse stores todayTransits "0" with a non-zero WoW
-      // for Hormuz. That 0 is an AIS-window zero-fill, not a measurement.
-      assert.match(hormuz, /data-chokepoint-transits>—/);
-      assert.doesNotMatch(
-        hormuz,
-        /data-chokepoint-transits>0</,
-        'absent-feed chokepoint must not render a numeric 0 transit count',
-      );
-      assert.match(
-        hormuz,
-        /World Monitor is not currently publishing a transit count for Strait of Hormuz for this period/,
-      );
+      // #7457: a frozen pulse once stored todayTransits "0" with a non-zero
+      // WoW for Hormuz. That 0 is an AIS-window zero-fill, not a measurement,
+      // so the page withholds the count. Which branch Hormuz is on follows the
+      // committed pulse (#9115); the per-chokepoint loop below holds every
+      // page to its own flags.
       const hormuzDocument = htmlDocument(
         hormuz,
         'https://www.worldmonitor.app/chokepoints/strait-of-hormuz/',
       );
+      const hormuzTransitsNote = hormuzDocument.querySelector('[data-chokepoint-transits-note]');
+      // The generator's own publish-or-withhold rule and label formatting.
+      const hormuzTransitsLabel = chokepointCoverageMetrics({
+        todayTransits: hormuzPulse.todayTransits,
+        todayCountsAvailable: hormuzPulse.todayCountsAvailable,
+      }).todayTransits;
+      if (hormuzTransitsLabel != null) {
+        assert.ok(hormuz.includes(`data-chokepoint-transits>${hormuzTransitsLabel}<`), `Hormuz must publish its count ${hormuzTransitsLabel}`);
+        assert.doesNotMatch(hormuz, /World Monitor is not currently publishing a transit count for Strait of Hormuz/);
+        assert.equal(hormuzTransitsNote.hidden, true, 'a published count carries no withhold note');
+      } else {
+        assert.match(hormuz, /data-chokepoint-transits>—/);
+        assert.doesNotMatch(
+          hormuz,
+          /data-chokepoint-transits>0</,
+          'absent-feed chokepoint must not render a numeric 0 transit count',
+        );
+        assert.match(
+          hormuz,
+          /World Monitor is not currently publishing a transit count for Strait of Hormuz for this period/,
+        );
+        assert.match(hormuzTransitsNote.textContent,
+          /Not measured here in this snapshot.*matched AIS entry and exit reports/);
+      }
+      assert.match(hormuzDocument.querySelector('[data-live-chokepoint]').dataset.transitMeasurementNote,
+        /Historical PortWatch totals/);
       // Visibility follows the pulse's availability flags, not a fixed
       // expectation. This asserted `hidden === true` unconditionally, which was
       // only true while the committed snapshot predated the #7535 flags; the
       // first refresh that carried them inverted it (#7530, same class as
       // #7533). The contract is that a tile is present in SSR for hydration and
       // hidden exactly when its own source is unavailable.
-      const hormuzPulse = clock.livePulse.chokepoints.hormuz_strait;
       for (const [selector, available] of [
         ['[data-chokepoint-warnings]', hormuzPulse.navigationalWarningsAvailable === true],
         ['[data-chokepoint-ais-disruptions]', hormuzPulse.aisSnapshotAvailable === true],
@@ -4983,6 +5077,25 @@ describe('crawlable corpus generator', () => {
         'HowTo-shaped use-case pages must emit HowTo JSON-LD (#7462)',
       );
       const compareHub = read(outDir, 'compare/index.html');
+      // Count distinct referring HTML pages, not repeated anchors or source strings.
+      const comparisonReferrers = new Map(COMPARISON_PAGES.map(({ path }) => [path, new Set()]));
+      for (const file of readdirSync(outDir, { recursive: true }).filter((file) => file.endsWith('.html') && !file.startsWith('compare/'))) {
+        const html = read(outDir, file);
+        for (const [, href] of html.matchAll(/<a\b[^>]*\bhref="([^"]+)"/g)) {
+          if (comparisonReferrers.has(href)) comparisonReferrers.get(href).add(file);
+        }
+      }
+      for (const [path, referrers] of comparisonReferrers) {
+        assert.ok(referrers.size >= 3, `${path}: expected at least 3 distinct inbound pages outside /compare/, got ${referrers.size}`);
+        const html = read(outDir, `compare/${path.split('/')[2]}/index.html`);
+        const section = html.match(/<h2>Related comparisons<\/h2>([\s\S]*?)<\/ul>/)?.[1] || '';
+        const siblings = [...section.matchAll(/href="([^"]+)"/g)].map((match) => match[1]);
+        assert.ok(siblings.length >= 3 && siblings.length <= 4, `${path}: expected 3–4 related comparisons`);
+        assert.equal(new Set(siblings).size, siblings.length);
+        for (const sibling of siblings) {
+          assert.ok(sibling !== path && comparisonReferrers.has(sibling), `${path}: invalid sibling ${sibling}`);
+        }
+      }
       const compareHubLd = jsonLdObjects(compareHub);
       assertDefaultSpeakable(
         compareHubLd.find((entry) => entry['@type'] === 'CollectionPage'),
@@ -4998,7 +5111,7 @@ describe('crawlable corpus generator', () => {
       for (const page of COMPARISON_PAGES) {
         const html = read(outDir, 'compare/' + page.slug + '/index.html');
         const ld = jsonLdObjects(html);
-        const h1 = html.match(/<h1>([^<]+)<\/h1>/)?.[1] ?? '';
+        const h1 = (html.match(/<h1>([^<]+)<\/h1>/)?.[1] ?? '').replaceAll('&#39;', "'").replaceAll('&amp;', '&');
         assert.ok(
           h1.toLowerCase().includes(page.h1.toLowerCase()),
           page.slug + ' H1 must contain its own h1 string',
@@ -5045,7 +5158,13 @@ describe('crawlable corpus generator', () => {
       assert.match(liveuamapPage, /Multi-domain fusion/i);
       assert.match(liveuamapPage, /maritime/i);
       const riskDashboards = read(outDir, 'compare/best-geopolitical-risk-dashboards/index.html');
-      assert.match(riskDashboards, /Update latency at zero price/i);
+      assert.match(riskDashboards, /Self-serve real-time monitoring with an API and MCP server/i);
+      assert.match(riskDashboards, /<a href="\/blog\/authors\/elie-habib\/" rel="author">Elie Habib<\/a>/);
+      assert.match(riskDashboards, /<h3 data-rank="1">1\. World Monitor, best for /);
+      assert.ok(
+        jsonLdObjects(riskDashboards).some((entry) => entry['@type'] === 'BlogPosting'),
+        'the buyer\'s shortlist must emit BlogPosting JSON-LD',
+      );
       const acledPage = read(outDir, 'compare/worldmonitor-vs-acled/index.html');
       assert.match(acledPage, /wins on historical depth/i);
       assert.match(acledPage, /complement/i);
@@ -5077,7 +5196,7 @@ describe('crawlable corpus generator', () => {
       assert.ok(compareHub.includes('<h2>Master comparison matrix</h2>'));
       assert.ok(compareHub.includes('<th>Product</th>'));
       assert.ok(compareHub.includes('<th>Price</th>'));
-      for (const vendor of ['Liveuamap', 'ACLED (myACLED)', 'GDELT Cloud', 'Dataminr', 'Recorded Future', 'IMF PortWatch']) {
+      for (const vendor of ['Liveuamap', 'ACLED (myACLED)', 'GDELT Project', 'Dataminr', 'Recorded Future', 'IMF PortWatch']) {
         assert.match(compareHub, new RegExp('<td>' + vendor.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&') + '</td>'));
       }
       // First data row must carry both a product cell and a real price cell.
@@ -5137,6 +5256,8 @@ describe('crawlable corpus generator', () => {
         'Satellite MCP',
         'OSINT MCP',
         'IMF PortWatch',
+        // Hosted MCP, generally available 2026-09-28 per its support site.
+        'Recorded Future',
       ];
       for (const row of comparisonRows) {
         const hasVerifiedMcp = verifiedMcpProducts.some((name) => row[0].includes(name));
@@ -5393,9 +5514,10 @@ describe('crawlable corpus generator', () => {
         gitFileLastmod(repoRoot, data.sources.countryRegions),
         gitFileLastmod(repoRoot, data.sources.microstateTerritories),
         gitFileLastmod(repoRoot, RELATED_READING_PATH),
+        ...COUNTRY_RELATED_LINK_SOURCES.map((key) => gitFileLastmod(repoRoot, data.sources[key])),
         COUNTRY_PAGE_CONTENT_VERSION,
       ),
-      'countries lastmod must fold snapshot, pulse, movement-claim expiry, geographic inputs, related reading and the page content version',
+      'countries lastmod must fold snapshot, pulse, movement-claim expiry, geographic inputs, related reading, related-country inputs and the page content version',
     );
     // #7518 set COUNTRY_PAGE_CONTENT_VERSION and CII_COUNTRY_PAGE_CONTENT_VERSION
     // to the same date, so the two clocks coincide by value. Pin the DERIVATION
@@ -5727,7 +5849,7 @@ describe('live-pulse snapshot injection (#7533)', () => {
         gitFileLastmod(repoRoot, data.sources.countryRegions),
         gitFileLastmod(repoRoot, data.sources.microstateTerritories),
         ...CHOKEPOINT_PAGE_LASTMOD_PATHS.map((path) => gitFileLastmod(repoRoot, path)),
-        gitFileLastmod(repoRoot, data.sources.crisisRegistry),
+        ...COUNTRY_RELATED_LINK_SOURCES.map((key) => gitFileLastmod(repoRoot, data.sources[key])),
         gitFileLastmod(repoRoot, RELATED_READING_PATH),
         COUNTRY_PAGE_CONTENT_VERSION,
         CII_COUNTRY_PAGE_CONTENT_VERSION,
@@ -5774,6 +5896,7 @@ describe('live-pulse snapshot injection (#7533)', () => {
           gitFileLastmod(repoRoot, data.sources.countryRegions),
           gitFileLastmod(repoRoot, data.sources.microstateTerritories),
           gitFileLastmod(repoRoot, RELATED_READING_PATH),
+          ...COUNTRY_RELATED_LINK_SOURCES.map((key) => gitFileLastmod(repoRoot, data.sources[key])),
           COUNTRY_PAGE_CONTENT_VERSION,
         );
         // Self-check the premise: with the escalated date the fold must land
@@ -6938,7 +7061,12 @@ describe('country recent developments', () => {
       const name = names.get(code);
       assert.ok(name, `pulse country ${code} must resolve to a display name`);
       const html = renderCountryDevelopments({ countryName: name, developments });
-      assertCountryBriefPresentation({ pagePath: `/countries/${code}/`, html, sources: developments.brief.sources });
+      assertCountryBriefPresentation({
+        pagePath: `/countries/${code}/`,
+        html,
+        sources: developments.brief.sources,
+        evidence: developments.brief.evidence || [],
+      });
     }
     assert.ok(briefCount + withheldCount >= 10, 'the sweep must inspect published and withdrawn briefs');
   });
@@ -6975,7 +7103,6 @@ describe('GEO residue #7616 (U5 sources DataCatalog)', () => {
       dataCatalogLd,
       escapeHtml,
       pageDocument: ({ jsonLd, body }) => JSON.stringify({ jsonLd, body }),
-      withUtmSource: (url, source) => `${url}?utm_source=${source}`,
     };
     return renderSourcesIndex({
       sourceStats: { providerCount: 747, activeHosts: 760, structuredHosts: 331, feedHosts: 461 },
@@ -7070,7 +7197,6 @@ describe('GEO residue #7869 (sources ItemList)', () => {
         dataCatalogLd,
         escapeHtml,
         pageDocument: ({ jsonLd, body, extraStyles }) => JSON.stringify({ jsonLd, body, extraStyles }),
-        withUtmSource: (url, source) => `${url}?utm_source=${source}`,
       },
     }));
   };
