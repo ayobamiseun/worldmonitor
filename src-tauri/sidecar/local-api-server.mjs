@@ -830,21 +830,170 @@ const cloudPreferredPrefixes = !process.env.WS_RELAY_URL
 // These routes read seed-owned Redis snapshots that the local sidecar does not
 // hold. They must stay cloud-preferred even when a desktop configures WS relay;
 // relay availability does not provide Upstash credentials to local handlers.
+// Seed-only RPC routes in families that also have live handlers (#5906); the
+// whole-family cases are in cloudPreferredSeedOnlyPrefixes below.
+// tests/sidecar-cloud-preferred-seed-only.test.mjs derives this set from the
+// generated route tables and fails when an entry is not a real RPC path, when
+// its handler reaches an upstream itself, or when a seed-only route is missing.
 const cloudPreferredExact = new Set([
-  '/api/intelligence/v1/list-wsb-tickers',
-  '/api/displacement/v1/get-displacement-summary',
   '/api/bootstrap',
+  '/api/aviation/v1/get-airport-ops-summary',
+  '/api/displacement/v1/get-displacement-summary',
+  '/api/displacement/v1/get-internal-displacement',
+  '/api/economic/v1/get-bis-credit',
+  '/api/economic/v1/get-bis-exchange-rates',
+  '/api/economic/v1/get-bis-policy-rates',
+  '/api/economic/v1/get-bls-series',
+  '/api/economic/v1/get-china-macro-snapshot',
+  '/api/economic/v1/get-crude-inventories',
+  '/api/economic/v1/get-ecb-fx-rates',
+  '/api/economic/v1/get-economic-calendar',
+  '/api/economic/v1/get-economic-stress',
+  '/api/economic/v1/get-energy-capacity',
+  '/api/economic/v1/get-energy-crisis-policies',
+  '/api/economic/v1/get-energy-prices',
+  '/api/economic/v1/get-eu-fsi',
+  '/api/economic/v1/get-eu-gas-storage',
+  '/api/economic/v1/get-eu-yield-curve',
+  '/api/economic/v1/get-eurostat-country-data',
+  '/api/economic/v1/get-fao-food-price-index',
+  '/api/economic/v1/get-fred-series',
+  '/api/economic/v1/get-fred-series-batch',
+  '/api/economic/v1/get-government-yield-curve',
+  '/api/economic/v1/get-macro-signals',
+  '/api/economic/v1/get-nat-gas-storage',
+  '/api/economic/v1/get-national-debt',
+  '/api/economic/v1/get-oil-inventories',
+  '/api/economic/v1/get-oil-stocks-analysis',
+  '/api/economic/v1/get-us-cpi-monthly',
+  '/api/economic/v1/get-us-interest-rates',
+  '/api/economic/v1/get-us-treasury-par-yield-curve',
+  '/api/economic/v1/get-world-cpi-monthly',
+  '/api/economic/v1/list-bigmac-prices',
+  '/api/economic/v1/list-fuel-prices',
+  '/api/economic/v1/list-global-tenders',
+  '/api/economic/v1/list-grocery-basket-prices',
+  '/api/forecast/v1/get-forecasts',
+  '/api/forecast/v1/get-simulation-outcome',
+  '/api/forecast/v1/get-simulation-package',
+  '/api/infrastructure/v1/get-bootstrap-data',
+  '/api/infrastructure/v1/get-temporal-baseline',
+  '/api/infrastructure/v1/list-internet-ddos-attacks',
+  '/api/infrastructure/v1/list-internet-outages',
+  '/api/infrastructure/v1/list-internet-traffic-anomalies',
+  '/api/infrastructure/v1/list-temporal-anomalies',
+  '/api/intelligence/v1/compute-energy-shock',
+  '/api/intelligence/v1/get-china-decision-signals',
+  '/api/intelligence/v1/get-country-energy-profile',
+  '/api/intelligence/v1/get-country-port-activity',
+  '/api/intelligence/v1/get-country-risk',
+  '/api/intelligence/v1/get-gdelt-topic-timeline',
+  '/api/intelligence/v1/get-pizzint-status',
+  '/api/intelligence/v1/get-regional-brief',
+  '/api/intelligence/v1/get-regional-snapshot',
+  '/api/intelligence/v1/get-social-velocity',
+  '/api/intelligence/v1/list-cross-source-signals',
+  '/api/intelligence/v1/list-gps-interference',
+  '/api/intelligence/v1/list-market-implications',
+  '/api/intelligence/v1/list-material-events',
+  '/api/intelligence/v1/list-satellites',
+  '/api/intelligence/v1/list-security-advisories',
+  '/api/intelligence/v1/list-wsb-tickers',
+  '/api/market/v1/get-cot-positioning',
+  '/api/market/v1/get-fear-greed-index',
+  '/api/market/v1/get-gold-intelligence',
+  '/api/market/v1/get-hyperliquid-flow',
+  '/api/market/v1/get-market-breadth-history',
+  '/api/market/v1/get-physical-divergence-index',
+  '/api/market/v1/get-physical-premiums',
+  '/api/market/v1/get-sector-summary',
+  '/api/market/v1/list-ai-tokens',
+  '/api/market/v1/list-commodity-quotes',
+  '/api/market/v1/list-crypto-sectors',
+  '/api/market/v1/list-defi-tokens',
+  '/api/market/v1/list-earnings-calendar',
+  '/api/market/v1/list-etf-flows',
+  '/api/market/v1/list-gulf-quotes',
+  '/api/market/v1/list-other-tokens',
   '/api/military/v1/get-defense-industrial-base',
-  '/api/supply-chain/v1/get-country-vulnerabilities',
+  '/api/military/v1/get-theater-posture',
+  '/api/military/v1/get-usni-fleet-report',
+  '/api/military/v1/list-defense-patents',
+  '/api/news/v1/summarize-article-cache',
+  '/api/research/v1/list-arxiv-papers',
+  '/api/research/v1/list-hackernews-items',
+  '/api/research/v1/list-trending-repos',
+  '/api/resilience/v1/get-demographics-capability',
+  '/api/resilience/v1/get-food-stocks',
+  '/api/resilience/v1/get-runtime-manifest',
+  '/api/sanctions/v1/list-sanctions-pressure',
+  '/api/scenario/v1/get-scenario-status',
+  '/api/supply-chain/v1/get-bypass-options',
   '/api/supply-chain/v1/get-chokepoint-dependencies',
+  '/api/supply-chain/v1/get-chokepoint-history',
+  '/api/supply-chain/v1/get-country-vulnerabilities',
+  '/api/supply-chain/v1/get-fuel-shortage-detail',
+  '/api/supply-chain/v1/get-mineral-production',
+  '/api/supply-chain/v1/get-multi-sector-cost-shock',
+  '/api/supply-chain/v1/get-pipeline-detail',
+  '/api/supply-chain/v1/get-shipping-rates',
+  '/api/supply-chain/v1/get-shipping-stress',
+  '/api/supply-chain/v1/get-storage-facility-detail',
+  '/api/supply-chain/v1/list-energy-disruptions',
+  '/api/supply-chain/v1/list-fuel-shortages',
+  '/api/supply-chain/v1/list-pipelines',
+  '/api/supply-chain/v1/list-storage-facilities',
   '/api/supply-chain/v1/list-vulnerability-rankings',
+  '/api/trade/v1/get-customs-revenue',
+  '/api/trade/v1/get-tariff-trends',
+  '/api/trade/v1/get-trade-barriers',
+  '/api/trade/v1/get-trade-flows',
+  '/api/trade/v1/get-trade-restrictions',
+  '/api/trade/v1/list-comtrade-flows',
+  '/api/v2/shipping/route-intelligence',
+  '/api/webcam/v1/list-webcams',
 ]);
+// Route families whose EVERY handler only reads seed-owned Redis (#5906). The
+// sidecar never holds Upstash credentials (UPSTASH_* is not in
+// ALLOWED_ENV_KEYS), a Redis miss degrades to an empty 200, and an empty 200
+// never trips the `!response.ok` cloud fallback — so served locally these
+// families render blank panels with no error anywhere. Always cloud,
+// WS_RELAY_URL or not. A family that gains a live handler moves to exact
+// entries; the contract test above enforces that.
+const cloudPreferredSeedOnlyPrefixes = [
+  '/api/climate/v1/',
+  '/api/conflict/v1/',
+  '/api/consumer-prices/v1/',
+  '/api/cyber/v1/',
+  '/api/health/v1/',
+  '/api/natural/v1/',
+  '/api/positive-events/v1/',
+  '/api/prediction/v1/',
+  '/api/radiation/v1/',
+  '/api/safety/v1/',
+  '/api/seismology/v1/',
+  '/api/thermal/v1/',
+  '/api/unrest/v1/',
+  '/api/wildfire/v1/',
+];
 const cloudPreferredAlwaysPrefixes = ['/api/scorecard/v1/'];
+
+// Versioned route families (api/v{N}/{domain}) the desktop deliberately never
+// bundles — scripts/build-sidecar-handlers.mjs refuses to build an undeclared
+// one, and its CLOUD_ONLY_ROUTE_FAMILIES must list exactly these (#5907).
+// Routed to the cloud on purpose, WS_RELAY_URL or not: route-intelligence reads
+// seed-owned Redis (empty 200 locally, so `!ok` fallback never fires) and the
+// webhook family is Pro-gated + server-persisted, so the gate lives upstream.
+// Before this list the family reached the cloud only via the 404 "handler
+// missing" fallback — undeclared, and invisible when cloudFallback is off.
+const cloudOnlyRouteFamilyPrefixes = ['/api/v2/shipping/'];
 
 function isCloudPreferred(pathname) {
   if (cloudPreferred.has(pathname)) return true;
   if (cloudPreferredExact.has(pathname)) return true;
   return cloudPreferredAlwaysPrefixes.some(p => pathname.startsWith(p))
+    || cloudPreferredSeedOnlyPrefixes.some(p => pathname.startsWith(p))
+    || cloudOnlyRouteFamilyPrefixes.some(p => pathname.startsWith(p))
     || cloudPreferredPrefixes.some(p => pathname.startsWith(p));
 }
 

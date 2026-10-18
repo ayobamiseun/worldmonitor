@@ -1,8 +1,13 @@
 import { convexTest } from "convex-test";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import schema from "../schema";
 import { internal } from "../_generated/api";
 import { PRODUCT_CATALOG } from "../config/productCatalog";
+import {
+  DODO_SIGNATURE_FAILURE_REPORT_COOLDOWN_MS,
+  DODO_WEBHOOK_MAX_BODY_BYTES,
+  scheduleDodoSignatureFailureReport,
+} from "../payments/webhookHandlers";
 
 const modules = import.meta.glob("../**/*.ts");
 
@@ -162,6 +167,7 @@ function failureArgs(overrides: Record<string, unknown> = {}) {
 
 describe("Dodo webhook failure tracking", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
     delete process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
@@ -800,7 +806,11 @@ describe("Dodo webhook failure tracking", () => {
   });
 
   test("still rejects a bad signature with 401 and records no failure", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(BASE_TIMESTAMP);
+    // Fake timers so the scheduled signature report is drained below instead
+    // of firing after this test's transaction is gone, mid-way through a
+    // later test.
+    vi.useFakeTimers();
+    vi.setSystemTime(BASE_TIMESTAMP);
     process.env.DODO_PAYMENTS_WEBHOOK_SECRET = DODO_WEBHOOK_SECRET;
     const t = await makeT();
     const body = JSON.stringify(makeProviderValidSubscriptionPayload());
@@ -825,5 +835,145 @@ describe("Dodo webhook failure tracking", () => {
       ctx.db.query("paymentWebhookFailures").collect(),
     );
     expect(rows).toHaveLength(0);
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+  });
+});
+
+describe("Dodo webhook unauthenticated cost bounds", () => {
+  let t: Awaited<ReturnType<typeof makeT>>;
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(BASE_TIMESTAMP);
+    process.env.DODO_PAYMENTS_WEBHOOK_SECRET = DODO_WEBHOOK_SECRET;
+    t = await makeT();
+  });
+  afterEach(async () => {
+    try {
+      await t.finishAllScheduledFunctions(vi.runAllTimers);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+      delete process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
+    }
+  });
+
+  const postBadlySigned = (t: Awaited<ReturnType<typeof makeT>>, body: string, webhookId: string) =>
+    t.fetch("/dodopayments-webhook", {
+      method: "POST",
+      headers: {
+        "webhook-id": webhookId,
+        "webhook-timestamp": String(Math.floor(Date.now() / 1000)),
+        "webhook-signature": "v1,AAAAAAAABBBBBBBBCCCCCCCCDDDDDDDDEEEEEEEE=",
+      },
+      body,
+    });
+
+  const scheduledSignatureReports = (t: Awaited<ReturnType<typeof makeT>>) =>
+    t.run(async (ctx) =>
+      (await ctx.db.system.query("_scheduled_functions").collect()).filter((job) =>
+        job.name.includes("reportDodoSignatureFailure"),
+      ),
+    );
+
+  test("a report is admitted exactly when the shared cooldown expires", async () => {
+    expect((await postBadlySigned(t, "{}", "wh_first")).status).toBe(401);
+    const initialSummary = await t.run((ctx) => ctx.db.query("paymentWebhookFailureSummary").first());
+
+    vi.setSystemTime(BASE_TIMESTAMP + DODO_SIGNATURE_FAILURE_REPORT_COOLDOWN_MS - 1);
+    expect((await postBadlySigned(t, "{}", "wh_suppressed")).status).toBe(401);
+    expect(await scheduledSignatureReports(t)).toHaveLength(1);
+    expect(await t.run((ctx) => ctx.db.query("paymentWebhookFailureSummary").first())).toEqual(initialSummary);
+
+    vi.setSystemTime(BASE_TIMESTAMP + DODO_SIGNATURE_FAILURE_REPORT_COOLDOWN_MS);
+    expect((await postBadlySigned(t, "{}", "wh_next_window")).status).toBe(401);
+    expect(await scheduledSignatureReports(t)).toHaveLength(2);
+    expect(await t.run((ctx) => ctx.db.query("paymentWebhookFailures").collect())).toHaveLength(0);
+  });
+
+  test("a burst of bad signatures schedules one Sentry report, not one per request", async () => {
+    const body = JSON.stringify(makeProviderValidSubscriptionPayload());
+
+    for (let i = 0; i < 3; i += 1) {
+      const response = await postBadlySigned(t, body, `wh_burst_${i}`);
+      expect(response.status).toBe(401);
+    }
+
+    expect(await scheduledSignatureReports(t)).toHaveLength(1);
+  });
+
+  test("fresh request modules share the reporting cooldown", async () => {
+    for (let i = 0; i < 3; i += 1) {
+      vi.resetModules();
+      const response = await postBadlySigned(t, "{}", `wh_fresh_${i}`);
+      expect(response.status).toBe(401);
+    }
+    expect(await scheduledSignatureReports(t)).toHaveLength(1);
+  });
+
+  const reportArgs = {
+    webhookId: "wh_candidate",
+    webhookTimestamp: String(BASE_TIMESTAMP / 1000),
+    errorMessage: "Invalid signature",
+  };
+
+  test("overlapping candidates recheck the shared admission record", async () => {
+    expect(await t.query(internal.payments.webhookHandlers.getLastDodoSignatureFailureReportAt, {})).toBeNull();
+    const admitted = await Promise.all(Array.from({ length: 3 }, () =>
+      t.mutation(internal.payments.webhookHandlers.scheduleDodoSignatureFailureReport, reportArgs),
+    ));
+    // convex-test serializes top-level mutations; this checks stale candidates,
+    // while production OCC retries serialize writes to the seeded document.
+    expect(admitted.filter(Boolean)).toHaveLength(1);
+    expect(await scheduledSignatureReports(t)).toHaveLength(1);
+  });
+
+  test("a scheduler failure rolls back admission so the next request can retry", async () => {
+    await expect(t.run((ctx) => scheduleDodoSignatureFailureReport._handler({
+      ...ctx,
+      scheduler: {
+        ...ctx.scheduler,
+        runAfter: async () => { throw new Error("Scheduler unavailable"); },
+      },
+    }, reportArgs))).rejects.toThrow("Scheduler unavailable");
+    expect(await t.query(internal.payments.webhookHandlers.getLastDodoSignatureFailureReportAt, {})).toBeNull();
+    expect(await scheduledSignatureReports(t)).toHaveLength(0);
+    expect((await postBadlySigned(t, "{}", "wh_retry")).status).toBe(401);
+    expect(await scheduledSignatureReports(t)).toHaveLength(1);
+  });
+
+  test("missing admission state preserves 401 and recovers after seeding", async () => {
+    await t.run(async (ctx) => {
+      const summary = await ctx.db.query("paymentWebhookFailureSummary").first();
+      if (summary) await ctx.db.delete(summary._id);
+    });
+    expect((await postBadlySigned(t, "{}", "wh_unseeded")).status).toBe(401);
+    expect(await scheduledSignatureReports(t)).toHaveLength(0);
+    expect(await t.run((ctx) => ctx.db.query("paymentWebhookFailureSummary").collect())).toEqual([]);
+
+    await t.mutation(internal.payments.webhookMutations._seedFailureSummary, {});
+    expect((await postBadlySigned(t, "{}", "wh_seeded")).status).toBe(401);
+    expect(await scheduledSignatureReports(t)).toHaveLength(1);
+  });
+
+  test("legacy queued reports still accept optional suppression counts", async () => {
+    await expect(t.mutation(internal.payments.webhookHandlers.reportDodoSignatureFailure, {
+      ...reportArgs,
+      suppressedSinceLastReport: 7,
+    })).rejects.toThrow("(+7 more since the last report)");
+  });
+
+  test("an oversize body is refused before any crypto, report or failure write", async () => {
+    const response = await postBadlySigned(t, "x".repeat(DODO_WEBHOOK_MAX_BODY_BYTES + 1), "wh_oversize");
+
+    expect(response.status).toBe(413);
+    expect(await scheduledSignatureReports(t)).toHaveLength(0);
+    expect(await t.run((ctx) => ctx.db.query("paymentWebhookFailures").collect())).toHaveLength(0);
+  });
+
+  test("a body exactly at the limit still reaches signature verification", async () => {
+    const response = await postBadlySigned(t, "x".repeat(DODO_WEBHOOK_MAX_BODY_BYTES), "wh_at_limit");
+
+    expect(response.status).toBe(401);
+    expect(await response.text()).toBe("Invalid webhook signature");
   });
 });
