@@ -36,6 +36,18 @@ const MIRRORED_FILES = [
   'stablecoins.json',
   'story-identity.js',
   'un-to-iso2.json',
+  'world-bank-rpc-cache.js',
+  // #8867: the market-alert detector graph that seed-market-alert-ledger.mjs
+  // runs from scripts/shared/ on Railway.
+  'market-alert-core.js',
+  'text-analysis-core.js',
+  'entity-registry.js',
+  'entity-extraction-core.js',
+  'news-clustering-core.js',
+  // #9095: news-clustering-core.js imports it for same-copy detection.
+  'syndication.js',
+  // Push event registry read by scripts/shipping-webhook-worker.mjs on Railway.
+  'event-triggers.json',
 ];
 
 describe('scripts/shared/ mirrors shared/', () => {
@@ -70,6 +82,7 @@ describe('regional snapshot seed scripts use scripts/shared/ (not repo-root shar
     'scripts/_seed-utils.mjs',
     'scripts/_clustering.mjs',
     'scripts/seed-regional-snapshots.mjs',
+    'scripts/seed-wb-indicators.mjs',
     'scripts/regional-snapshot/actor-scoring.mjs',
     'scripts/regional-snapshot/balance-vector.mjs',
     'scripts/regional-snapshot/evidence-collector.mjs',

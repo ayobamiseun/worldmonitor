@@ -212,6 +212,8 @@ import { TierPreferenceHandoff } from '@/app/tier-preference-handoff';
 import { initialRegionFromCache, resolveUserRegion, resolvePreciseUserCoordinates, type PreciseCoordinates } from '@/utils/user-location';
 import { showProBanner } from '@/components/ProBanner';
 import { getAuthState, initAuthState, subscribeAuthState } from '@/services/auth-state';
+import { installSignUpResume } from '@/services/sign-up-resume';
+import { createSignUpResumeOverlay } from '@/components/SignUpResumeOverlay';
 import {
   CLOUD_PREFS_APPLIED_EVENT,
   CLOUD_PREFS_SIGN_IN_TERMINAL_EVENT,
@@ -255,7 +257,11 @@ import {
   resetEntitlementState,
   resetEntitlementVerification,
 } from '@/services/entitlements';
-import { initSubscriptionWatch, destroySubscriptionWatch } from '@/services/billing';
+import { initSubscriptionWatch, destroySubscriptionWatch, openBillingPortal } from '@/services/billing';
+import {
+  captureBillingPortalIntentFromUrl,
+  resumePendingBillingPortal,
+} from '@/services/billing-portal-intent';
 import {
   FREE_TIER_FOLLOW_LIMIT,
   WM_FOLLOWED_COUNTRIES_CAP_DROP,
@@ -299,6 +305,15 @@ export type { CountryBriefSignals } from '@/app/app-context';
 
 export class App {
   private state: AppContext;
+  private resumeBillingPortal(capturedThisLoad = false): Promise<boolean> {
+    return resumePendingBillingPortal({
+      getUserId: () => getAuthState().user?.id,
+      openAuth: () => this.state.authModal?.open(),
+      openPortal: () => openBillingPortal(),
+      notify: (message) => showToast(message),
+    }, capturedThisLoad);
+  }
+
   private pendingDeepLinkCountry: string | null = null;
   private pendingDeepLinkExpanded = false;
   private pendingDeepLinkStoryCode: string | null = null;
@@ -2603,6 +2618,7 @@ export class App {
     // Verify OAuth OTT and hydrate auth session BEFORE any UI subscribes to auth state
     await initAuthState();
     initAuthAnalytics();
+    installSignUpResume(createSignUpResumeOverlay());
     installCloudPrefsSync(SITE_VARIANT);
     window.addEventListener(CLOUD_PREFS_APPLIED_EVENT, this.handleCloudPrefsApplied);
     window.addEventListener(
@@ -2829,6 +2845,7 @@ export class App {
         void resumePendingCheckout({
           openAuth: () => this.state.authModal?.open(),
         });
+        void this.resumeBillingPortal();
       } else if (userId === null && _prevUserId !== null) {
         // Clerk's mounted UserButton signs out through the SDK directly, so
         // this observed transition is the authoritative place to invalidate
@@ -2958,6 +2975,11 @@ export class App {
         openAuth: () => this.state.authModal?.open(),
       });
     }
+    // Payment-email fallback (/dashboard?billing=portal): open the portal
+    // now if signed in, else after the sign-in the auth listener observes.
+    if (captureBillingPortalIntentFromUrl()) {
+      void this.resumeBillingPortal(true);
+    }
 
     // Phase 4: MapLayerHandlers, CountryIntel. SearchManager is lazy-loaded
     // on first CMD+K/search-button open so its modal catalog stays off startup.
@@ -2975,6 +2997,9 @@ export class App {
     this.pendingDeepLinkExpanded = initState.expanded === true;
     this.pendingDeepLinkChokepoint = initState.chokepoint ?? null;
     const earlyParams = new URLSearchParams(window.location.search);
+    if (earlyParams.get('settings') === 'notifications') {
+      void this.state.unifiedSettings?.open('notifications');
+    }
     this.pendingDeepLinkStoryCode = earlyParams.get('c') ?? null;
     this.pendingDeepLinkSearchQuery = readDashboardSearchQuery(window.location.search);
     this.eventHandlers.setupUrlStateSync();

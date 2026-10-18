@@ -474,6 +474,8 @@ PROTO_INPUTS=(
   scripts/shared/iso2-to-region.json
   server/_shared/api-key-rate-limit.ts
   server/_shared/auth-session.ts
+  server/_shared/bounded-jmespath.ts
+  server/_shared/bounded-json.ts
   server/_shared/cache-contract.ts
   server/_shared/client-ip.ts
   server/_shared/deprecation-policy.ts
@@ -503,6 +505,7 @@ PROTO_INPUTS=(
   server/worldmonitor/consumer-prices/v1/get-consumer-price-basket-series.ts
   server/worldmonitor/consumer-prices/v1/_selection.ts
   server/worldmonitor/supply-chain/v1/scenario-templates.ts
+  shared/aircraft-emergencies.ts
   shared/attribution-rider.ts
   shared/compare-and-delete-script.cjs
   shared/china-corridor-control-towers.ts
@@ -640,6 +643,14 @@ fi
 if changed '^(src/|scripts/(enforce-safe-local-storage|lib/source-scan)\.mjs$)'; then
   echo "Running raw localStorage check..."
   npm run lint:safe-local-storage || exit 1
+fi
+
+# Gated on all of src/ because the edit this catches is "someone added an
+# overlay" or "someone added a reload consumer", and overlays live in
+# components/, services/, features/ and app/ alike (WORLDMONITOR-15X/15Z).
+if changed '^(src/|scripts/(enforce-overlay-reload-policy|lib/source-scan)\.mjs$)'; then
+  echo "Running overlay reload-contract check..."
+  npm run lint:overlay-reload-policy || exit 1
 fi
 
 if changed '^(src/|api/|server/|scripts/check-sentry-coverage\.mjs$)'; then

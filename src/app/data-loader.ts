@@ -46,6 +46,7 @@ import {
 import { INTEL_HOTSPOTS, CONFLICT_ZONES } from '@/config/geo';
 import { tokenizeForMatch, matchKeyword } from '@/utils/keyword-match';
 import { withTimeout } from '@/utils/with-timeout';
+import { assessCorroboration, evidenceFromCluster } from '@/utils/corroboration-flag';
 import { fetchPredictionCandidates, reprioritizeMarketsForRegion as reprioritizePredictionMarketsForRegion } from '@/services/prediction';
 import {
   fetchEarthquakes,
@@ -122,7 +123,7 @@ import type { SatRecEntry } from '@/services/satellites';
 import { dataFreshness, type DataSourceId } from '@/services/data-freshness';
 import type { CorrelationSignal } from '@/services/correlation';
 import { fetchConflictEvents, fetchUcdpEvents, fetchIranEvents } from '@/services/conflict';
-import { fetchUnhcrPopulation } from '@/services/displacement';
+import { fetchCrossBorderArrivals, fetchInternalDisplacement, fetchUnhcrPopulation } from '@/services/displacement';
 import { fetchClimateAnomalies } from '@/services/climate';
 import { fetchImdCycloneMarine } from '@/services/imd-cyclone-marine';
 import { fetchSecurityAdvisories } from '@/services/security-advisories';
@@ -207,7 +208,6 @@ import type {
   SectorBriefContext,
 } from '@/services/daily-market-brief';
 import { fetchCachedRiskScores, getCachedScores, toCountryScore, type CachedRiskScores } from '@/services/cached-risk-scores';
-import type { ThreatLevel as ClientThreatLevel } from '@/types';
 import type { NewsItem as ProtoNewsItem } from '@/generated/client/worldmonitor/news/v1/service_client';
 import { fetchMarketImplications } from '@/services/market-implications';
 import { fetchDiseaseOutbreaks } from '@/services/disease-outbreaks';
@@ -223,9 +223,7 @@ import type { GeoHubsPanel } from '@/components/GeoHubsPanel';
 import type { TechHubsPanel } from '@/components/TechHubsPanel';
 import { EconomicServiceClient, MarketServiceClient, ResearchServiceClient } from '@/services/generated-rpc-clients';
 
-// The proto-level -> label map lives in shared/news-clustering-core.js so the
-// client digest loader and the server-side MCP tools cannot drift (#5697).
-import { protoThreatLevelToLabel } from '../../shared/news-clustering-core.js';
+import { protoItemToNewsItem } from '@/services/news-digest-items';
 import { normalizeStockSymbol } from '../../shared/stock-symbol';
 
 type PhysicalPremiumFetcher = typeof import('@/services/market')['fetchPhysicalPremiums'];
@@ -265,52 +263,6 @@ export async function loadPhysicalPremiumComparisonIfNeeded(
   return true;
 }
 
-const PROTO_TO_CLIENT_PHASE: Record<string, import('@/types').StoryPhase> = {
-  STORY_PHASE_BREAKING:   'breaking',
-  STORY_PHASE_DEVELOPING: 'developing',
-  STORY_PHASE_SUSTAINED:  'sustained',
-  STORY_PHASE_FADING:     'fading',
-};
-
-function protoItemToNewsItem(p: ProtoNewsItem): NewsItem {
-  const level: ClientThreatLevel = protoThreatLevelToLabel(p.threat?.level);
-  return {
-    source: p.source,
-    title: p.title,
-    link: p.link,
-    pubDate: new Date(p.publishedAt),
-    isAlert: p.isAlert,
-    importanceScore: p.importanceScore || undefined,
-    credibilityScore: Number.isFinite(p.credibilityScore) ? p.credibilityScore : undefined,
-    corroborationCount: p.corroborationCount || undefined,
-    storyMeta: p.storyMeta && p.storyMeta.phase !== 'STORY_PHASE_UNSPECIFIED' ? {
-      firstSeen:    p.storyMeta.firstSeen,
-      mentionCount: p.storyMeta.mentionCount,
-      sourceCount:  p.storyMeta.sourceCount,
-      phase: PROTO_TO_CLIENT_PHASE[p.storyMeta.phase] ?? 'breaking',
-    } : undefined,
-    threat: p.threat ? {
-      level,
-      category: p.threat.category as import('@/services/threat-classifier').EventCategory,
-      confidence: p.threat.confidence,
-      source: (p.threat.source || 'keyword') as 'keyword' | 'ml' | 'llm',
-    } : undefined,
-    ...(p.locationName && { locationName: p.locationName }),
-    ...(p.location && { lat: p.location.latitude, lon: p.location.longitude }),
-    ...(p.importanceScore ? { importanceScore: p.importanceScore } : {}),
-    ...(Number.isFinite(p.credibilityScore) ? { credibilityScore: p.credibilityScore } : {}),
-    ...(p.corroborationCount ? { corroborationCount: p.corroborationCount } : {}),
-    // Cleaned RSS description (U3 proto field 12). Only populated when the
-    // upstream feed carried a usable <description>/<content:encoded>/<summary>;
-    // empty string otherwise. Consumers render the headline and fall back to
-    // snippet as a secondary line when non-empty.
-    ...(p.snippet ? { snippet: p.snippet } : {}),
-    // Ingest-extracted tickers (#4922a, proto field 13). Runtime guard on
-    // top of the generated type: persisted last-good digests from before
-    // the rollout carry items without the field.
-    ...(p.tickers && p.tickers.length ? { tickers: p.tickers } : {}),
-  };
-}
 
 interface SelectedNewsDigest {
   digest: ListFeedDigestResponse;
@@ -2313,8 +2265,10 @@ export class DataLoaderManager implements AppModule {
           title: c.primaryTitle,
           threatLevel: c.threat?.level ?? 'info',
           timestamp: c.lastUpdated,
+          // #9213: the verdict the News panel shows for this cluster.
+          corroboration: assessCorroboration(evidenceFromCluster(c)),
         }));
-      if (geoLocated.length > 0) {
+      if (geoLocated.length > 0 || landed) {
         this.ctx.map?.setNewsLocations(geoLocated);
       }
     } catch (error) {
@@ -3213,7 +3167,7 @@ export class DataLoaderManager implements AppModule {
         portAlerts: [],
         marineBulletins: [],
         sourceName: 'India Meteorological Department',
-        sourceUrl: 'https://api.imd.gov.in/public/api_reference.html',
+        sourceUrl: 'https://mausam.imd.gov.in/responsive/marine_forecast.php',
       };
     }
   }
@@ -3540,6 +3494,10 @@ export class DataLoaderManager implements AppModule {
           flightClusters: flightData.clusters,
           vessels: vesselData.vessels,
           vesselClusters: vesselData.clusters,
+          flightDataState: flightData.dataState,
+          vesselDataState: vesselData.dataState,
+          vesselNegativeEvidenceConfirmed: vesselData.negativeEvidenceConfirmed,
+          vesselCoverageNotes: vesselData.coverageNotes,
         };
         this.callbacks.refreshOpenCountryMilitary?.();
         this.callbacks.refreshOpenCountryTimeline?.();
@@ -3629,6 +3587,35 @@ export class DataLoaderManager implements AppModule {
         dataFreshness.recordError('unhcr', String(error));
       }
     })());
+
+    tasks.push((async () => {
+      try {
+        const internal = await fetchInternalDisplacement();
+        if (internal.operations.length === 0) return;
+        this.callPanel('displacement', 'setInternalData', internal);
+        if (this.ctx.mapLayers.displacement) {
+          this.ctx.map?.setInternalDisplacement(internal);
+        }
+      } catch (error) {
+        console.error('[Intelligence] IOM DTM displacement fetch failed:', error);
+      }
+    })());
+
+    // On-demand key: only fetched when something shows it.
+    if (this.ctx.mapLayers.displacement || this.ctx.panelSettings['displacement']?.enabled) {
+      tasks.push((async () => {
+        try {
+          const crossBorder = await fetchCrossBorderArrivals();
+          if (crossBorder.situations.length === 0) return;
+          this.callPanel('displacement', 'setCrossBorderData', crossBorder);
+          if (this.ctx.mapLayers.displacement) {
+            this.ctx.map?.setCrossBorderArrivals(crossBorder);
+          }
+        } catch (error) {
+          console.error('[Intelligence] UNHCR cross-border fetch failed:', error);
+        }
+      })());
+    }
 
     tasks.push((async () => {
       try {
@@ -4045,6 +4032,10 @@ export class DataLoaderManager implements AppModule {
         flightClusters: flightData.clusters,
         vessels: vesselData.vessels,
         vesselClusters: vesselData.clusters,
+        flightDataState: flightData.dataState,
+        vesselDataState: vesselData.dataState,
+        vesselNegativeEvidenceConfirmed: vesselData.negativeEvidenceConfirmed,
+        vesselCoverageNotes: vesselData.coverageNotes,
       };
       this.callbacks.refreshOpenCountryMilitary?.();
       this.callbacks.refreshOpenCountryTimeline?.();
@@ -4418,7 +4409,10 @@ export class DataLoaderManager implements AppModule {
       } = await import('@/services/trade');
       const [restrictions, tariffs, flows, barriers, revenue, comtrade] = await Promise.allSettled([
         fetchTradeRestrictions([], 50),
-        fetchTariffTrends('840', '156', '', 10),
+        // No partner: the tab shows the US MFN baseline against the US-wide
+        // effective rate. A partner selects the WITS bilateral average, which
+        // the tab does not label as such.
+        fetchTariffTrends('840', '', '', 10),
         // Partner '000' is World. This asked for '156' (China) until #6309:
         // WTO's ITS_MTV_AX/AM indicators publish a World total only and answer
         // 204 for any other partner, so the flows tab requested a combination
@@ -4757,16 +4751,15 @@ export class DataLoaderManager implements AppModule {
         fetchGdeltTensions()
       ]);
 
+      this.ctx.pizzintIndicator?.show();
+      this.ctx.pizzintIndicator?.updateStatus(status);
+      this.ctx.pizzintIndicator?.updateTensions(tensions);
       if (status.locationsMonitored === 0) {
-        this.ctx.pizzintIndicator?.hide();
         this.ctx.statusPanel?.updateApi('PizzINT', { status: 'error' });
         dataFreshness.recordError('pizzint', 'No monitored locations returned');
         return;
       }
 
-      this.ctx.pizzintIndicator?.show();
-      this.ctx.pizzintIndicator?.updateStatus(status);
-      this.ctx.pizzintIndicator?.updateTensions(tensions);
       this.ctx.statusPanel?.updateApi('PizzINT', { status: 'ok' });
       dataFreshness.recordUpdate('pizzint', Math.max(status.locationsMonitored, tensions.length));
     } catch (error) {
