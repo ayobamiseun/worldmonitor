@@ -544,8 +544,9 @@ export interface PowerFeatureMcpClientLike {
  * OR-ed: a locally stored custom widget, or a connected MCP client that has not
  * been revoked (#5612). Before this, only widgets counted, so a Pro user who
  * had connected Claude Desktop or Cursor weeks earlier still saw the power
- * step presented as unfinished work. `mcpClients` is optional because the
- * synchronous context reader has no network access; pass what you have.
+ * step presented as unfinished work. `mcpClients` is optional: a caller that
+ * has not read the client list (a widget already answered, or the lookup
+ * failed) passes nothing and gets the widget-only answer.
  */
 export function resolveHasUsedPowerFeature(
   widgetCount: number,
