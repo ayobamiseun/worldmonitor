@@ -37,8 +37,10 @@ import type { MarketServiceClient as MarketServiceClientCtor } from '@/generated
 type RpcClientOptions = NonNullable<ConstructorParameters<typeof MarketServiceClientCtor>[1]>;
 type RpcClientConstructor<T extends object> = new (baseURL: string, options?: RpcClientOptions) => T;
 type RpcClientConstructorLoader<T extends object> = () => Promise<RpcClientConstructor<T>>;
+/** Maps every public member that is not an async method to `never`, so `T extends AsyncMethodsOnly<T>` fails for it. */
+type AsyncMethodsOnly<T> = { [K in keyof T]: T[K] extends (...args: never[]) => Promise<unknown> ? T[K] : never };
 
-export function createLazyRpcClientConstructor<T extends object>(loadConstructor: RpcClientConstructorLoader<T>): RpcClientConstructor<T> {
+export function createLazyRpcClientConstructor<T extends object & AsyncMethodsOnly<T>>(loadConstructor: RpcClientConstructorLoader<T>): RpcClientConstructor<T> {
   return function LazyRpcClient(baseURL: string, options?: RpcClientOptions): T {
     let clientPromise: Promise<T> | undefined;
     const getClient = () => {
@@ -54,14 +56,17 @@ export function createLazyRpcClientConstructor<T extends object>(loadConstructor
     };
 
     // Every property read yields an invoker, because the real client is not
-    // loaded yet and the generated clients expose only async methods. The
-    // `as T` cast below asserts that shape, so a future generated client with
-    // a public field or getter would compile against this proxy and then
-    // silently hand callers a function where they expected a value (#4550).
-    // Fail loudly in that case rather than forwarding the non-callable.
+    // loaded yet. That is only sound when every public member of T is an async
+    // method; a field or getter would read as a function here while its type
+    // says string or boolean (#4550). The AsyncMethodsOnly constraint rejects
+    // such clients at compile time. At runtime a bare read stays silent, so if
+    // the loaded client still drifts from its type, invoking a non-method
+    // rejects instead of resolving to the value.
+    // `then` and `toJSON` stay undefined so await and JSON.stringify treat the
+    // proxy as a plain object instead of calling an invoker.
     return new Proxy({}, {
       get(target, property, receiver) {
-        if (property === 'then') return undefined;
+        if (property === 'then' || property === 'toJSON') return undefined;
         if (typeof property === 'symbol') return Reflect.get(target, property, receiver);
         return (...args: unknown[]) => getClient().then((client) => {
           const value = (client as Record<PropertyKey, unknown>)[property];
