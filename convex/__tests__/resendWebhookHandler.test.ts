@@ -179,6 +179,20 @@ describe("Resend webhook signature verification (#4678)", () => {
     expect(await missing.text()).toBe("Invalid signature");
   });
 
+  test("a malformed or empty secret is a server error, not a 401", async () => {
+    // Before the shared verifier this threw out of atob/importKey, which
+    // Convex turns into a 500; keep that so Svix retries until it is fixed.
+    vi.spyOn(Date, "now").mockReturnValue(TEST_NOW_MS);
+    const payload = makePayload();
+    const signature = await signPayload(payload);
+    for (const secret of ["whsec_not*base64!", "whsec_"]) {
+      process.env.RESEND_WEBHOOK_SECRET = secret;
+      await expect(postResendWebhook(`v1,${signature}`, { payload }), secret).rejects.toThrow(
+        "RESEND_WEBHOOK_SECRET is not a valid whsec_ secret",
+      );
+    }
+  });
+
   test("rejects stale timestamps", async () => {
     vi.spyOn(Date, "now").mockReturnValue(TEST_NOW_MS);
     process.env.RESEND_WEBHOOK_SECRET = RESEND_WEBHOOK_SECRET;

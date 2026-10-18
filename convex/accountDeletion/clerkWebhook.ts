@@ -37,6 +37,11 @@ export const clerkWebhookHandler = httpAction(async (ctx, request) => {
     skewSeconds: CLERK_SKEW_SECONDS,
   });
   if (!verified.ok) {
+    // A secret we cannot decode is our misconfiguration, not a bad delivery:
+    // throw so Convex answers 500 and reports it, and Svix keeps retrying.
+    if (verified.reason === "malformed_secret") {
+      throw new Error("[clerk-webhook] CLERK_WEBHOOK_SECRET is not a valid whsec_ secret");
+    }
     console.warn("[clerk-webhook] Invalid signature");
     return new Response("Invalid signature", { status: 401 });
   }

@@ -1,7 +1,6 @@
 import { ConvexError, type Infer, v } from "convex/values";
 import type { Doc } from "../_generated/dataModel";
 import { internal } from "../_generated/api";
-import { timingSafeEqualStrings } from "../lib/svixVerify";
 import {
   internalMutation,
   mutation,
@@ -191,6 +190,20 @@ function normalizeWorkerId(workerId: string): string {
   return workerId;
 }
 
+async function timingSafeEqualStrings(left: string, right: string): Promise<boolean> {
+  const encoder = new TextEncoder();
+  const [leftDigest, rightDigest] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(left)),
+    crypto.subtle.digest("SHA-256", encoder.encode(right)),
+  ]);
+  const leftBytes = new Uint8Array(leftDigest);
+  const rightBytes = new Uint8Array(rightDigest);
+  let mismatch = 0;
+  for (let index = 0; index < leftBytes.length; index += 1) {
+    mismatch |= leftBytes[index]! ^ rightBytes[index]!;
+  }
+  return mismatch === 0;
+}
 
 async function requireWorkerSecret(secret: string): Promise<void> {
   const expected = process.env.COMPANY_MONITORING_WORKER_SECRET ?? "";

@@ -54,7 +54,9 @@ export type SvixVerifyFailure =
   | "invalid_timestamp"
   | "timestamp_too_old"
   | "timestamp_too_new"
-  | "no_matching_signature";
+  | "no_matching_signature"
+  /** The configured secret is not base64 or decodes to an empty key. */
+  | "malformed_secret";
 
 export type SvixVerifyResult =
   | { ok: true }
@@ -101,12 +103,18 @@ export async function timingSafeEqualStrings(a: string, b: string): Promise<bool
  * corrupted into a different key, and every delivery would then fail
  * verification for a reason no log would explain. A secret without the
  * prefix is accepted as the bare base64 body.
+ *
+ * Throws on a body that is not base64 and on one that decodes to nothing: an
+ * HMAC under an empty key is a signature anyone can compute, and whether
+ * `importKey` rejects a zero-length key differs between runtimes.
  */
 export function decodeSvixSecret(secret: string): Uint8Array<ArrayBuffer> {
   const body = secret.startsWith(SVIX_SECRET_PREFIX)
     ? secret.slice(SVIX_SECRET_PREFIX.length)
     : secret;
-  return Uint8Array.from(atob(body), (c) => c.charCodeAt(0));
+  const bytes = Uint8Array.from(atob(body), (c) => c.charCodeAt(0));
+  if (bytes.length === 0) throw new Error("Svix secret decodes to an empty key");
+  return bytes;
 }
 
 /**
@@ -133,6 +141,31 @@ export function collectSignatureCandidates(
   return candidates;
 }
 
+/** The HMAC signing key for a `whsec_…` secret; throws on a malformed one. */
+function importSvixKey(secret: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    "raw",
+    decodeSvixSecret(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+}
+
+async function signSvixMessage(
+  key: CryptoKey,
+  id: string,
+  timestamp: string,
+  payload: string,
+): Promise<string> {
+  const sig = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`${id}.${timestamp}.${payload}`),
+  );
+  return btoa(String.fromCharCode(...new Uint8Array(sig)));
+}
+
 /** Base64 HMAC-SHA256 of `${id}.${timestamp}.${payload}` under the secret. */
 export async function computeSvixSignature(
   secret: string,
@@ -140,19 +173,7 @@ export async function computeSvixSignature(
   timestamp: string,
   payload: string,
 ): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    decodeSvixSecret(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const sig = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    new TextEncoder().encode(`${id}.${timestamp}.${payload}`),
-  );
-  return btoa(String.fromCharCode(...new Uint8Array(sig)));
+  return signSvixMessage(await importSvixKey(secret), id, timestamp, payload);
 }
 
 /**
@@ -165,9 +186,12 @@ function parseTimestampSeconds(raw: string): number | null {
 }
 
 /**
- * Verify one delivery. Never throws on bad input: the result names why a
- * delivery failed so a caller can log or map it (Dodo maps the reasons onto
- * the SDK's error messages) without re-deriving the checks.
+ * Verify one delivery. Never throws on bad input, including a malformed
+ * configured secret: the result names why a delivery failed so a caller can
+ * log or map it (Dodo maps the reasons onto the SDK's error messages) without
+ * re-deriving the checks. The secret is decoded only after the header and
+ * replay-window checks pass, so those failures keep their own reasons
+ * whatever the secret holds.
  */
 export async function verifySvixSignature(
   payload: string,
@@ -192,7 +216,13 @@ export async function verifySvixSignature(
   if (now - ts > skewSeconds) return { ok: false, reason: "timestamp_too_old" };
   if (ts - now > skewSeconds) return { ok: false, reason: "timestamp_too_new" };
 
-  const expected = await computeSvixSignature(secret, id, timestamp, payload);
+  let key: CryptoKey;
+  try {
+    key = await importSvixKey(secret);
+  } catch {
+    return { ok: false, reason: "malformed_secret" };
+  }
+  const expected = await signSvixMessage(key, id, timestamp, payload);
   for (const candidate of collectSignatureCandidates(signatureHeader, maxCandidates)) {
     if (await timingSafeEqualStrings(candidate, expected)) return { ok: true };
   }

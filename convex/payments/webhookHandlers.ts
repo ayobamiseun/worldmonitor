@@ -33,6 +33,9 @@ const DODO_SIGNATURE_ERROR_MESSAGES: Record<SvixVerifyFailure, string> = {
   timestamp_too_old: "Message timestamp too old",
   timestamp_too_new: "Message timestamp too new",
   no_matching_signature: "No matching signature found",
+  // Not an SDK message: before the shared verifier, atob's or importKey's own
+  // error landed here. Still a 401 plus the signature report, as then.
+  malformed_secret: "Malformed webhook secret",
 };
 
 async function verifyDodoSignature(

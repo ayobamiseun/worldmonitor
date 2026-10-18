@@ -56,6 +56,13 @@ describe("decodeSvixSecret", () => {
     expect(() => decodeSvixSecret(`${SECRET_BODY}whsec_`)).toThrow();
     expect(() => decodeSvixSecret(`whsec_whsec_${SECRET_BODY}`)).toThrow();
   });
+
+  test("refuses a secret that decodes to an empty key", () => {
+    // HMAC under a zero-length key is a signature anyone can compute; whether
+    // importKey rejects one is runtime-dependent, so the decoder does.
+    expect(() => decodeSvixSecret("whsec_")).toThrow();
+    expect(() => decodeSvixSecret("")).toThrow();
+  });
 });
 
 describe("collectSignatureCandidates", () => {
@@ -148,6 +155,29 @@ describe("verifySvixSignature", () => {
       ok: false,
       reason: "no_matching_signature",
     });
+  });
+
+  test("reports a malformed or empty secret as malformed_secret instead of throwing", async () => {
+    const headers = await signedHeaders();
+    for (const secret of ["whsec_not*base64!", "whsec_"]) {
+      expect(await verifySvixSignature(PAYLOAD, headers, secret, { nowSeconds: NOW }), secret).toEqual({
+        ok: false,
+        reason: "malformed_secret",
+      });
+    }
+  });
+
+  test("checks headers and the replay window before the secret", async () => {
+    // Callers map malformed_secret to a different status from the header and
+    // window failures, so the order of the checks is part of each status.
+    expect(
+      await verifySvixSignature(PAYLOAD, await signedHeaders({ id: null }), "whsec_", { nowSeconds: NOW }),
+    ).toEqual({ ok: false, reason: "missing_headers" });
+    expect(
+      await verifySvixSignature(PAYLOAD, await signedHeaders({ timestamp: String(NOW - 301) }), "whsec_", {
+        nowSeconds: NOW,
+      }),
+    ).toEqual({ ok: false, reason: "timestamp_too_old" });
   });
 
   test("ignores a malformed candidate instead of partially parsing it", async () => {

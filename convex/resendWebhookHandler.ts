@@ -175,8 +175,13 @@ export const resendWebhookHandler = httpAction(async (ctx, request) => {
 
   const rawBody = await request.text();
 
-  const valid = (await verifySvixSignature(rawBody, request.headers, secret)).ok;
-  if (!valid) {
+  const verified = await verifySvixSignature(rawBody, request.headers, secret);
+  if (!verified.ok) {
+    // A secret we cannot decode is our misconfiguration, not a bad delivery:
+    // throw so Convex answers 500 and reports it, and Svix keeps retrying.
+    if (verified.reason === "malformed_secret") {
+      throw new Error("[resend-webhook] RESEND_WEBHOOK_SECRET is not a valid whsec_ secret");
+    }
     console.warn("[resend-webhook] Invalid signature");
     return new Response("Invalid signature", { status: 401 });
   }
