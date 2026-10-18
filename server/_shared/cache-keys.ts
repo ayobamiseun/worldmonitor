@@ -24,7 +24,7 @@ export const DIGEST_ACCUMULATOR_KEY_PREFIX = 'digest:accumulator:v1:';
  * Story tracking keys — written by list-feed-digest.ts, read by digest cron (E2).
  * All keys use 32-char SHA-256 hex prefix of the normalised title as ${titleHash}.
  *
- *   story:track:v1:${titleHash}     Hash   firstSeen/lastSeen/title/link/severity/mentionCount/currentScore/lang/description/publishedAt/entityCorroborationCount/isOpinion/isFeelGood/isEphemeralLiveCoverage/category/anchorEligible (always-written)
+ *   story:track:v1:${titleHash}     Hash   firstSeen/lastSeen/title/link/severity/mentionCount/currentScore/lang/description/publishedAt/entityCorroborationCount/isOpinion/isFeelGood/isEphemeralLiveCoverage/category/anchorEligible (always-written); corrState (full/en label history, #9093) and corroboration:${variant}:${lang} (the verdict that variant served, `state|publishers` or `unknown`, #9213)
  *   story:sources:v1:${titleHash}   Set    feed IDs (SADD per appearance)
  *   story:peak:v1:${titleHash}      ZSet   single member "peak", score = highest importanceScore (ZADD GT)
  *   digest:accumulator:v1:${variant}:${lang} ZSet  member=titleHash, score=lastSeen_ms (updated every appearance)
@@ -134,13 +134,6 @@ export const CHOKEPOINT_EXPOSURE_SEED_META_KEY = 'seed-meta:supply_chain:chokepo
  */
 export const COST_SHOCK_KEY = (iso2: string, chokepointId: string) =>
   `supply-chain:cost-shock:${iso2}:${chokepointId}:v1` as const;
-
-/**
- * Per-country + per-HS2 sector dependency cache.
- * NOT in bootstrap — request-varying, PRO-gated.
- */
-export const SECTOR_DEPENDENCY_KEY = (iso2: string, hs2: string) =>
-  `supply-chain:sector-dep:${iso2}:${hs2}:v1` as const;
 
 /**
  * Route Explorer lane cache — per (fromIso2, toIso2, hs2, cargoType).

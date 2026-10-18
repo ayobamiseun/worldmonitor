@@ -5,8 +5,12 @@
  * to 'GET, POST, OPTIONS' (sebuf routes support GET and POST).
  */
 
+// App-serving hosts only; sibling vendor hosts do not inherit browser trust.
+// Keep aligned with convex/payments/returnUrlOrigin.ts and CORS parity tests.
+const APP_ORIGIN_PATTERN = /^https:\/\/(?:(?:www|app|api|tech|finance|commodity|happy|energy)\.)?worldmonitor\.app$/;
+
 const PRODUCTION_PATTERNS: RegExp[] = [
-  /^https:\/\/(.*\.)?worldmonitor\.app$/,
+  APP_ORIGIN_PATTERN,
   // Vercel preview deployments under the "eliewm" team scope, e.g.
   //   worldmonitor-git-<branch>-eliewm.vercel.app  (git-branch alias)
   //   worldmonitor-<hash>-eliewm.vercel.app        (deployment URL)
@@ -59,6 +63,10 @@ const EXPOSED_HEADERS = [
   // Fail-open limiter degradation marker. Parity with api/_cors.js (#7270):
   // the Limit/Remaining/Reset triplet is not enough for browser JS to read Mode.
   'X-RateLimit-Mode',
+  // api/mcp-proxy marks the 504 it relays for a remote MCP server timeout so
+  // premium-fetch's origin-5xx canary can skip it (WORLDMONITOR-17A). Parity
+  // with api/_cors.js.
+  'X-Wm-Upstream-Timeout',
   // IETF draft-ietf-httpapi-ratelimit-headers fields — emitted by the
   // per-account API-key limiter; docs/usage-rate-limits.mdx tells browser
   // clients to self-throttle on these, so they must be readable cross-origin
@@ -100,21 +108,21 @@ function originForAllowlistMatch(origin: string): string {
 
 /**
  * Decode Google Translate's hostname rewrite and require the reconstructed
- * host to be worldmonitor.app / *.worldmonitor.app. Suffix-matching the
+ * host to be an enumerated app host. Suffix-matching the
  * encoded label would admit evil--worldmonitor-app.translate.goog (#6411).
  * Keep in sync with api/_cors.js and workers/api-cors-preflight.
  */
 function isWorldMonitorGoogleTranslateOrigin(origin: string): boolean {
   try {
     const url = new URL(origin);
-    if (url.protocol !== 'https:') return false;
+    if (url.protocol !== 'https:' || url.port !== '') return false;
     const host = url.hostname.replace(/\.+$/, '');
     const suffix = '.translate.goog';
     if (!host.endsWith(suffix)) return false;
     const encoded = host.slice(0, -suffix.length);
     if (!encoded || encoded.includes('.')) return false;
     const decoded = encoded.replace(/--/g, '\0').replace(/-/g, '.').replace(/\0/g, '-');
-    return decoded === 'worldmonitor.app' || decoded.endsWith('.worldmonitor.app');
+    return APP_ORIGIN_PATTERN.test(`https://${decoded}`);
   } catch {
     return false;
   }
