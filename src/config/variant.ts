@@ -1,4 +1,4 @@
-import { isDesktopRuntime } from '@/services/desktop-runtime';
+import { isDesktopRuntime } from '@/config/desktop-runtime';
 
 /**
  * Every variant a user can switch to. One desktop binary ships and switches

@@ -3,7 +3,7 @@
 // can render without dragging maplibre+deck.gl into the entry bundle.
 // maplibre-using helpers live in `./basemap-styles.ts` and are loaded
 // lazily alongside MapContainer/DeckGLMap when the map panel mounts.
-import { isDesktopRuntime } from '@/services/desktop-runtime';
+import { isDesktopRuntime } from '@/config/desktop-runtime';
 
 const R2_PROXY = import.meta.env.VITE_PMTILES_URL ?? '';
 const R2_PUBLIC = import.meta.env.VITE_PMTILES_URL_PUBLIC ?? '';

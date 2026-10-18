@@ -6204,7 +6204,7 @@
           "path": "server/worldmonitor/research/v1/list-tech-events.ts"
         },
         {
-          "path": "src/services/desktop-runtime.ts"
+          "path": "src/config/desktop-runtime.ts"
         },
         {
           "path": "src/services/wm-session.ts"
