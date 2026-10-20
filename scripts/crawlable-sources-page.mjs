@@ -117,6 +117,9 @@ const SOURCE_DOMAIN_OVERRIDES = new Map([
   ['Barchart', 'finance'],
   ['TradingView', 'finance'],
   ['api.rainviewer.com', 'environment'],
+  // #6229: NVD CVE reference store for the cyber surface (scripts/seed-cve-reference.mjs).
+  ['nvd.nist.gov', 'infrastructure'],
+  ['services.nvd.nist.gov', 'infrastructure'],
   // #9094: locates published fact-checks for /verify and verify_claim.
   ['factchecktools.googleapis.com', 'news'],
   // BestTime live busyness is the fallback feed for the PizzINT (Pentagon pizza) panel.
