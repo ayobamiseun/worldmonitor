@@ -2931,6 +2931,9 @@
       "status": "terms-review",
       "references": [
         {
+          "path": "scripts/lib/yield-curves/oecd-lt.mjs"
+        },
+        {
           "path": "scripts/seed-ecb-fx-rates.mjs"
         },
         {
@@ -10761,6 +10764,9 @@
       "references": [
         {
           "path": "api/mcp/skill-extension/generated.ts"
+        },
+        {
+          "path": "scripts/ais-relay.cjs"
         },
         {
           "path": "server/worldmonitor/trade/v1/_tradestats-tariff.ts"

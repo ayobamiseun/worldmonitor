@@ -94,7 +94,7 @@ describe('product MCP host aliases are migration-only', () => {
           const res = await request(`https://${host}${path}?caller-controlled=1`, { method, headers: { Accept: 'text/html' } });
           assert.equal(res.status, 308, `${host}${path} ${method}`);
           assert.equal(res.headers.get('location'), expected);
-          assert.equal(res.headers.get('vary'), 'Accept, Last-Event-ID');
+          assert.equal(res.headers.get('vary'), 'Accept, Last-Event-ID, Origin, MCP-Protocol-Version');
           assert.equal(res.headers.get('cache-control'), 'no-store');
           assert.equal(res.headers.get('access-control-allow-origin'), '*');
         }
@@ -164,11 +164,18 @@ describe('product MCP host aliases are migration-only', () => {
       }
     }
 
-    for (const id of ['', null]) {
+    for (const id of ['', 'alias-id']) {
       const res = await post(`https://${'api'}.worldmonitor.app/api/mcp`, rpc('initialize', INIT_PARAMS, id));
       assert.equal(res.status, 410);
       const body = await res.json();
       assert.equal(body.id, id);
+    }
+
+    for (const id of [null, 1.25]) {
+      const res = await post('https://api.worldmonitor.app/api/mcp', rpc('initialize', INIT_PARAMS, id));
+      const body = await res.json();
+      assert.equal(body.id, null);
+      assert.equal(body.error.code, -32600);
     }
 
     for (const host of PRODUCT_MCP_ALIASES) {
@@ -202,7 +209,7 @@ describe('product MCP host aliases are migration-only', () => {
     });
     assert.equal(res.status, 200);
     const body = await res.json();
-    assert.equal(body.error.code, -32600);
+    assert.equal(body.error.code, -32700);
 
     const invalidId = await post(`https://${'api'}.worldmonitor.app/api/mcp`, { jsonrpc: '2.0', id: {}, method: 'initialize' });
     assert.equal(invalidId.status, 200);
