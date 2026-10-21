@@ -22,24 +22,36 @@ vi.mock('@/config', async (importOriginal) => ({
 vi.mock('@/services/analysis-worker', () => ({
   analysisWorker: { clusterNews: vi.fn(), analyzeCorrelations: vi.fn() },
 }));
+vi.mock('@/services/renewable-energy-data', () => ({
+  fetchRenewableEnergyData: vi.fn(),
+  fetchEnergyCapacity: vi.fn(),
+}));
 
 import { getInitialPanelSettingsForVariant } from '@/config/panels';
 import { hasPanelSettingEntry } from '@/app/news-panel-keys';
+import { fetchRenewableEnergyData, fetchEnergyCapacity } from '@/services/renewable-energy-data';
+
+const renewableResult = {
+  state: 'live' as const,
+  cachedAt: null,
+  data: { globalPercentage: 30, globalYear: 2024, historicalData: [{ year: 2024, value: 30 }], regions: [] },
+};
+const capacity = [{ source: 'SUN', name: 'Solar', data: [{ year: 2024, capacityMw: 100 }] }];
 
 interface LoaderInternals {
   runHydrationTasks(tasks: Array<{ name: string; task: () => Promise<void> }>, forceAll: boolean): Promise<void>;
-  loadRenewableData(): Promise<void>;
   updateSearchIndex(): void;
   shouldHydrateNews(forceAll: boolean): boolean;
 }
 
 async function scheduledTasks(panelSettings: AppContext['panelSettings']) {
+  const renewablePanel = { setData: vi.fn(), setCapacityData: vi.fn() };
   const ctx = {
     statusPanel: { updateDigestCoverage: vi.fn(), updateFeed: vi.fn(), updateApi: vi.fn() },
     disabledSources: new Set<string>(),
     newsCategoryPanelKeys: new Map<string, string>(),
     newsPanels: {},
-    panels: {},
+    panels: { renewable: renewablePanel },
     panelSettings,
     newsByCategory: {},
     currentTimeRange: 'all',
@@ -59,8 +71,6 @@ async function scheduledTasks(panelSettings: AppContext['panelSettings']) {
   const loader = new DataLoaderManager(ctx, { renderCriticalBanner: () => undefined, refreshOpenCountryBrief: () => undefined });
   const internal = loader as unknown as LoaderInternals;
   const names: string[] = [];
-  const loadRenewableData = vi.fn(async () => undefined);
-  internal.loadRenewableData = loadRenewableData;
   internal.runHydrationTasks = async (tasks) => {
     names.push(...tasks.map((t) => t.name));
     await tasks.find((t) => t.name === 'renewable')?.task();
@@ -68,11 +78,13 @@ async function scheduledTasks(panelSettings: AppContext['panelSettings']) {
   internal.updateSearchIndex = () => undefined;
   internal.shouldHydrateNews = () => false;
   await loader.loadAllData(true);
-  return { names, loadRenewableData };
+  return { names, renewablePanel };
 }
 
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')));
+  vi.mocked(fetchRenewableEnergyData).mockResolvedValue(renewableResult);
+  vi.mocked(fetchEnergyCapacity).mockResolvedValue(capacity);
 });
 
 describe('energy variant renewable panel', () => {
@@ -85,10 +97,11 @@ describe('energy variant renewable panel', () => {
   });
 
   it('runs its hydration callback under the energy variant alongside the non-happy loaders', async () => {
-    const { names, loadRenewableData } = await scheduledTasks(getInitialPanelSettingsForVariant('energy'));
+    const { names, renewablePanel } = await scheduledTasks(getInitialPanelSettingsForVariant('energy'));
     expect(names).toContain('renewable');
     expect(names).toContain('markets');
-    expect(loadRenewableData).toHaveBeenCalledTimes(1);
+    expect(renewablePanel.setData).toHaveBeenCalledExactlyOnceWith(renewableResult);
+    expect(renewablePanel.setCapacityData).toHaveBeenCalledExactlyOnceWith(capacity);
   });
 
   it('is created by the layout through the same panel-setting read', () => {
