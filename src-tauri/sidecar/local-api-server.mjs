@@ -227,7 +227,15 @@ function registerSidecarAllowedPrivateFetchOrigins(port, extraOrigins = []) {
 }
 
 function isAllowedPrivateSidecarFetch(url) {
-  return sidecarAllowedPrivateFetchOrigins.has(url.origin);
+  if (sidecarAllowedPrivateFetchOrigins.has(url.origin)) return true;
+  // Desktop users can change Ollama settings without restarting the sidecar.
+  // Trust only the current configured origin, never an address from a request.
+  if (process.env.LOCAL_API_MODE === 'tauri-sidecar' && process.env.OLLAMA_API_URL) {
+    try {
+      return url.origin === new URL(process.env.OLLAMA_API_URL).origin;
+    } catch { /* invalid configuration grants no private-network access */ }
+  }
+  return false;
 }
 
 async function assertSafeSidecarFetchUrl(url) {
@@ -718,15 +726,79 @@ function toHeaders(nodeHeaders, options = {}) {
   return headers;
 }
 
-async function proxyToCloud(requestUrl, req, remoteBase) {
+// The renderer forwards a signed-in Pro user's Clerk bearer under its own
+// header: `Authorization` on the renderer → sidecar hop carries the sidecar
+// token, so the user credential cannot share it (#9396).
+const CLOUD_USER_AUTHORIZATION_HEADER = 'x-worldmonitor-user-authorization';
+const CLOUD_BEARER_SHAPE = /^Bearer [A-Za-z0-9._~+/-]+=*$/;
+const CLOUD_SESSION_REFRESH_MARGIN_MS = 5 * 60 * 1000;
+const CLOUD_SESSION_RETRY_MS = 30 * 1000;
+
+// The cloud edge 403s missing, short, and library user agents. The renderer's
+// hop arrives through Rust with none, and a WebView UA would misreport the caller.
+function cloudUserAgent() {
+  return `WorldMonitor-Desktop/${process.env.LOCAL_API_APP_VERSION || 'unknown'} (sidecar)`;
+}
+
+function cloudUrl(remoteBase, pathname) {
   const target = new URL(remoteBase);
-  target.pathname = `${target.pathname.replace(/\/$/, '')}${requestUrl.pathname}`;
+  target.pathname = `${target.pathname.replace(/\/$/, '')}${pathname}`;
+  return target;
+}
+
+// The gateway authenticates a Pro browser by an anonymous wms_ session plus
+// the Clerk bearer; the bearer alone is ignored on routes that are not
+// tier-gated. Mint the session the way a browser does and reuse it until
+// close to expiry. A failed mint is retried after a pause, not per request.
+async function mintCloudSession(remoteBase) {
+  try {
+    const response = await fetch(cloudUrl(remoteBase, '/api/wm-session'), {
+      method: 'POST',
+      headers: { Origin: 'https://worldmonitor.app', 'User-Agent': cloudUserAgent() },
+      signal: AbortSignal.timeout(CLOUD_PROXY_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    if (typeof payload?.token !== 'string' || !payload.token.startsWith('wms_') || !Number.isFinite(payload.exp)) {
+      return null;
+    }
+    return { token: payload.token, exp: payload.exp };
+  } catch {
+    return null;
+  }
+}
+
+// A failed refresh keeps the current session until it actually expires.
+async function getCloudSessionToken(context) {
+  const now = Date.now();
+  const cached = context.cloudSession;
+  const usable = cached?.token && cached.exp > now ? cached.token : null;
+  if (usable && cached.exp - now > CLOUD_SESSION_REFRESH_MARGIN_MS) return usable;
+  if (cached?.retryAt > now) return usable;
+  context.cloudSessionMint ??= mintCloudSession(context.remoteBase).then((session) => {
+    context.cloudSession = session ?? { ...cached, token: usable, retryAt: Date.now() + CLOUD_SESSION_RETRY_MS };
+    return session?.token ?? usable;
+  }).finally(() => {
+    context.cloudSessionMint = null;
+  });
+  return context.cloudSessionMint;
+}
+
+async function proxyToCloud(requestUrl, req, context) {
+  // One budget covers session minting and the fetch, so a cold session cannot
+  // stretch a request past the renderer's fallback timeout.
+  const deadline = AbortSignal.timeout(CLOUD_PROXY_TIMEOUT_MS);
+  const target = cloudUrl(context.remoteBase, requestUrl.pathname);
   target.search = requestUrl.search;
   const body = ['GET', 'HEAD'].includes(req.method) ? undefined : await readBody(req);
   const headers = toHeaders(req.headers, { stripOrigin: true });
   headers.delete(LOCAL_API_TRANSPORT_HEADER);
   // Strip sidecar auth token — meaningless to cloud API.
   headers.delete('Authorization');
+  const userAuthorization = headers.get(CLOUD_USER_AUTHORIZATION_HEADER) ?? '';
+  headers.delete(CLOUD_USER_AUTHORIZATION_HEADER);
+  const userBearer = CLOUD_BEARER_SHAPE.test(userAuthorization) ? userAuthorization : '';
+  headers.set('User-Agent', cloudUserAgent());
   // Strip conditional headers so cloud always returns fresh 200, not 304.
   // The browser may have stale ETags from previous sessions with empty data.
   headers.delete('If-None-Match');
@@ -743,6 +815,21 @@ async function proxyToCloud(requestUrl, req, remoteBase) {
     const wmKey = process.env.WORLDMONITOR_API_KEY;
     if (wmKey) headers.set('X-WorldMonitor-Key', wmKey);
   }
+  // Only a signed-in Pro desktop forwards a bearer.
+  if (userBearer) headers.set('Authorization', userBearer);
+  // Without a key the gateway answers 401, so every desktop presents the
+  // anonymous session a browser holds (#7548). The gateway rejects that session
+  // on tier-gated routes, so it unlocks nothing beyond the public web app.
+  if (!headers.has('X-WorldMonitor-Key')) {
+    const session = await Promise.race([
+      getCloudSessionToken(context),
+      new Promise((resolve) => {
+        if (deadline.aborted) resolve(null);
+        else deadline.addEventListener('abort', () => resolve(null), { once: true });
+      }),
+    ]);
+    if (session) headers.set('X-WorldMonitor-Key', session);
+  }
   const clientAbort = new AbortController();
   const onClientClose = () => clientAbort.abort();
   req.socket.once('close', onClientClose);
@@ -752,7 +839,7 @@ async function proxyToCloud(requestUrl, req, remoteBase) {
       method: req.method,
       headers,
       body,
-      signal: AbortSignal.any([clientAbort.signal, AbortSignal.timeout(CLOUD_PROXY_TIMEOUT_MS)]),
+      signal: AbortSignal.any([clientAbort.signal, deadline]),
     });
   } finally {
     req.socket.off('close', onClientClose);
@@ -778,6 +865,7 @@ async function proxyRegisterInterestToCloud(requestUrl, req, context) {
   const body = JSON.stringify(normalizedPayload);
   const headers = toHeaders(req.headers, { stripOrigin: true });
   headers.delete(LOCAL_API_TRANSPORT_HEADER);
+  headers.delete(CLOUD_USER_AUTHORIZATION_HEADER);
   headers.delete('Authorization');
   headers.delete('If-None-Match');
   headers.delete('If-Modified-Since');
@@ -853,10 +941,12 @@ const cloudPreferredExact = new Set([
   '/api/aviation/v1/get-airport-ops-summary',
   '/api/displacement/v1/get-displacement-summary',
   '/api/displacement/v1/get-internal-displacement',
+  '/api/displacement/v1/get-cross-border-movements',
   '/api/economic/v1/get-bis-credit',
   '/api/economic/v1/get-bis-exchange-rates',
   '/api/economic/v1/get-bis-policy-rates',
   '/api/economic/v1/get-bls-series',
+  '/api/economic/v1/get-capital-flows',
   '/api/economic/v1/get-china-macro-snapshot',
   '/api/economic/v1/get-crude-inventories',
   '/api/economic/v1/get-ecb-fx-rates',
@@ -898,6 +988,7 @@ const cloudPreferredExact = new Set([
   '/api/intelligence/v1/compute-energy-shock',
   '/api/intelligence/v1/get-china-decision-signals',
   '/api/intelligence/v1/get-country-energy-profile',
+  '/api/intelligence/v1/get-country-history',
   '/api/intelligence/v1/get-country-port-activity',
   '/api/intelligence/v1/get-country-risk',
   '/api/intelligence/v1/get-gdelt-topic-timeline',
@@ -1008,6 +1099,18 @@ function isCloudPreferred(pathname) {
     || cloudPreferredSeedOnlyPrefixes.some(p => pathname.startsWith(p))
     || cloudOnlyRouteFamilyPrefixes.some(p => pathname.startsWith(p))
     || cloudPreferredPrefixes.some(p => pathname.startsWith(p));
+}
+
+async function isLocalOnlyRequest(req, pathname) {
+  if (req.method !== 'POST' || pathname !== '/api/news/v1/summarize-article') return false;
+  const body = await readBody(req);
+  if (!body?.length) return false;
+  try {
+    const parsed = JSON.parse(body.toString('utf8'));
+    return parsed?.provider === 'ollama' && parsed?.mode === 'translate';
+  } catch {
+    return false;
+  }
 }
 
 const TRAFFIC_LOG_MAX = 200;
@@ -1158,7 +1261,7 @@ async function tryCloudFallback(requestUrl, req, context, reason) {
     }
   }
   try {
-    const resp = await proxyToCloud(requestUrl, req, context.remoteBase);
+    const resp = await proxyToCloud(requestUrl, req, context);
     if (!resp.ok) {
       context.logger.warn(`[local-api] cloud returned ${resp.status} for ${requestUrl.pathname}`);
     }
@@ -2002,12 +2105,13 @@ async function dispatch(requestUrl, req, routes, context) {
     }
   }
 
-  const cloudPreferredAttempted = context.cloudFallback && isCloudPreferred(requestUrl.pathname);
+  const localOnly = await isLocalOnlyRequest(req, requestUrl.pathname);
+  const cloudPreferredAttempted = !localOnly && context.cloudFallback && isCloudPreferred(requestUrl.pathname);
   if (cloudPreferredAttempted) {
     const cloudResponse = await tryCloudFallback(requestUrl, req, context, 'cloud-preferred');
     if (cloudResponse) return cloudResponse;
   }
-  const allowCloudFallback = context.cloudFallback && !cloudPreferredAttempted;
+  const allowCloudFallback = !localOnly && context.cloudFallback && !cloudPreferredAttempted;
 
   const modulePath = pickModule(requestUrl.pathname, routes);
   if (!modulePath || !existsSync(modulePath)) {
@@ -2045,6 +2149,7 @@ async function dispatch(requestUrl, req, routes, context) {
     // not expose it to route handlers, where Authorization is caller identity
     // (OAuth bearer) and X-WorldMonitor-Key is the caller's API key.
     hdrs.delete(LOCAL_API_TRANSPORT_HEADER);
+    hdrs.delete(CLOUD_USER_AUTHORIZATION_HEADER);
     if (hdrs.get('Authorization') === `Bearer ${expectedToken}`) {
       hdrs.delete('Authorization');
     }

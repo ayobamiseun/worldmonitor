@@ -13,6 +13,7 @@ import {
   parseEducationPayloadRankableRecordCount,
   parseRankableRecordCount,
 } from './_rankable-coverage.js';
+import { assessCiiInputs, CII_INPUT_POLICY } from './_cii-input-health.js';
 // Seed-envelope helper. PR 1 imports it here so PR 2 can wire envelope-aware
 // reads at specific call sites without further plumbing. It's a no-op on
 // legacy-shape seed-meta values (they have no `_seed` wrapper and pass through
@@ -286,9 +287,10 @@ function fenceHealthMutations(commands, token) {
     : [op, key, ...args]);
 }
 
-// Iran-events domain sunset (war ended 2026-07). Default OFF everywhere; set
-// IRAN_EVENTS_ENABLED=true to restore the whole domain. Mirrors the backend
-// *_ENABLED env idiom (server/worldmonitor/resilience/v1/_shared.ts).
+// Middle East strike feed (conflict:iran-events:v1, produced by ais-relay from
+// Telegram + GDELT). Default OFF everywhere; IRAN_EVENTS_ENABLED=true enables
+// the producer and every reader. Mirrors the backend *_ENABLED env idiom
+// (server/worldmonitor/resilience/v1/_shared.ts).
 const IRAN_EVENTS_ENABLED = (process.env.IRAN_EVENTS_ENABLED ?? 'false').toLowerCase() === 'true';
 
 const BOOTSTRAP_KEYS = {
@@ -419,6 +421,13 @@ const STANDALONE_KEYS = {
   // evicted or stale index stays invisible until the next weekly freeze.
   gdeltCountryArticles: 'gdelt:bulk:country-articles:v1',
   gdeltDyadTension: 'gdelt:bulk:dyad-tension:v1',
+  // Per-country GDELT conflict counts and own-baseline medians, read only by the
+  // CII conflict component (get-risk-scores), so monitored here.
+  gdeltCountryEvents: 'gdelt:bulk:country-events:v1',
+  // 30 days of per-country strike tallies the relay builds from the Middle East
+  // strike feed; read only by the CII strike pressure (get-risk-scores), so
+  // monitored here. Gated by IRAN_EVENTS_ENABLED like the feed itself.
+  strikePressure:     'conflict:strike-pressure:v1',
   chinaCoverage:      CHINA_COVERAGE_SUMMARY_KEY,
   // Control-plane heartbeat only. Convex owns every durable scan lease,
   // checkpoint, receipt, and replay decision; this Redis value is disposable.
@@ -482,6 +491,7 @@ const STANDALONE_KEYS = {
   // plan 2026-04-25-004 Phase 2: financialSystemExposure data keys.
   wbExternalDebt:       'economic:wb-external-debt:v1',
   bisLbs:               'economic:bis-lbs:v1',
+  capitalFlows:         'economic:capital-flows:v1',
   fatfListing:          'economic:fatf-listing:v1',
   climateZoneNormals:    'climate:zone-normals:v1',
   shippingRates:         'supply_chain:shipping:v2',
@@ -499,6 +509,7 @@ const STANDALONE_KEYS = {
   theaterPostureBackup:  'theater-posture:sebuf:backup:v1',
   riskScoresLive:        CII_RISK_SCORE_CACHE_KEYS.live,
   riskScoresHistory:     CII_RISK_SCORE_CACHE_KEYS.dailyHistoryIndex,
+  countryHistory:        'history:country:index',
   usniFleet:             'usni-fleet:sebuf:v1',
   usniFleetStale:        'usni-fleet:sebuf:stale:v1',
   faaDelays:             'aviation:delays:faa:v1',
@@ -517,6 +528,11 @@ const STANDALONE_KEYS = {
   // verifies existence + freshness via the matching SEED_META entry. Same
   // shape as militaryFlights above.
   militaryCii:           'intelligence:military-cii:v1',
+  // Derived by seed-fire-detections from the canonical wildfires key (#9509):
+  // per-country intensity rows plus the FIRMS clock, read by the CII and
+  // temporal-anomaly rebuilds instead of the 2-5 MB canonical payload. Same
+  // single-payload shape as militaryCii; health checks existence + freshness.
+  wildfiresSummary:      'wildfire:fires-summary:v1',
   globalTendersSam:             'economic:global-tenders:v1:source:sam',
   globalTendersTed:             'economic:global-tenders:v1:source:ted',
   globalTendersContractsFinder: 'economic:global-tenders:v1:source:contracts-finder',
@@ -530,6 +546,13 @@ const STANDALONE_KEYS = {
   displacement:          `displacement:summary:v1:${new Date().getUTCFullYear()}`,
   displacementPrev:      `displacement:summary:v1:${new Date().getUTCFullYear() - 1}`,
   dtmDisplacement:       'displacement:dtm:v1',
+  borderUk: 'displacement:border-uk:v1',
+  borderCbp: 'displacement:border-cbp:v1',
+  borderFrontex: 'displacement:border-frontex:v1',
+  borderPanama: 'displacement:border-panama:v1',
+  // Seeded by seed-idmc-idu-displacement (#9014); read by the displacement
+  // panel and map layer through the on-demand bootstrap URL, and by MCP.
+  idmcIduDisplacement: BOOTSTRAP_CACHE_KEYS.idmcIduDisplacement,
   acledIntel:            'conflict:acled:v1:all:0:0',
   satellites:            'intelligence:satellites:tle:v1',
   portwatch:             'supply_chain:portwatch:v1',
@@ -628,6 +651,7 @@ const STANDALONE_KEYS = {
   jodiGas:                  'energy:jodi-gas:v1:_countries',
   lngVulnerability:         'energy:lng-vulnerability:v1',
   jodiOil:                  'energy:jodi-oil:v1:_countries',
+  oilTradeSeries:           'energy:oil-trade-series:v1',
   chokepointBaselines:      'energy:chokepoint-baselines:v1',
   portwatchChokepointsRef:  'portwatch:chokepoints:ref:v1',
   chokepointFlows:          'energy:chokepoint-flows:v1',
@@ -777,6 +801,21 @@ const SEED_META = {
     ],
   }, // FIRMS NRT resets at midnight UTC; new-day data takes 3-6h to accumulate
   wildfiresBootstrap: { key: 'seed-meta:wildfire:fires-bootstrap', maxStaleMin: 360 }, // Compact CDN payload is a distinct publish target; monitor it so canonical fallback cannot hide transform/write failures.
+  // Derived summary the CII and temporal-anomaly rebuilds read (#9509). Same
+  // seeder run and 2h TTL as the canonical key; monitored on its own so the
+  // readers' canonical fallback cannot hide a broken summary write. Softened
+  // until seed-fire-detections writes the durable marker on its first publish.
+  wildfiresSummary: {
+    key: 'seed-meta:wildfire:fires-summary',
+    maxStaleMin: 360,
+    activationKey: 'seed-activated:wildfire:fires-summary',
+    cutover: {
+      mode: 'activation-marker',
+      fromKey: null,
+      issue: 9509,
+      activationKey: 'seed-activated:wildfire:fires-summary',
+    },
+  },
   outages:          { key: 'seed-meta:infra:outages',           maxStaleMin: 30 },
   // seed-live-video-resolved cron `0 */6 * * *` (#8545); 1080 = 3× cadence per
   // project convention. The PR registers the probe before the Railway service
@@ -982,6 +1021,19 @@ const SEED_META = {
   // plan 2026-04-25-004 Phase 2: financialSystemExposure component seeders.
   // Bundle: scripts/seed-bundle-macro.mjs (Codex R1 #5, Option A).
   wbExternalDebt:   { key: 'seed-meta:economic:wb-external-debt', maxStaleMin: 100800 }, // annual WB IDS publication; 70d threshold matches IMF cadence pattern
+  // Weekly macro-bundle seed of quarterly IMF BOP/PIP + BIS LBS (#9394);
+  // 10d = weekly interval + slack. Activation marker bridges deploy-before-first-tick.
+  capitalFlows: {
+    key: 'seed-meta:economic:capital-flows',
+    maxStaleMin: 14400,
+    activationKey: 'seed-activated:economic:capital-flows',
+    cutover: {
+      mode: 'activation-marker',
+      fromKey: null,
+      issue: 9394,
+      activationKey: 'seed-activated:economic:capital-flows',
+    },
+  },
   bisLbs:           { key: 'seed-meta:economic:bis-lbs',          maxStaleMin: 14400 }, // BIS LBS quarterly publication; 10d threshold = ~1× publish lag tolerance after macro bundle daily refresh
   fatfListing:      { key: 'seed-meta:economic:fatf-listing',     maxStaleMin: 60480 }, // FATF plenary 3×/year; 42d threshold = >1 plenary cycle (catches missed-update if cron silently fails)
   shippingRates:    { key: 'seed-meta:supply_chain:shipping',     maxStaleMin: 420 },
@@ -992,13 +1044,18 @@ const SEED_META = {
   sharedFxRates:    { key: 'seed-meta:shared:fx-rates',           maxStaleMin: 3600 }, // daily seed; 60h tolerance covers a missed 25h cache refresh
   gpsjam:           { key: 'seed-meta:intelligence:gpsjam',       maxStaleMin: 1440 }, // Wingbits API (scripts/fetch-gpsjam.mjs); 1440min = 24h tolerance gives operator headroom to handle upstream outages and monthly quota exhaustion (HTTP 402 observed 2026-04-29) without dashboard noise. Seeder catch-block extends TTL on fail without refreshing fetchedAt, so STALE_SEED via age is the only alarm path.
   positiveGeoEvents:{ key: 'seed-meta:positive-events:geo',       maxStaleMin: 60 },
-  riskScores:       { key: 'seed-meta:intelligence:risk-scores',  maxStaleMin: 30, minRecordCount: 3 }, // CII warm-ping every 8min; recordCount is realtime signal-density coverage for score-relevant conflict (ACLED or UCDP), news, and cyber families, not raw feed availability; quiet-but-fresh feeds may warn COVERAGE_PARTIAL.
+  riskScores:       { key: 'seed-meta:intelligence:risk-scores',  maxStaleMin: 30, minRecordCount: 2 }, // CII warm-ping every 8min; recordCount is realtime signal-density coverage for score-relevant conflict (ACLED or UCDP) and news families, not raw feed availability; quiet-but-fresh feeds may warn COVERAGE_PARTIAL. Per-input availability (seed-meta `inputs`) is graded by composeRiskScoresInputHealth.
   riskScoresHistory: {
     key: 'seed-meta:intelligence:risk-scores-history', maxStaleMin: 30, minRecordCount: 31,
     activationKey: CII_RISK_SCORE_CACHE_KEYS.dailyHistoryActivation,
     cutover: { mode: 'activation-marker', fromKey: null, issue: 9354, activationKey: CII_RISK_SCORE_CACHE_KEYS.dailyHistoryActivation },
   },
-  iranEvents:       { key: 'seed-meta:conflict:iran-events',      maxStaleMin: 20160 }, // manual seed from LiveUAMap; 20160 = 14d = 2× weekly cadence
+  countryHistory: {
+    key: 'seed-meta:history:country', maxStaleMin: 2160, minRecordCount: 196,
+    activationKey: 'seed-activated:history:country',
+    cutover: { mode: 'activation-marker', fromKey: null, issue: 4276, activationKey: 'seed-activated:history:country' },
+  },
+  iranEvents:       { key: 'seed-meta:conflict:iran-events',      maxStaleMin: 45 }, // ais-relay Middle East strike loop (Telegram + GDELT) every 10min; 45 = 4 missed ticks. The relay withholds seed-meta when the Telegram poll is stale or the classifier fails, so either outage turns STALE_SEED rather than reading a frozen feed as fresh.
   ucdpEvents:       { key: 'seed-meta:conflict:ucdp-events',      maxStaleMin: 420 },
   ucdpEventsBootstrap: { key: 'seed-meta:conflict:ucdp-events-bootstrap', maxStaleMin: 420 }, // Same cron. Monitored separately because the bootstrap tier now hydrates from the compact projection, and a transform/write failure there must not hide behind a healthy canonical key (#5300).
   acledIntel:       { key: 'seed-meta:conflict:acled-intel',      maxStaleMin: 38 }, // conflict:acled:v1:all:0:0, now ACLED-or-GDELT fallback for the forecast EMA input (#5099).
@@ -1226,6 +1283,28 @@ const SEED_META = {
     cutover: {
       mode: 'activation-marker', fromKey: null, issue: 8676,
       activationKey: 'seed-activated:gdelt:bulk:dyad-tension',
+    },
+  },
+  // Same materializer tick; pending until its first country-events publish
+  // writes the durable marker, strict after it. The 32-day data TTL outlives this gate.
+  gdeltCountryEvents: {
+    key: 'seed-meta:gdelt:bulk:country-events', maxStaleMin: 45,
+    activationKey: 'seed-activated:gdelt:bulk:country-events',
+    cutover: {
+      mode: 'activation-marker', fromKey: null, issue: 7582,
+      activationKey: 'seed-activated:gdelt:bulk:country-events',
+    },
+  },
+  // ais-relay strike loop (10min) adds each healthy window to the 30-day tally;
+  // seed-meta advances only on a healthy cycle, like iranEvents. Pending until
+  // the first healthy tally publish writes the durable marker, strict after it.
+  // The 35-day data TTL outlives this gate.
+  strikePressure: {
+    key: 'seed-meta:conflict:strike-pressure', maxStaleMin: 45,
+    activationKey: 'seed-activated:conflict:strike-pressure',
+    cutover: {
+      mode: 'activation-marker', fromKey: null, issue: 7582,
+      activationKey: 'seed-activated:conflict:strike-pressure',
     },
   },
   // Same materializer tick as gdeltIntel; the 2-day data TTL outlives this
@@ -1533,6 +1612,10 @@ const SEED_META = {
   // UNHCR Operational Data Portal situations (seed-cross-border-arrivals.mjs,
   // daily health bundle, #9023). 48h = two missed ticks; report age is
   // checked by maxContentAgeMin.
+  borderUk: { key: 'seed-meta:displacement:border-uk', maxStaleMin: 2880, activationKey: 'seed-activated:displacement:border-uk', cutover: { mode: 'activation-marker', fromKey: null, issue: 9023, activationKey: 'seed-activated:displacement:border-uk' } },
+  borderCbp: { key: 'seed-meta:displacement:border-cbp', maxStaleMin: 2880, activationKey: 'seed-activated:displacement:border-cbp', cutover: { mode: 'activation-marker', fromKey: null, issue: 9023, activationKey: 'seed-activated:displacement:border-cbp' } },
+  borderFrontex: { key: 'seed-meta:displacement:border-frontex', maxStaleMin: 2880, activationKey: 'seed-activated:displacement:border-frontex', cutover: { mode: 'activation-marker', fromKey: null, issue: 9023, activationKey: 'seed-activated:displacement:border-frontex' } },
+  borderPanama: { key: 'seed-meta:displacement:border-panama', maxStaleMin: 2880, activationKey: 'seed-activated:displacement:border-panama', cutover: { mode: 'activation-marker', fromKey: null, issue: 9023, activationKey: 'seed-activated:displacement:border-panama' } },
   crossBorderArrivals: {
     key: 'seed-meta:displacement:cross-border',
     maxStaleMin: 2880,
@@ -1557,6 +1640,20 @@ const SEED_META = {
       fromKey: null,
       issue: 9014,
       activationKey: 'seed-activated:displacement:dtm',
+    },
+  },
+  // IDMC Internal Displacement Updates from HDX (seed-idmc-idu-displacement.mjs,
+  // daily health bundle, #9014). 48h = two missed ticks.
+  idmcIduDisplacement: {
+    key: 'seed-meta:displacement:idmc-idu',
+    maxStaleMin: 2880,
+    minRecordCount: 500,
+    activationKey: 'seed-activated:displacement:idmc-idu',
+    cutover: {
+      mode: 'activation-marker',
+      fromKey: null,
+      issue: 9014,
+      activationKey: 'seed-activated:displacement:idmc-idu',
     },
   },
   bocValet:          {
@@ -1760,7 +1857,11 @@ const SEED_META = {
   },
   oecdLtRates: {
     key: 'seed-meta:economic:oecd-lt-rates',
-    maxStaleMin: 60 * 24 * 21, // weekly section; 21d = 3x interval, matches monthly data cadence
+    // budgetMinutes is the widest entry of OECD_LT_SOURCE_BUDGET_MIN in
+    // scripts/lib/yield-curves/oecd-lt.mjs (FRED/OECD route, 120d); the producer
+    // judges ECB-sourced markets at the tighter 114d budget before publishing.
+    requireContentFreshness: { countries: ['DE', 'JP', 'GB', 'CA', 'AU', 'CH', 'NO', 'SE', 'IT', 'ES', 'KR', 'MX', 'ZA', 'PL', 'NL', 'BE', 'AT', 'PT', 'IE', 'FI', 'DK', 'GR', 'CZ', 'HU', 'CL', 'FR', 'US'], budgetMinutes: 120 * 24 * 60 },
+    maxStaleMin: 4320, // daily bundle section; 72h = 3x interval. Per-market content age is separate.
     activationKey: 'seed-activated:economic:oecd-lt-rates',
     cutover: {
       mode: 'activation-marker',
@@ -1770,7 +1871,7 @@ const SEED_META = {
     },
   },
   euFsi:             { key: 'seed-meta:economic:fsi-eu',               maxStaleMin: 5760 }, // daily seed (weekdays + holidays); 5760min = 96h = covers Wed→Mon Easter gap. Data freshness is tracked separately via content-age (STALE_CONTENT) — see seed-fsi-eu.mjs.
-  newsThreatSummary: { key: 'seed-meta:news:threat-summary',          maxStaleMin: 60 }, // relay classify every ~20min; 60min = 3x interval
+  newsThreatSummary: { key: 'seed-meta:news:threat-summary',          maxStaleMin: 60 }, // relay classify writes every 15min (27-48min across restarts); 60min budget sits under the 2h payload TTL so this goes stale before the key vanishes
   shippingStress:    { key: 'seed-meta:supply_chain:shipping_stress',  maxStaleMin: 45 }, // relay loop every 15min; 45 = 3x interval (was 30 = 2×, too tight on relay hiccup)
   diseaseOutbreaks:  { key: 'seed-meta:health:disease-outbreaks',      maxStaleMin: 2880 }, // daily seed; 2880 = 48h = 2x interval
   healthAirQuality:  { key: 'seed-meta:health:air-quality',            maxStaleMin: 180 }, // hourly cron; 180 = 3x interval for shared health/climate seed
@@ -1859,6 +1960,21 @@ const SEED_META = {
   // (newestItemAt/maxContentAgeMin in seed-meta) — a frozen upstream file
   // reads STALE_CONTENT rather than passing as fresh.
   jodiOil:              { key: 'seed-meta:energy:jodi-oil',               maxStaleMin: 60 * 24 * 40, chinaRow: true }, // monthly 35d cadence; 40d = cadence + 5d late-publisher grace. Data/meta TTL is 70d (2× cadence) so last-good outlives this gate and one missed monthly publish.
+  // Weekly bundle tick (seed-bundle-energy-sources); 14d = two missed runs. minRecordCount
+  // mirrors MIN_COUNTRIES_WITH_PRODUCTION in scripts/seed-oil-trade-series.mjs. Content age is
+  // the newest EIA STEO month (newestItemAt/maxContentAgeMin in seed-meta).
+  oilTradeSeries: {
+    key: 'seed-meta:energy:oil-trade-series',
+    maxStaleMin: 20160,
+    minRecordCount: 18,
+    activationKey: 'seed-activated:energy:oil-trade-series',
+    cutover: {
+      mode: 'activation-marker',
+      fromKey: null,
+      issue: 9392,
+      activationKey: 'seed-activated:energy:oil-trade-series',
+    },
+  },
   ieaOilStocks:         { key: 'seed-meta:energy:iea-oil-stocks',        maxStaleMin: 60 * 24 * 40 }, // monthly cron on 15th; 40d threshold = TTL_SECONDS
   oilStocksAnalysis:    { key: 'seed-meta:energy:oil-stocks-analysis',   maxStaleMin: 60 * 24 * 50 }, // afterPublish of ieaOilStocks; 50d = matches seed-meta TTL (exceeds 40d data TTL)
   eiaPetroleum:         { key: 'seed-meta:energy:eia-petroleum',         maxStaleMin: 4320 }, // daily bundle cron (seed-bundle-energy-sources); 72h = 3× interval, well under 7d data TTL
@@ -2042,12 +2158,14 @@ for (const market of CONSUMER_PRICE_HEALTH_MARKETS) {
   };
 }
 
-// Iran-events sunset: when disabled (default), drop it from all health
-// classification so the deliberately-dormant manual seed can't raise
-// STALE_SEED (present-but-stale) or EMPTY (absent). Re-enabling restores both.
+// Middle East strike feed: when disabled (default), the relay producer does
+// not run, so drop the key from all health classification; otherwise it would
+// raise STALE_SEED or EMPTY for a feed that is off by design. Re-enabling restores both.
 if (!IRAN_EVENTS_ENABLED) {
   delete BOOTSTRAP_KEYS.iranEvents;
   delete SEED_META.iranEvents;
+  delete STANDALONE_KEYS.strikePressure;
+  delete SEED_META.strikePressure;
 }
 
 // Standalone keys that are populated on-demand by RPC handlers (not seeds).
@@ -2074,6 +2192,10 @@ const ON_DEMAND_KEYS = new Set([
   // activation marker after its first successful publish; after that, a
   // missing/stale summary is strict forever.
   'chinaCoverage',
+  // Deployment-order bridge (#9509): Vercel can ship the summary readers before
+  // seed-fire-detections' next 10-minute tick writes the key. The seeder SETs
+  // the durable marker on every successful publish; strict from then on.
+  'wildfiresSummary',
   // Deployment-order bridge. The worker writes a permanent activation marker
   // on its first healthy loop report; absence becomes strict immediately after.
   'companyMonitoringWorker',
@@ -2092,8 +2214,15 @@ const ON_DEMAND_KEYS = new Set([
   // daily tick publishes. seed-dtm-displacement.mjs SETs the marker after its
   // first successful publish.
   'dtmDisplacement',
+  // Same bridge for the IDMC IDU events (seed-idmc-idu-displacement.mjs).
+  'idmcIduDisplacement',
+  // Same bridge for the oil trade series: the reader ships before the energy
+  // bundle's first tick publishes. seed-oil-trade-series.mjs SETs the marker.
+  'oilTradeSeries',
   // Same bridge for the UNHCR cross-border movements (#9023).
-  'crossBorderArrivals',
+  // Deploy-before-first-tick bridge for the weekly capital-flows seed (#9394).
+  'capitalFlows',
+  'crossBorderArrivals', 'borderUk', 'borderCbp', 'borderFrontex', 'borderPanama',
   // Same deploy-before-first-tick bridge as cbrRates for the two Canada
   // national-statistics seeders: bocValet (#6616) and statcanWds (#6676).
   // Softening lifts once the durable activation marker exists.
@@ -2128,6 +2257,9 @@ const ON_DEMAND_KEYS = new Set([
   // pending until that first tick and strict afterward.
   'gdeltCountryArticles',
   'gdeltDyadTension',
+  'gdeltCountryEvents',
+  // Relay strike-pressure tally: the marker is written after its first healthy publish.
+  'strikePressure',
   // Scheduled producer. The marker is written only after a successful
   // publish of the canonical snapshot. Before that first publish, absence is
   // pending activation; after it, missing or stale data is strict.
@@ -2176,7 +2308,6 @@ const ON_DEMAND_KEYS = new Set([
   'marketAlertLedger',
   'marketAlertScorecard',
   'newsRecallBenchmark',
-  'newsThreatSummary', // relay classify loop — only written when mergedByCountry has entries; absent on quiet news periods
   'resilienceRanking', // on-demand RPC cache populated after ranking requests; missing before first Pro use is expected
   'recoveryFiscalSpace', 'recoveryReserveAdequacy', 'recoveryExternalDebt',
   // NOTE (2026-04-24, plan 2026-04-24-001): the PR 1 v2 energy seeds
@@ -2196,6 +2327,7 @@ const ON_DEMAND_KEYS = new Set([
   // never covers a key that has data behind it (see classifyKey).
   'pizzintHistory',
   'riskScoresHistory', // first fresh leader build atomically activates daily history
+  'countryHistory',
   // #6070 retired six expired deployment-order bridges after live producer
   // verification. Future temporary softening needs an activation marker or an
   // enforced wall-clock expiry; a prose-only removal reminder is not a control.
@@ -2231,6 +2363,7 @@ const ACTIVATION_MARKERS = {
   // Written by the PizzINT archive's Lua (scripts/shared/pizzint-history.cjs).
   pizzintHistory: SEED_META.pizzintHistory.activationKey,
   riskScoresHistory: SEED_META.riskScoresHistory.activationKey,
+  countryHistory: SEED_META.countryHistory.activationKey,
   companyMonitoringWorker: 'seed-activated:company-monitoring:worker',
   shippingWebhookWorker: SEED_META.shippingWebhookWorker.activationKey,
   sanctionsChanges: SEED_META.sanctionsChanges.activationKey,
@@ -2239,12 +2372,25 @@ const ACTIVATION_MARKERS = {
   cbrRates: 'seed-activated:economic:cbr-rates',
   // Written by scripts/seed-dtm-displacement.mjs in runSeed's afterPublish hook.
   dtmDisplacement: SEED_META.dtmDisplacement.activationKey,
+  // Written by scripts/seed-idmc-idu-displacement.mjs in runSeed's afterPublish hook.
+  idmcIduDisplacement: SEED_META.idmcIduDisplacement.activationKey,
+  // Written by scripts/seed-oil-trade-series.mjs in runSeed's afterPublish hook.
+  oilTradeSeries: SEED_META.oilTradeSeries.activationKey,
   // Written by scripts/seed-cross-border-arrivals.mjs in runSeed's afterPublish hook.
   crossBorderArrivals: SEED_META.crossBorderArrivals.activationKey,
+  borderUk: SEED_META.borderUk.activationKey,
+  borderCbp: SEED_META.borderCbp.activationKey,
+  borderFrontex: SEED_META.borderFrontex.activationKey,
+  borderPanama: SEED_META.borderPanama.activationKey,
+  // Written by scripts/seed-capital-flows.mjs in runSeed's afterPublish hook.
+  capitalFlows: SEED_META.capitalFlows.activationKey,
   bocValet: 'seed-activated:economic:boc-valet',
   statcanWds: 'seed-activated:economic:statcan-wds',
   // Written by scripts/seed-live-video-resolved.mjs in runSeed's afterPublish hook.
   liveVideoResolved: SEED_META.liveVideoResolved.activationKey,
+  // Written by scripts/seed-fire-detections.mjs in runSeed's afterFreshness hook,
+  // after the summary extra key and the canonical seed-meta (#9509).
+  wildfiresSummary: SEED_META.wildfiresSummary.activationKey,
   usCpiMonthly: SEED_META.usCpiMonthly.activationKey,
   usTreasuryParYield: SEED_META.usTreasuryParYield.activationKey,
   usInterestRates: SEED_META.usInterestRates.activationKey,
@@ -2259,6 +2405,9 @@ const ACTIVATION_MARKERS = {
   // article index publishes with its seed-meta (#7748).
   gdeltCountryArticles: SEED_META.gdeltCountryArticles.activationKey,
   gdeltDyadTension: SEED_META.gdeltDyadTension.activationKey,
+  gdeltCountryEvents: SEED_META.gdeltCountryEvents.activationKey,
+  // Written by scripts/ais-relay.cjs after the first healthy strike-pressure publish.
+  strikePressure: 'seed-activated:conflict:strike-pressure',
   physicalPremiums: SEED_META.physicalPremiums.activationKey,
   // Written by publishUsHtsIndex in scripts/seed-supply-chain-trade.mjs.
   usHtsDuties: SEED_META.usHtsDuties.activationKey,
@@ -2302,6 +2451,7 @@ const ACTIVATION_MARKERS = {
 export const COVERAGE_FAILURE_REASONS = Object.freeze([
   'provider-cooldown',
   'provider-error',
+  'source-http-error',
   'missing-price',
   'price-evidence-missing',
   'quantity-as-price',
@@ -2562,7 +2712,7 @@ const EMPTY_DATA_OK_KEYS = new Set([
   'notamClosures', 'faaDelays', 'intlDelays', 'gpsjam', 'positiveGeoEvents', 'weatherAlerts', 'imdCycloneMarine', 'canadaRoads', 'albertaRoads', 'manitobaRoads', 'torontoRoads', 'bcOpen511', 'canadaAlerts', 'canadaAlertsAbSource', 'canadaAlertsBcSource', 'canadaAlertsSkSource',
   'earningsCalendar', 'econCalendar', 'cotPositioning',
   'usniFleet', // usniFleetStale covers the fallback; relay outages → WARN not CRIT
-  'newsThreatSummary', // only written when classify produces country matches; quiet news periods = 0 countries, no write
+  'newsThreatSummary', // a quiet classify cycle writes `byCountry: {}` (0 records); MISSING_DATA_IS_FAILURE_KEYS makes a payload missing beside fresh seed-meta critical (expiry after the 2h TTL reads STALE_SEED, since seed-meta is stale by then)
   'recoveryFiscalSpace',
   'ddosAttacks', 'trafficAnomalies', // zero events during quiet periods is valid, not critical
   'resilienceStaticFao', // empty aggregate = no IPC Phase 3+ countries this year (possible in theory); the key must exist but count=0 is fine
@@ -2626,6 +2776,11 @@ const MISSING_DATA_IS_FAILURE_KEYS = new Set([
   'canadaAlertsAbSource',
   'canadaAlertsBcSource',
   'canadaAlertsSkSource',
+  // The relay classify loop writes the summary on every cycle that reached a
+  // digest (`byCountry: {}` when quiet) and advances seed-meta only after that
+  // write lands, so fresh metadata beside a missing payload is an expiry or a
+  // lost write. That gap zeroes every country's CII news score.
+  'newsThreatSummary',
 ]);
 
 // Keys where a present payload with meta recordCount=0 is valid, but the data
@@ -2635,6 +2790,12 @@ const ZERO_RECORD_DATA_OK_KEYS = new Set([
   'sanctionsChanges',
   'forecastArchive',
   'naturalEvents',
+  // A 72h window with no corroborated strike is a quiet theater, not a failed
+  // publish: the relay writes {events: []} every healthy tick, so a MISSING
+  // canonical key still reads EMPTY.
+  'iranEvents',
+  // Thirty quiet days leave an empty tally ({days: {}}), still written every tick.
+  'strikePressure',
   // A current List query can validly return no Posts. The relay still writes
   // the canonical snapshot, so a missing xFeed key remains a hard failure.
   'xFeed',
@@ -3563,18 +3724,18 @@ function classifyKey(name, redisKey, opts, ctx) {
   // meta.maxContentAgeMin); legacy seeders without it skip this branch.
   // 2026-05-04 health-readiness plan, Sprint 1.
   else if (contentAge && contentAge.contentStale) status = 'STALE_CONTENT';
-  // Pre-breach lead time (reader policy, see CONTENT_AGE_PREWARNING_RATIO in
-  // api/_content-age.js). Fires only after every hard fault declined and
-  // before COVERAGE_MARGIN_LOW, which is informational: an approaching time
-  // breach outranks a thin-but-passing cohort. Rides the compact pending lane
-  // via the STATUS_COUNTS/healthStatusBucket pattern — visible, non-blocking.
-  else if (contentAge && contentAge.preWarning) status = 'CONTENT_AGE_PREWARNING';
   // Shares STALE_CONTENT with the newestItemAt branch above: both mean "the
   // producer is healthy and correctly sized, but the data itself is older than
   // its content budget". Here the stale unit is a country rather than the
   // whole corpus, and the named entities are on the wire so an operator sees
   // the stale source family instead of a generic warning.
   else if (contentFreshness?.contentStale) status = 'STALE_CONTENT';
+  // Pre-breach lead time (reader policy, see CONTENT_AGE_PREWARNING_RATIO in
+  // api/_content-age.js). Fires only after every hard fault declined and
+  // before COVERAGE_MARGIN_LOW, which is informational: an approaching time
+  // breach outranks a thin-but-passing cohort. Rides the compact pending lane
+  // via the STATUS_COUNTS/healthStatusBucket pattern — visible, non-blocking.
+  else if (contentAge && contentAge.preWarning) status = 'CONTENT_AGE_PREWARNING';
   // Last in the chain, and only reachable when every fault branch above
   // declined: this says "nothing is wrong, but a pool is close to its floor".
   // Placing it here is what keeps it from masking a real verdict — a stale or
@@ -4161,6 +4322,32 @@ function composeChinaDecisionSignalsStatus(entry, _chinaCoverageEntry, now) {
   }
 
   return entry;
+}
+
+// The CII reads ~20 inputs, and the riskScores seed-meta count (realtime
+// signal density) stayed OK for months while ACLED fed nothing, because the
+// annual UCDP floor kept the conflict family "covered". This grades the
+// producer's per-input report (api/_cii-input-health.js) against the sibling
+// checks that own each input's staleness budget. It only raises an OK or
+// COVERAGE_PARTIAL verdict; a stale or missing seed-meta keeps its own status,
+// with the input detail attached for diagnosis. A dead input is never
+// contained: containment means the served payload is merely old, while scores
+// built without a signal are wrong.
+function composeRiskScoresInputHealth(entry, rawMeta, checks, now, containmentEvidenceByName) {
+  if (!entry) return entry;
+  const meta = unwrapEnvelope(parseRedisValue(rawMeta)).data;
+  const sourceStatuses = {};
+  for (const [id, cfg] of Object.entries(CII_INPUT_POLICY.inputs)) {
+    if (cfg.sourceCheck && checks?.[cfg.sourceCheck]) sourceStatuses[id] = checks[cfg.sourceCheck].status;
+  }
+  const ciiInputs = assessCiiInputs(meta, now, sourceStatuses);
+  const unfed = !ciiInputs.valid || ciiInputs.unfedFamilies.length > 0;
+  if (!unfed && ciiInputs.dead.length === 0) return { ...entry, ciiInputs };
+  // Also on a stale verdict: otherwise it becomes a contained HEALTHY as the
+  // seed-meta ages, while the served scores still lack the input.
+  containmentEvidenceByName?.delete('riskScores');
+  if (entry.status !== 'OK' && entry.status !== 'COVERAGE_PARTIAL') return { ...entry, ciiInputs };
+  return { ...entry, status: unfed ? 'COVERAGE_DEGRADED' : 'COVERAGE_PARTIAL', ciiInputs };
 }
 
 function composeScorecardReadModelStatus(entry, raw, readError = false) {
@@ -4977,11 +5164,14 @@ function healthResponseBody(snapshot, compact) {
       }
       if (check?.contentFreshness === undefined
         && check?.decisionGroups === undefined
-        && check?.chinaRow === undefined) continue;
+        && check?.chinaRow === undefined
+        && check?.ciiInputs === undefined) continue;
+      // `ciiInputs` names which CII sources are unconfigured or dead.
       const {
         contentFreshness: _detail,
         decisionGroups: _groups,
         chinaRow: _chinaRow,
+        ciiInputs: _ciiInputs,
         ...publicFields
       } = check;
       collection[name] = publicFields;
@@ -5504,6 +5694,13 @@ export async function handleHealth(req, ctx, options = {}) {
     checks.chinaCoverage,
     evaluationNow,
   );
+  checks.riskScores = composeRiskScoresInputHealth(
+    checks.riskScores,
+    keyMetaValues.get(SEED_META.riskScores.key),
+    checks,
+    evaluationNow,
+    containmentEvidenceByName,
+  );
 
   // Now that every key has a status, claim (or read back) the one durable
   // deadline per STALE_CONTENT source and publish it. Only the claim half is
@@ -5730,6 +5927,7 @@ export default async function handler(req, ctx) {
 // 2026-05-04 health-readiness plan, Sprint 1 test plan (Codex round 2 P1).
 export const __testing__ = {
   composeContractsFinderHealth,
+  composeRiskScoresInputHealth,
   readSeedMeta,
   classifyKey,
   healthResponseBody,

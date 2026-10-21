@@ -1668,6 +1668,7 @@ describe('crawlable corpus generator', () => {
       'src/config/trade-routes.ts',
       'scripts/chokepoint-page-content.mjs',
       'scripts/chokepoint-eia-baselines.mjs',
+      'scripts/live-pages/related-links.mjs',
     ]);
   });
 
@@ -3233,13 +3234,24 @@ describe('crawlable corpus generator', () => {
           relatedLinksFrameWords > 0 && relatedLinksFrameWords <= 55 + 3 * words(country.name).length,
           `${route} related-links heading, intro and Pro/API sentence must stay short, got ${relatedLinksFrameWords} words`,
         );
+        // The live-data links (scripts/live-pages/related-links.mjs) are the
+        // same kind of navigation block: a heading and one short line per
+        // live page, at most five lines (the US profile).
+        const liveLinksBlock = countryDocument.querySelector('[data-live-data-links]');
+        const liveLinkItems = [...(liveLinksBlock?.querySelectorAll('li') || [])];
+        assert.ok(liveLinkItems.length >= 2 && liveLinkItems.length <= 5, `${route} must list 2-5 live data links, got ${liveLinkItems.length}`);
+        for (const item of liveLinkItems) {
+          assert.ok(words(item.textContent).length <= 10, `${route} live data lines must stay one short line`);
+        }
+        const liveLinksWordCount = words(liveLinksBlock?.textContent).length;
+        const navigationWordCount = relatedLinksWordCount + liveLinksWordCount;
         const basePageWordCeiling = country.headlineEligible === false ? 950 : 900;
-        const pageWordCeiling = basePageWordCeiling + developmentsWordCount + relatedLinksWordCount;
+        const pageWordCeiling = basePageWordCeiling + developmentsWordCount + navigationWordCount;
         assert.ok(
-          // The 600-word floor is for page content, so the navigation block
-          // does not count toward it.
-          pageWordCount - relatedLinksWordCount >= 600 && pageWordCount <= pageWordCeiling,
-          `${route} main content must contain at least 600 words besides the related links and no more than ${basePageWordCeiling} base words plus ${developmentsWordCount} developments words and ${relatedLinksWordCount} related-link words; got ${pageWordCount}`,
+          // The 600-word floor is for page content, so the navigation blocks
+          // do not count toward it.
+          pageWordCount - navigationWordCount >= 600 && pageWordCount <= pageWordCeiling,
+          `${route} main content must contain at least 600 words besides the navigation links and no more than ${basePageWordCeiling} base words plus ${developmentsWordCount} developments words and ${navigationWordCount} navigation words; got ${pageWordCount}`,
         );
       }
 
@@ -5434,8 +5446,15 @@ describe('crawlable corpus generator', () => {
       const changelogIndex = read(outDir, 'reference/changelog/index.html');
       const changelogPage2 = read(outDir, 'reference/changelog/page/2/index.html');
       assert.match(changelogIndex, /<link rel="next" href="https:\/\/www\.worldmonitor\.app\/reference\/changelog\/page\/2\/">/);
-      assert.match(changelogIndex, /server scorer read non-existent/);
-      assert.match(changelogIndex, /methodology_version is now v8/);
+      const changelogWindow = new Window();
+      try {
+        changelogWindow.document.write(changelogIndex);
+        const renderedBullets = [...changelogWindow.document.querySelectorAll('article.card:first-of-type li')]
+          .map((item) => item.textContent);
+        assert.deepEqual(renderedBullets, clock.changelog[0].bullets);
+      } finally {
+        changelogWindow.close();
+      }
       assert.match(
         changelogIndex,
         /name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"/,
@@ -5577,12 +5596,8 @@ describe('crawlable corpus generator', () => {
     assert.ok(data.countries.some((country) => country.slug === 'norway' && Number.isInteger(country.rank)));
     assert.ok(data.chokepoints.some((chokepoint) => chokepoint.slug === 'strait-of-hormuz' && chokepoint.id === 'hormuz_strait'));
     assert.ok(data.glossaryTerms.some((term) => term.slug === 'country-resilience-index'));
-    // Position-independent: the parser must carry full bullet prose through,
-    // but pinning the NEWEST bullet made every changelog addition a test
-    // failure. Assert the known CII v8 entry exists wherever it now sits.
-    const allBullets = data.changelog.flatMap((entry) => entry.bullets);
-    assert.ok(allBullets.some((bullet) => bullet.includes('server scorer read non-existent')));
-    assert.ok(allBullets.some((bullet) => bullet.includes('methodology_version is now v8')));
+    assert.ok(data.changelog.length > 0);
+    assert.ok(data.changelog.every((entry) => entry.bullets.length > 0 && entry.bullets.length <= 8));
     assert.match(data.lastmod.chokepoints, /^\d{4}-\d{2}-\d{2}$/);
   });
 });

@@ -96,7 +96,7 @@ export interface UnifiedSettingsConfig {
    *
    * Sources apply to `ctx.disabledSources` on click (no draft/Save step like
    * panels), but nothing subscribed to that write, so the change only reached
-   * the dashboard at the next `REFRESH_INTERVALS.feeds` tick — 20 minutes
+   * the dashboard at the next `REFRESH_INTERVALS.feeds` tick
    * (#6380). This is the subscription.
    *
    * Fired on teardown rather than per click on purpose: the overlay covers the
@@ -1155,7 +1155,9 @@ export class UnifiedSettings {
       if (sub?.currentPeriodEnd) {
         const dateStr = new Date(sub.currentPeriodEnd).toLocaleDateString();
         if (sub.status === 'active') {
-          statusLine = `Renews: ${dateStr}`;
+          statusLine = sub.cancelAtPeriodEnd
+            ? `Cancellation scheduled -- access until ${dateStr}`
+            : `Renews: ${dateStr}`;
         } else if (sub.status === 'on_hold') {
           statusLine = 'On hold -- please update payment method';
         } else if (sub.status === 'cancelled') {

@@ -690,6 +690,9 @@ function stringExample(name, schema = {}, context = {}) {
   if (description.includes('iata')) return constrainedString(key.includes('destination') || key.includes('arrival') ? 'LHR' : 'JFK', schema);
   if (description.includes('iso 4217') || key.includes('currency')) return constrainedString('USD', schema);
   if (description.includes('iso 639') || key === 'lang' || key.includes('locale')) return constrainedString('en', schema);
+  // A partner country must differ from the primary country example (US), or
+  // the sample request describes a self-pair that returns no pair.
+  if (key === 'counterpart' && description.includes('iso 3166')) return constrainedString('DE', schema);
   if (description.includes('iso 3166') || key.includes('marketcode')) return constrainedString('US', schema);
   if (description.includes('wto member code')) return constrainedString(key.includes('partner') ? '156' : '840', schema);
   if (description.includes('world bank indicator code')) return constrainedString('NY.GDP.MKTP.CD', schema);
@@ -702,7 +705,8 @@ function stringExample(name, schema = {}, context = {}) {
   if (key.includes('iso2') || key.includes('country') || key.includes('countrycode')) return constrainedString('US', schema);
   if (key === 'members' || key === 'includedmembers') return constrainedString('US', schema);
   if (key.includes('bbox')) return constrainedString('-74.10,40.60,-73.70,40.90', schema);
-  if (key.includes('lat')) return constrainedString('40.7128', schema);
+  // Word-shaped, as in the numeric picker: `latestPeriod` is not a latitude.
+  if (key === 'lat' || key.endsWith('lat') || key.includes('latitude')) return constrainedString('40.7128', schema);
   if (key.includes('lng') || key.includes('lon')) return constrainedString('-74.0060', schema);
   if (key.includes('date') || key.endsWith('day')) return constrainedString('2026-01-15', schema);
   if (key.includes('time') || key.endsWith('at')) return constrainedString('2026-01-15T12:00:00Z', schema);
@@ -711,6 +715,11 @@ function stringExample(name, schema = {}, context = {}) {
   if (key.includes('language')) return constrainedString('typescript', schema);
   if (key.includes('category')) return constrainedString('cs.AI', schema);
   if (key.includes('feedtype')) return constrainedString('top', schema);
+  // GetCapitalFlows: periods, episode bounds and source quarters are YYYY-Qn.
+  if ((where.includes('getcapitalflows') || where.includes('get-capital-flows'))
+    && (key.includes('period') || key.includes('quarter') || key === 'start' || key === 'end')) {
+    return constrainedString('2026-Q1', schema);
+  }
   if (key.includes('period')) return constrainedString('daily', schema);
   if (key.includes('cargotype')) return constrainedString('container', schema);
   if (key.includes('commoditytype')) return constrainedString('oil', schema);
@@ -845,6 +854,30 @@ function getPriceHistoryExample() {
       { symbol: 'SI=F', name: 'Silver', currency: 'USD', timestamps: days, closes: [60.84, 61.02, 61.25] },
     ],
     unavailable: [],
+  };
+}
+
+function getGoldIntelligenceExample() {
+  return {
+    goldPrice: 3200,
+    goldChangePct: 0,
+    goldSparkline: [],
+    silverPrice: 0,
+    platinumPrice: 0,
+    palladiumPrice: 0,
+    crossCurrencyPrices: [],
+    drivers: [],
+    updatedAt: '2026-09-30T00:00:00Z',
+    unavailable: false,
+    cbReserves: {
+      asOfMonth: '2026-09',
+      indicator: 'IRFCLDT1_IRFCL56_USD',
+      valueIsOunces: false,
+      totalTonnes: 0,
+      topHolders: [{ iso3: 'USA', name: 'United States', tonnes: 0, pctOfReserves: 50 }],
+      topBuyers12m: [],
+      topSellers12m: [],
+    },
   };
 }
 
@@ -1069,6 +1102,17 @@ function exampleForSchema(schema, spec, context = {}, depth = 0, seen = new Set(
   if (!schema || typeof schema !== 'object') return 'example';
   const original = schema;
   schema = resolveRef(schema, spec);
+  if (depth === 0 && context.operationId === 'GetCountrySignalObservations'
+    && context.exampleSurface === 'response') {
+    return {
+      countryCode: 'US', family: 'COUNTRY_SIGNAL_FAMILY_OUTAGES', windowIndex: 0,
+      outcomeJson: JSON.stringify({ countryCode: 'US', family: 'outages', state: 'unavailable', observations: [],
+        snapshotAt: null, retrievedAt: '2026-10-18T12:00:00.000Z', computedAt: null,
+        observationWindow: null, scope: 'Country-qualified observations', attribution: 'Cloudflare Radar',
+        partial: true, sampleBeforeCountryFilter: false, reason: 'Synthetic unavailable-source example.',
+        matchedRows: null, sampledRows: null, omittedRows: null }),
+    };
+  }
   if (depth === 0 && context.operationId === 'ListAircraftEmergencies'
     && String(context.name ?? '').endsWith('Response')) {
     return {
@@ -1127,6 +1171,13 @@ function exampleForSchema(schema, spec, context = {}, depth = 0, seen = new Set(
     && String(context.name ?? '').toLowerCase().endsWith('response')
   ) {
     return getPriceHistoryExample();
+  }
+  if (
+    depth === 0
+    && String(context.operationId ?? '').toLowerCase() === 'getgoldintelligence'
+    && String(context.name ?? '').toLowerCase().endsWith('response')
+  ) {
+    return getGoldIntelligenceExample();
   }
   if (
     depth === 0
@@ -1373,6 +1424,19 @@ function injectDisplacementYearContract(spec) {
 
 function injectSpecExamples(spec) {
   let changed = injectDisplacementYearContract(spec);
+  const countrySignals = spec.paths?.['/api/intelligence/v1/get-country-signal-observations']?.get;
+  const countrySignalFields = spec.components?.schemas?.GetCountrySignalObservationsRequest?.properties;
+  for (const parameter of countrySignals?.parameters ?? []) {
+    const property = { country_code: 'countryCode', window_index: 'windowIndex', cursor: 'cursor' }[parameter.name];
+    if (property && countrySignalFields?.[property]) {
+      const schema = clone(countrySignalFields[property]);
+      delete schema.description;
+      delete schema.example;
+      delete schema.examples;
+      if (!eq(parameter.schema, schema)) changed = true;
+      parameter.schema = schema;
+    }
+  }
   const runId = spec.components?.schemas?.GetSimulationOutcomeRequest?.properties?.runId;
   const runIdParameter = spec.paths?.['/api/forecast/v1/get-simulation-outcome']?.get?.parameters
     ?.find((item) => item?.in === 'query' && item.name === 'runId');
@@ -1402,7 +1466,9 @@ function injectSpecExamples(spec) {
           // and clobbering it would fight that injector. That injector owns
           // header-param examples.
           if (param.in === 'header') continue;
-          const example = exampleForSchema(param.schema, spec, {
+          const example = context.operationId === 'GetCountrySignalObservations' && param.name === 'window_index' ? 0
+            : context.operationId === 'GetCountrySignalObservations' && param.name === 'cursor' ? ''
+            : exampleForSchema(param.schema, spec, {
             ...context,
             name: param.name,
             description: param.description,
@@ -1703,6 +1769,12 @@ function patchYamlExamples(raw, spec, label) {
   if (runIdParameter) {
     const loc = findOperation(lines, runIdPath, 'get', label);
     replaceParamSchema(lines, loc.start, loc.end, 'runId', runIdParameter.schema);
+  }
+  const countrySignalsPath = '/api/intelligence/v1/get-country-signal-observations';
+  for (const parameter of spec.paths?.[countrySignalsPath]?.get?.parameters ?? []) {
+    if (!['country_code', 'window_index', 'cursor'].includes(parameter.name)) continue;
+    const loc = findOperation(lines, countrySignalsPath, 'get', label);
+    replaceParamSchema(lines, loc.start, loc.end, parameter.name, parameter.schema);
   }
   for (const [path, ops] of Object.entries(spec.paths ?? {})) {
     for (const [method, op] of Object.entries(ops ?? {})) {

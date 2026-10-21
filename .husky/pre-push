@@ -444,6 +444,7 @@ PROTO_INPUTS=(
   scripts/_html-entities.mjs
   scripts/apply-openapi-filter-param-schemas.mjs
   scripts/generate-request-validation.mjs
+  scripts/harden-generated-server-errors.mjs
   scripts/generate-scorecard-edge-mirrors.mjs
   scripts/lib/main-module.mjs
   scripts/lib/openapi-codegen.mjs
@@ -478,6 +479,7 @@ PROTO_INPUTS=(
   server/_shared/bounded-json.ts
   server/_shared/cache-contract.ts
   server/_shared/client-ip.ts
+  server/_shared/country-history-access.ts
   server/_shared/deprecation-policy.ts
   server/_shared/direct-llm-quota.ts
   server/_shared/entitlement-check.ts
@@ -559,6 +561,11 @@ fi
 if [ ! -f node_modules/.package-lock.json ]; then
   echo "node_modules missing or incomplete, running npm ci..."
   npm ci --cache "$npm_config_cache" --prefer-offline || exit 1
+fi
+
+if changed '^(\.github/workflows/[^/]+\.ya?ml|ARCHITECTURE\.md|scripts/docs-stats\.mjs|\.husky/pre-push)$'; then
+  echo "Checking workflow documentation contracts..."
+  npm run docs:check || exit 1
 fi
 
 if changed '^(src/|tests/|e2e/|middleware|index\.html|vite\.config|scripts/|types/)'; then

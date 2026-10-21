@@ -28,6 +28,7 @@ import { PIPELINES } from '../shared/pipelines-data.ts';
 import { TOOL_REGISTRY, toolAccess } from '../api/mcp/registry/index.ts';
 import { MCP_DOMAIN_SUMMARY, MCP_TAGS, MCP_TOOL_CATEGORIES, TOOL_CATEGORY_BY_NAME } from '../api/mcp/domains.ts';
 import { UI_RESOURCE_LIST_RESPONSE } from '../api/mcp/ui/registry.ts';
+import { FREE_ACCOUNT_CALLS_PER_DAY } from '../api/mcp/upgrade-constants.ts';
 import { publishedRankedCountries } from './build-crawlable-corpus.mjs';
 import { commandPaletteCommandCount } from './lib/command-palette-count.mjs';
 import { defaultOnLayerStats } from './lib/default-map-layer-count.mjs';
@@ -396,6 +397,8 @@ transform('public/.well-known/mcp/server-card.json', (source) => {
   card.metadata.mcpApps.uiResources = UI_RESOURCE_LIST_RESPONSE.map(resource => resource.uri);
   // Categories and tags come from api/mcp/domains.ts. The per-tool category is
   // card-only; the live tools/list _meta stays access + weight (no wire change).
+  // ui.resourceUri mirrors the live MCP Apps link so a scanner that cannot
+  // authenticate still sees which tools render an app.
   card.toolCategories = MCP_TOOL_CATEGORIES.map((category) => category.id);
   card.tags = [...MCP_TAGS];
   card.tools = TOOL_REGISTRY.map((tool) => {
@@ -404,7 +407,11 @@ transform('public/.well-known/mcp/server-card.json', (source) => {
     return {
       name: tool.name,
       description: tool.description,
-      _meta: { 'worldmonitor/access': toolAccess(tool), 'worldmonitor/category': category },
+      _meta: {
+        ...(tool._uiResourceUri ? { ui: { resourceUri: tool._uiResourceUri } } : {}),
+        'worldmonitor/access': toolAccess(tool),
+        'worldmonitor/category': category,
+      },
     };
   });
   return renderJsonDomainSurface(json(card), SERVER_CARD_DOMAIN_SURFACE, MCP_DOMAIN_SUMMARY);
@@ -473,6 +480,7 @@ for (const path of new Set([
   'public/pricing.md',
   'docs/pricing.mdx',
   'docs/zh/pricing.mdx',
+  'docs/zh/about.mdx',
   'docs/api-commerce.mdx',
   'docs/zh/api-commerce.mdx',
   'blog-site/src/content/blog/free-vs-paid-real-time-intelligence-dashboards.md',
@@ -483,6 +491,45 @@ for (const path of new Set([
 ])) {
   transform(path, replacePreviousPrices);
 }
+
+/**
+ * docs/about.mdx is the canonical product description directories lift (#9405),
+ * so its inventory figures restate the measured depth-band stats. Each phrase
+ * must occur exactly `occurrences` times: copy that drifts from the wording
+ * fails here instead of going stale. `keys` fill the phrase's leading numerals
+ * in order; later digits (the "1" in "Tier-1") are left alone.
+ */
+const ABOUT_FACT_PHRASES = [
+  { pattern: /\b\d+ news and OSINT feeds from \d+ attributed providers\b/g, occurrences: 1, keys: ['feeds', 'providers'] },
+  { pattern: /\ball \d+ attributed providers\b/g, occurrences: 1, keys: ['providers'] },
+  { pattern: /\b\d+ (?:toggleable )?layer types\b/g, occurrences: 2, keys: ['mapLayers'] },
+  { pattern: /\b\d+ Tier-1 countries\b/g, occurrences: 1, keys: ['instabilityCountries'] },
+  { pattern: /\b\d+ scored hotspots\b/g, occurrences: 1, keys: ['hotspots'] },
+  { pattern: /\b\d+ live-AIS maritime chokepoints\b/g, occurrences: 1, keys: ['chokepoints'] },
+  { pattern: /\b\d+ subsea cables\b/g, occurrences: 1, keys: ['submarineCables'] },
+];
+
+function restateAboutFacts(source, stats) {
+  let result = source;
+  for (const { pattern, occurrences, keys } of ABOUT_FACT_PHRASES) {
+    const found = result.match(pattern)?.length ?? 0;
+    if (found !== occurrences) {
+      throw new Error(`docs/about.mdx: expected ${occurrences} match(es) of ${pattern}, found ${found}`);
+    }
+    result = result.replace(pattern, (phrase) => {
+      let slot = 0;
+      return phrase.replace(/\d+/g, (digits) => (slot < keys.length ? String(stats[keys[slot++]]) : digits));
+    });
+  }
+  return result;
+}
+
+// One transform per file: a second one would read the unwritten original in
+// --check mode, so the Pro price rewrite rides along here.
+transform('docs/about.mdx', (source) => restateAboutFacts(replacePreviousPrices(source), facts.depthProofStats));
+
+/** The free-account MCP allowance, worded once for every pricing surface (#9144). */
+const FREE_ACCOUNT_MCP_LINE = `${FREE_ACCOUNT_CALLS_PER_DAY} cached-data MCP calls/day with a free account`;
 
 function pricingSummary() {
   const byKey = Object.fromEntries(plans.map((plan) => [plan.planKey, plan]));
@@ -506,7 +553,7 @@ function pricingSummary() {
         name: 'Free',
         price_usd_monthly: 0,
         signup_required: false,
-        features: ['global map coverage (Resilience is Pro)', 'curated feeds', 'country briefs', 'chokepoints', 'instability scores', 'watchlists', '3 dashboard tabs'],
+        features: ['global map coverage (Resilience is Pro)', 'curated feeds', 'country briefs', 'chokepoints', 'instability scores', 'watchlists', '3 dashboard tabs', FREE_ACCOUNT_MCP_LINE],
       },
       {
         name: 'Pro',
@@ -548,6 +595,10 @@ transform('public/pricing.md', (source) => {
   if (!next.includes(generatedNote)) {
     next = next.replace('# Pricing - World Monitor\n', `# Pricing - World Monitor\n\n${generatedNote}\n`);
   }
+  const freeMcp = `- MCP: ${FREE_ACCOUNT_MCP_LINE}; other MCP tools require a paid plan\n`;
+  next = /^- MCP: .* with a free account.*\n/m.test(next)
+    ? next.replace(/^- MCP: .* with a free account.*\n/m, freeMcp)
+    : next.replace(/(## Free\n[\s\S]*?^- Limits: .*\n)/m, `$1${freeMcp}`);
   return next.replace(
     /```json\n[\s\S]*?```/,
     `\`\`\`json\n${JSON.stringify(pricingSummary(), null, 2)}\n\`\`\``,

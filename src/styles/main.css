@@ -3762,6 +3762,10 @@ body.live-news-fullscreen-active #mapSection.live-news-fullscreen .map-container
   min-height: 0 !important;
 }
 
+body.live-news-fullscreen-active .map-popup {
+  z-index: 10001;
+}
+
 /* Hide map overlays and sibling panels behind fullscreen panel (#829, #859) */
 body.live-news-fullscreen-active .layer-toggles,
 body.live-news-fullscreen-active .map-legend {
@@ -16334,6 +16338,19 @@ a.prediction-link:hover {
   font-size: calc(11px * var(--wm-panel-effective-scale, 1));
   color: var(--green);
   font-weight: bold;
+}
+
+.cascade-redundancy-zone {
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+  color: var(--yellow, #e0b000);
+  margin-right: 6px;
+}
+
+.cascade-estimate-note {
+  margin-top: 8px;
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+  color: var(--text-dim, #888);
+  font-style: italic;
 }
 
 /* Strategic Risk Panel */

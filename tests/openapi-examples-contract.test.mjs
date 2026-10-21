@@ -652,7 +652,7 @@ describe('OpenAPI examples contract', () => {
       const spec = JSON.parse(readFileSync(resolve(apiDir, file), 'utf8'));
       return sum + operationEntries(spec).length;
     }, 0);
-    assert.equal(total, 248, `expected 248 OpenAPI operations, found ${total}`);
+    assert.equal(total, 252, `expected 252 OpenAPI operations, found ${total}`);
   });
 
   it('adds schema-valid request and response examples to every service JSON spec', () => {
@@ -664,9 +664,9 @@ describe('OpenAPI examples contract', () => {
       totals.requestExpected += result.requestExpected;
       totals.responseExpected += result.responseExpected;
     }
-    assert.equal(totals.operations, 248);
+    assert.equal(totals.operations, 252);
     assert.ok(totals.requestExpected >= 137, `expected at least 137 request example targets, found ${totals.requestExpected}`);
-    assert.equal(totals.responseExpected, 248);
+    assert.equal(totals.responseExpected, 252);
   });
 
   // record-baseline-snapshot's nested updates[].type is a bare string (no schema
@@ -705,14 +705,14 @@ describe('OpenAPI examples contract', () => {
       const spec = loadYaml(readFileSync(resolve(apiDir, yamlFile), 'utf8'));
       operations += assertOperationExamples(spec, yamlFile).operations;
     }
-    assert.equal(operations, 248);
+    assert.equal(operations, 252);
   });
 
   it('adds request and response examples to the unified OpenAPI bundle', () => {
     const bundle = loadUnifiedOpenApiSpec();
     const result = assertOperationExamples(bundle, 'worldmonitor.openapi.yaml');
-    assert.equal(result.operations, 248);
-    assert.equal(result.responseExpected, 248);
+    assert.equal(result.operations, 252);
+    assert.equal(result.responseExpected, 252);
   });
 
   it('labels aircraft emergency examples synthetic and documents projected response shapes', () => {
@@ -775,6 +775,26 @@ describe('OpenAPI examples contract', () => {
 });
 
 describe('OpenAPI curated example values', () => {
+  it('shows USD gold reserve quantities as unmeasured in all published examples', () => {
+    const specs = [
+      ['MarketService.openapi.json', JSON.parse(readFileSync(resolve(apiDir, 'MarketService.openapi.json'), 'utf8'))],
+      ['MarketService.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'MarketService.openapi.yaml'), 'utf8'))],
+      ['worldmonitor.openapi.yaml', loadUnifiedOpenApiSpec()],
+    ];
+    for (const [label, spec] of specs) {
+      const example = spec.paths['/api/market/v1/get-gold-intelligence'].get.responses['200'].content[JSON_MEDIA].example;
+      assert.equal(example.cbReserves.indicator, 'IRFCLDT1_IRFCL56_USD', label);
+      assert.equal(example.cbReserves.valueIsOunces, false, label);
+      assert.equal(example.cbReserves.totalTonnes, 0, label);
+      assert.equal(example.cbReserves.topHolders[0].tonnes, 0, label);
+      assert.ok(example.cbReserves.topHolders[0].pctOfReserves > 0, label);
+      assert.deepEqual(example.cbReserves.topBuyers12m, [], label);
+      assert.deepEqual(example.cbReserves.topSellers12m, [], label);
+      assert.ok(example.goldPrice > 0, label);
+      assert.equal(example.unavailable, false, label);
+    }
+  });
+
   // These parameters have accepted-value sets the field-name heuristic can't
   // infer; the injector's override map pins each to a real value the handlers
   // accept. Guards against a regression to a rejected placeholder.

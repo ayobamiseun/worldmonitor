@@ -54,6 +54,19 @@ test('daily CII history monitors its string index and requires a build within 30
   }
 });
 
+test('country archive health activates once and detects a stopped daily cron', () => {
+  const name = 'countryHistory', key = STANDALONE_KEYS[name];
+  assert.equal(__testing__.ACTIVATION_MARKERS[name], 'seed-activated:history:country');
+  assert.equal(classifyKey(name, key, { allowOnDemand: true }, makeCtx({ activationStates: { [name]: false } })).status, 'EMPTY_ON_DEMAND');
+  assert.equal(classifyKey(name, key, { allowOnDemand: true }, makeCtx({ activationStates: { [name]: true } })).status, 'EMPTY');
+  for (const [age, status] of [[0, 'OK'], [2161, 'STALE_SEED']]) {
+    assert.equal(classifyKey(name, key, { allowOnDemand: true }, makeCtx({
+      activationStates: { [name]: true }, strens: { [key]: 256 },
+      metaValues: { [SEED_META[name].key]: seedMeta({ fetchedAt: NOW - age * ONE_MIN_MS, recordCount: 196 }) },
+    })).status, status);
+  }
+});
+
 test('daily CII health is pending only before its first confirmed publication', () => {
   const name = 'riskScoresHistory';
   const key = STANDALONE_KEYS[name];
@@ -662,6 +675,7 @@ test('classifyKey: consumer-price coverage relays bounded failure reasons and dr
           rejectedCount: 3,
           failureReasons: {
             'missing-price': 2,
+            'source-http-error': 1,
             'validator-rejected': 1,
             'not-a-real-reason': 9,
             'provider-error': -4,
@@ -675,7 +689,7 @@ test('classifyKey: consumer-price coverage relays bounded failure reasons and dr
             failedPages: 2,
             rejectedCount: 1,
             completionRatio: 0,
-            failureReasons: { 'missing-price': 2, 'bogus-code': 1 },
+            failureReasons: { 'source-http-error': 2, 'bogus-code': 1 },
           }],
         },
       }),
@@ -684,9 +698,10 @@ test('classifyKey: consumer-price coverage relays bounded failure reasons and dr
 
   assert.deepEqual(entry.coverage.failureReasons, {
     'missing-price': 2,
+    'source-http-error': 1,
     'validator-rejected': 1,
   });
-  assert.deepEqual(entry.coverage.retailers[0].failureReasons, { 'missing-price': 2 });
+  assert.deepEqual(entry.coverage.retailers[0].failureReasons, { 'source-http-error': 2 });
 });
 
 test('classifyKey: consumer-price coverage without failure reasons reports an empty map', () => {
@@ -1472,7 +1487,7 @@ test('classifyKey: riskScores partial realtime family coverage → COVERAGE_PART
 
   assert.equal(entry.status, 'COVERAGE_PARTIAL');
   assert.equal(entry.records, 1);
-  assert.equal(entry.minRecordCount, 3);
+  assert.equal(entry.minRecordCount, 2, 'conflict + news families since CII v14');
   assert.equal(STATUS_COUNTS[entry.status], 'warn');
 });
 
@@ -2856,12 +2871,12 @@ test('classifyKey: an UNREADABLE activation marker earns nothing (fails closed)'
 });
 
 test('classifyKey: a key with no activation marker is untouched by the change', () => {
-  // newsThreatSummary is in both sets too, but configures no marker — so it is
+  // recoveryFiscalSpace is in both sets too, but configures no marker — so it is
   // permanently `unknown` and MUST keep EMPTY_DATA_OK_KEYS' behaviour. This is
   // what stops the reorder from silencing producers that run and then stop.
   const entry = classifyKey(
-    'newsThreatSummary',
-    STANDALONE_KEYS.newsThreatSummary,
+    'recoveryFiscalSpace',
+    STANDALONE_KEYS.recoveryFiscalSpace,
     { allowOnDemand: true },
     makeCtx({ activationStates: IMD_MARKER_ABSENT }),
   );
@@ -2885,6 +2900,19 @@ test('dyad health is pending before activation and strict afterward', () => {
   const name = 'gdeltDyadTension';
   const key = STANDALONE_KEYS[name];
   assert.equal(__testing__.ACTIVATION_MARKERS[name], 'seed-activated:gdelt:bulk:dyad-tension');
+  assert.equal(classifyKey(name, key, { allowOnDemand: true },
+    makeCtx({ activationStates: { [name]: false } })).status, 'EMPTY_ON_DEMAND');
+  assert.equal(classifyKey(name, key, { allowOnDemand: true },
+    makeCtx({ activationStates: { [name]: true } })).status, 'EMPTY');
+});
+
+
+test('GDELT country-events health is pending before activation and strict afterward', () => {
+  const name = 'gdeltCountryEvents';
+  const key = STANDALONE_KEYS[name];
+  assert.equal(key, 'gdelt:bulk:country-events:v1');
+  assert.ok(ON_DEMAND_KEYS.has(name));
+  assert.equal(__testing__.ACTIVATION_MARKERS[name], SEED_META[name].activationKey);
   assert.equal(classifyKey(name, key, { allowOnDemand: true },
     makeCtx({ activationStates: { [name]: false } })).status, 'EMPTY_ON_DEMAND');
   assert.equal(classifyKey(name, key, { allowOnDemand: true },

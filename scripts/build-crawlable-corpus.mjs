@@ -29,6 +29,7 @@ import {
   renderContextualComparisons,
 } from './build-comparison-pages.mjs';
 import { RELATED_READING_PATH, loadRelatedReading, renderRelatedReading } from './related-reading.mjs';
+import { LIVE_PAGE_LINKS_PATH, chokepointLiveLinks, countryLiveLinks, crisisLiveLinks, renderLiveDataLinks } from './live-pages/related-links.mjs';
 import {
   USE_CASE_PAGES,
   USE_CASES_CONTENT_VERSION,
@@ -193,6 +194,7 @@ export const CHOKEPOINT_PAGE_LASTMOD_PATHS = Object.freeze([
   TRADE_ROUTES_PATH,
   CHOKEPOINT_PAGE_CONTENT_PATH,
   EIA_OIL_TRANSIT_BASELINES_PATH,
+  LIVE_PAGE_LINKS_PATH,
 ]);
 /** Compare pages interpolate live provider and chokepoint counts (#7744). */
 export const COMPARISON_PAGE_LASTMOD_PATHS = Object.freeze([
@@ -210,7 +212,7 @@ export const COMPARISON_PAGE_LASTMOD_PATHS = Object.freeze([
 // families take the later of this version and their own committed source date,
 // so template changes are reflected without pretending every deploy is fresh.
 export const CORPUS_GENERATOR_CONTENT_VERSION = '2026-09-01';
-export const COUNTRY_PAGE_CONTENT_VERSION = '2026-10-16';
+export const COUNTRY_PAGE_CONTENT_VERSION = '2026-10-18';
 export const CII_COUNTRY_PAGE_CONTENT_VERSION = '2026-09-12';
 // Exported so the #7533 guard test can recompute every family clock without
 // re-implementing the version constants themselves.
@@ -235,7 +237,7 @@ const AVAILABLE_EVIDENCE_LIMIT = 6;
 // This floor is published on country pages, so keep it aligned with
 // docs/methodology/country-resilience-index.mdx#supported-readings-on-unranked-country-pages.
 export const SUPPORTED_READING_MIN_COVERAGE = 0.5;
-export const CHOKEPOINT_PAGE_CONTENT_VERSION = '2026-09-10';
+export const CHOKEPOINT_PAGE_CONTENT_VERSION = '2026-10-18';
 const SOURCES_PAGE_CONTENT_VERSION = '2026-09-10';
 // Dataset schema versions stamp Dataset JSON-LD shape changes, per family. They
 // must NOT fold into every family's sitemap/page lastmod — that made ~90% of main
@@ -250,7 +252,7 @@ export const DATASET_SCHEMA_CONTENT_VERSION = {
   crisis: '2026-09-03',
   tools: '2026-09-03',
 };
-export const CRISIS_PAGE_CONTENT_VERSION = '2026-09-10';
+export const CRISIS_PAGE_CONTENT_VERSION = '2026-10-18';
 // TOOLS_PAGE_CONTENT_VERSION and RESEARCH_PAGE_CONTENT_VERSION are exported
 // for the same reason as the constants above: the #7533 guard recomputes
 // their families' clocks from the real values.
@@ -1923,6 +1925,7 @@ export async function loadCorpusData({
     gitFileLastmod(rootDir, COUNTRY_REGIONS_PATH),
     gitFileLastmod(rootDir, MICROSTATE_TERRITORIES_PATH),
     gitFileLastmod(rootDir, RELATED_READING_PATH),
+    gitFileLastmod(rootDir, LIVE_PAGE_LINKS_PATH),
     // Inputs of the related-country links (scripts/country-related-links.mjs).
     gitFileLastmod(rootDir, CRISIS_REGISTRY_PATH),
     gitFileLastmod(rootDir, TENSION_PAIRS_PATH),
@@ -1975,6 +1978,7 @@ export async function loadCorpusData({
   const crisesLastmod = laterDate(
     gitFileLastmod(rootDir, CRISIS_REGISTRY_PATH),
     gitFileLastmod(rootDir, RELATED_READING_PATH),
+    gitFileLastmod(rootDir, LIVE_PAGE_LINKS_PATH),
     livePulse.capturedAt,
     CRISIS_PAGE_CONTENT_VERSION,
   );
@@ -3987,6 +3991,7 @@ ${renderCountryDevelopments({ countryCode: country.code, countryName: country.na
 ${analysis.html}
 ${renderCountryRelatedLinks(country, relatedCountries, escapeHtml)}
 ${renderRelatedChokepoints(relatedChokepoints)}
+${renderLiveDataLinks(countryLiveLinks(country.code), escapeHtml)}
 ${renderRelatedReading(relatedReading, escapeHtml)}
 ${analysis.readingGuide ? `      <h2>How to use this evidence</h2>
       <p>${escapeHtml(analysis.readingGuide)} <a href="/docs/methodology/country-resilience-index">Full CRI method</a> · <a href="/docs/corrections">revision log</a> · <a href="/accuracy/">forecast accuracy scorecard</a>.</p>` : `      <h2>How to read this page</h2>
@@ -4290,6 +4295,7 @@ ${oilTransitRows.map(({ row, eia }) => `          <tr><td><a href="/chokepoints/
         </tbody>
       </table></div>
       <p class="source" data-snapshot-source="${escapeHtml(EIA_OIL_TRANSIT_BASELINES_PATH)}">Baseline source: U.S. ${escapeHtml(EIA_OIL_TRANSIT_SOURCE)} (${EIA_OIL_TRANSIT_REFERENCE_YEAR}). The remaining ${chokepointHubRows.length - oilTransitRows.length} tracked waterways have no row in that series; their pages say so rather than estimating one.</p>
+      <p>These are transit volumes. For how much crude the US holds in storage this week, see <a href="/tools/crude-oil-inventories/">US crude oil inventories this week</a>.</p>
       <h2>Why each waterway is tracked</h2>
       <dl data-chokepoint-context>
 ${chokepointHubRows.map((row) => {
@@ -4510,6 +4516,9 @@ function renderChokepointPage({
     relatedItems.push(`<a href="/blog/glossary/${content.glossarySlug}/">${escapeHtml(chokepoint.displayName)} in the glossary</a>`);
   }
   relatedItems.push('<a href="/blog/glossary/maritime-chokepoint/">What is a maritime chokepoint?</a>');
+  for (const link of chokepointLiveLinks({ carriesOil: Boolean(EIA_OIL_TRANSIT_BASELINES.byRegistryId[chokepoint.id]) })) {
+    relatedItems.push(`<a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>`);
+  }
   for (const link of editorialLinks) {
     relatedItems.push(`<a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>`);
   }
@@ -4808,6 +4817,7 @@ ${snapshotSection}
       <h2>Coverage boundary</h2>
       <p>${escapeHtml(crisis.coverage.map((country) => `${country.name} (${country.code})`).join(', '))}. Events outside this list are not included in the live totals on this page.</p>
 ${renderRelatedChokepoints(relatedChokepoints)}
+${renderLiveDataLinks(crisisLiveLinks({ touchesOilChokepoint: relatedChokepoints.some((chokepoint) => EIA_OIL_TRANSIT_BASELINES.byRegistryId[chokepoint.id]) }), escapeHtml)}
 ${renderRelatedReading(relatedReading, escapeHtml)}
       <h2>How to read this tracker</h2>
       <p>Use these monthly country summaries as a bounded pulse, then inspect the dashboard for event-level context, map layers, and other independent signals. The figures are not forecasts and should not be interpreted as a complete casualty or incident ledger. World Monitor's forecasts are graded separately, and that record is published on the <a href="/accuracy/">forecast accuracy scorecard</a>.</p>

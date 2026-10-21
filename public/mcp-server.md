@@ -27,6 +27,8 @@ The server ships tools in these domains: <!-- mcp-domains:start -->markets, comm
 
 Call `get_mcp_allowance({})` to read the current verified account allowance when the host cannot read `worldmonitor://account/mcp-allowance`. It requires user-bound OAuth or `wm_…` credentials, accepts only optional `jmespath`, and rejects account selectors and `panel_request`. Status spends no daily allowance, remains available at the daily cap, and uses the shared 192/minute protocol bucket. Unreadable counters return an error rather than a zero snapshot. Check `sharedWithRestApi` before interpreting `used`; account totals may include REST traffic and do not identify individual callers.
 
+When a denial's `error.data` carries `checkoutTool: "start_upgrade"`, call `start_upgrade({plan})` with its `recommendedPlan` to get a personal checkout link for the signed-in account. The user pays in a browser; the tool never charges and spends no daily allowance. After payment, `get_mcp_allowance` reports the paid limit without re-authorization.
+
 ## MCP Apps
 
 World Monitor supports MCP Apps (`io.modelcontextprotocol/ui`) with interactive `ui://` app shells. The linked tools are `get_country_risk`, `get_world_brief`, `get_country_brief`, `get_market_data`, `get_chokepoint_status`, `get_news_intelligence`, `get_conflict_events`, `get_natural_disasters`, `get_prediction_markets`, `get_forecast_predictions`, `open_news_dashboard`, and `open_country_brief`; their UI resources are:
@@ -48,7 +50,7 @@ Hosts discover the links through `_meta.ui.resourceUri` in `tools/list`, enumera
 
 ## Authentication
 
-`get_gold_intelligence` preserves gold quotes and optional COT, ETF and central-bank enrichment with individual observation dates; `unavailable` and absent enrichment remain explicit. `get_internet_activity` reads traffic anomalies (optional country) or global DDoS summaries with `limit` 1..100, default 30. The traffic `totalCount` is global before filtering; DDoS percentages are not country-filtered. Both require subscription access and make one signed downstream GET, charged at weight 2 on API allowances (the MCP request plus the downstream request). Missing internet snapshots return an error; valid empty snapshots retain empty lists.
+`get_gold_intelligence` preserves gold quotes and optional COT, ETF and central-bank enrichment with individual observation dates; `unavailable` and absent enrichment remain explicit. It requires subscription access and makes one signed downstream GET, charged at weight 2 on API allowances (the MCP request plus the downstream request). `get_infrastructure_status` reads Cloudflare Radar outages, traffic anomalies and global DDoS summaries from the seeded cache; the traffic `totalCount` is global before filtering and DDoS percentages are not country-filtered. The retired `get_internet_activity` and `get_energy_storage` names still answer with a `deprecation` notice that names their replacements.
 
 - **Connecting an MCP client:** an `initialize` with no credentials gets `401` with a `WWW-Authenticate` challenge, which starts your client's OAuth sign-in. A free account is enough.
 - **`tools/list` and other stateless discovery calls:** anonymous, no key.

@@ -17,6 +17,9 @@
           "path": "scripts/profile-news-hybrid-clustering-7782-dashboard.mjs"
         },
         {
+          "path": "src/services/desktop-sign-in-page.ts"
+        },
+        {
           "path": "src/services/runtime.ts"
         }
       ]
@@ -580,6 +583,9 @@
       "status": "excluded",
       "references": [
         {
+          "path": "api/_desktop-auth.ts"
+        },
+        {
           "path": "api/user/passkey-offer.ts"
         },
         {
@@ -729,6 +735,9 @@
         },
         {
           "path": "scripts/seed-fuel-prices.mjs"
+        },
+        {
+          "path": "scripts/seed-oil-trade-series.mjs"
         }
       ]
     },
@@ -928,6 +937,12 @@
       "references": [
         {
           "path": "scripts/_seed-utils.mjs"
+        },
+        {
+          "path": "scripts/backtest-capital-flow-episodes.mjs"
+        },
+        {
+          "path": "scripts/seed-capital-flows.mjs"
         },
         {
           "path": "scripts/seed-gold-cb-reserves.mjs"
@@ -1393,6 +1408,9 @@
         },
         {
           "path": "scripts/seed-bis-lbs.mjs"
+        },
+        {
+          "path": "scripts/seed-capital-flows.mjs"
         },
         {
           "path": "scripts/seed-education-attainment.mjs"
@@ -2655,6 +2673,9 @@
           "path": "scripts/seed-comtrade-bilateral-hs4.mjs"
         },
         {
+          "path": "scripts/seed-oil-trade-series.mjs"
+        },
+        {
           "path": "scripts/seed-recovery-import-hhi.mjs"
         },
         {
@@ -2761,6 +2782,20 @@
         },
         {
           "path": "src/config/feeds.ts"
+        }
+      ]
+    },
+    {
+      "host": "creativecommons.org",
+      "provider": "creativecommons.org",
+      "kind": "structured",
+      "observed": true,
+      "license": "Excluded: first-party, control-plane, UI, or rendering transport",
+      "attribution": "Excluded from the external-provider count: not an ingested upstream dataset.",
+      "status": "excluded",
+      "references": [
+        {
+          "path": "server/worldmonitor/displacement/v1/cross-border-data.ts"
         }
       ]
     },
@@ -2896,6 +2931,9 @@
       "status": "terms-review",
       "references": [
         {
+          "path": "scripts/lib/yield-curves/oecd-lt.mjs"
+        },
+        {
           "path": "scripts/seed-ecb-fx-rates.mjs"
         },
         {
@@ -2964,6 +3002,9 @@
           "path": "scripts/benchmark-resilience-external.mjs"
         },
         {
+          "path": "scripts/seed-idmc-idu-displacement.mjs"
+        },
+        {
           "path": "scripts/seed-resilience-static.mjs"
         }
       ]
@@ -3025,16 +3066,33 @@
       ]
     },
     {
+      "host": "data.trade.gov",
+      "provider": "International Trade Administration (US Consolidated Screening List)",
+      "kind": "structured",
+      "observed": true,
+      "license": "US government work. The ITA Data API terms of service (developer.trade.gov/terms-of-service) require the notice: This product uses the International Trade Administration's Data API but is not endorsed or certified by the International Trade Administration.",
+      "attribution": "This product uses the International Trade Administration's Data API but is not endorsed or certified by the International Trade Administration. Verify listings against the Federal Register and the issuing agency.",
+      "status": "terms-review",
+      "references": [
+        {
+          "path": "scripts/_csl-sanctions.mjs"
+        }
+      ]
+    },
+    {
       "host": "data.unhcr.org",
       "provider": "data.unhcr.org",
       "kind": "structured",
       "observed": true,
-      "license": "Provider terms for this upstream API/dataset; verify before redistribution",
-      "attribution": "Credit data.unhcr.org and link to the original upstream API/dataset.",
-      "status": "terms-review",
+      "license": "ODP footer states datasets are CC BY 4.0 (observed 2026-10-19).",
+      "attribution": "UNHCR Operational Data Portal; link the situation and CC BY 4.0. WorldMonitor normalizes and derives the view. No UNHCR endorsement.",
+      "status": "reviewed",
       "references": [
         {
           "path": "scripts/seed-cross-border-arrivals.mjs"
+        },
+        {
+          "path": "server/worldmonitor/displacement/v1/cross-border-data.ts"
         }
       ]
     },
@@ -7696,6 +7754,9 @@
       "references": [
         {
           "path": "scripts/build-chokepoint-transit-snapshot.mjs"
+        },
+        {
+          "path": "scripts/seed-oil-trade-series.mjs"
         }
       ]
     },
@@ -8845,6 +8906,9 @@
           "path": "scripts/build-chokepoint-transit-snapshot.mjs"
         },
         {
+          "path": "scripts/seed-oil-trade-series.mjs"
+        },
+        {
           "path": "scripts/seed-portwatch-chokepoints-ref.mjs"
         },
         {
@@ -9042,6 +9106,9 @@
         },
         {
           "path": "scripts/seed-bis-lbs.mjs"
+        },
+        {
+          "path": "scripts/seed-capital-flows.mjs"
         },
         {
           "path": "server/worldmonitor/economic/v1/_bis-shared.ts"
@@ -10699,6 +10766,9 @@
           "path": "api/mcp/skill-extension/generated.ts"
         },
         {
+          "path": "scripts/ais-relay.cjs"
+        },
+        {
           "path": "server/worldmonitor/trade/v1/_tradestats-tariff.ts"
         },
         {
@@ -11555,6 +11625,23 @@
       ]
     },
     {
+      "host": "www.cbp.gov",
+      "provider": "www.cbp.gov",
+      "kind": "structured",
+      "observed": true,
+      "license": "US government public-domain work unless otherwise noted. Copyright notice reviewed 2026-10-19 for the Nationwide Encounters CSV.",
+      "attribution": "Credit US Customs and Border Protection and link to the Nationwide Encounters source. Encounters are enforcement events, not unique people.",
+      "status": "reviewed",
+      "references": [
+        {
+          "path": "scripts/lib/border-route-sources.mjs"
+        },
+        {
+          "path": "server/worldmonitor/displacement/v1/cross-border-data.ts"
+        }
+      ]
+    },
+    {
       "host": "www.cbr.ru",
       "provider": "www.cbr.ru",
       "kind": "structured",
@@ -12114,12 +12201,15 @@
     {
       "host": "www.eia.gov",
       "provider": "www.eia.gov",
-      "kind": "feed",
+      "kind": "feed+structured",
       "observed": true,
       "license": "Provider terms for this feed publisher; verify before redistribution",
       "attribution": "Credit www.eia.gov and link to the original feed publisher.",
       "status": "terms-review",
       "references": [
+        {
+          "path": "scripts/seed-oil-trade-series.mjs"
+        },
         {
           "path": "src/config/feeds.ts"
         }
@@ -12381,6 +12471,23 @@
       ]
     },
     {
+      "host": "www.frontex.europa.eu",
+      "provider": "www.frontex.europa.eu",
+      "kind": "structured",
+      "observed": true,
+      "license": "Used with permission; repository owner confirmed reuse permission on 2026-10-20.",
+      "attribution": "Credit Frontex and link to https://www.frontex.europa.eu/what-we-do/monitoring-and-risk-analysis/migratory-map/. Counts are detections, not unique people. No endorsement implied.",
+      "status": "reviewed",
+      "references": [
+        {
+          "path": "scripts/lib/border-route-sources.mjs"
+        },
+        {
+          "path": "server/worldmonitor/displacement/v1/cross-border-data.ts"
+        }
+      ]
+    },
+    {
       "host": "www.ft.com",
       "provider": "www.ft.com",
       "kind": "feed",
@@ -12608,15 +12715,21 @@
       "provider": "www.gov.uk",
       "kind": "feed+structured",
       "observed": true,
-      "license": "Provider terms for this feed publisher; verify before redistribution",
-      "attribution": "Credit www.gov.uk and link to the original feed publisher.",
+      "license": "GOV.UK Open Government Licence v3.0 for Home Office small-boat arrival statistics; other publishers on this host retain their source terms.",
+      "attribution": "Credit the issuing department and original dataset. Home Office arrivals: Contains public sector information licensed under the Open Government Licence v3.0.",
       "status": "terms-review",
       "references": [
+        {
+          "path": "scripts/lib/border-route-sources.mjs"
+        },
         {
           "path": "scripts/seed-fuel-prices.mjs"
         },
         {
           "path": "scripts/seed-security-advisories.mjs"
+        },
+        {
+          "path": "server/worldmonitor/displacement/v1/cross-border-data.ts"
         },
         {
           "path": "src/config/feeds.ts"
@@ -12917,6 +13030,9 @@
         },
         {
           "path": "scripts/seed-jodi-oil.mjs"
+        },
+        {
+          "path": "scripts/seed-oil-trade-series.mjs"
         }
       ]
     },
@@ -13142,6 +13258,23 @@
       ]
     },
     {
+      "host": "www.migracion.gob.pa",
+      "provider": "www.migracion.gob.pa",
+      "kind": "structured",
+      "observed": true,
+      "license": "Used with permission; repository owner confirmed reuse permission on 2026-10-20.",
+      "attribution": "Servicio Nacional de Migración, Panamá. https://www.migracion.gob.pa/estadisticas/. Figures are preliminary and subject to revision.",
+      "status": "reviewed",
+      "references": [
+        {
+          "path": "scripts/lib/border-route-sources.mjs"
+        },
+        {
+          "path": "server/worldmonitor/displacement/v1/cross-border-data.ts"
+        }
+      ]
+    },
+    {
       "host": "www.miit.gov.cn",
       "provider": "www.miit.gov.cn",
       "kind": "structured",
@@ -13305,6 +13438,23 @@
         },
         {
           "path": "src/config/feeds.ts"
+        }
+      ]
+    },
+    {
+      "host": "www.nationalarchives.gov.uk",
+      "provider": "www.nationalarchives.gov.uk",
+      "kind": "structured",
+      "observed": true,
+      "license": "Excluded: first-party, control-plane, UI, or rendering transport",
+      "attribution": "Excluded from the external-provider count: not an ingested upstream dataset.",
+      "status": "excluded",
+      "references": [
+        {
+          "path": "scripts/lib/border-route-sources.mjs"
+        },
+        {
+          "path": "server/worldmonitor/displacement/v1/cross-border-data.ts"
         }
       ]
     },
@@ -14238,6 +14388,9 @@
       "attribution": "TeleGeography Submarine Cable Map; link to the source map.",
       "status": "terms-review",
       "references": [
+        {
+          "path": "scripts/check-submarine-cable-gaps.mjs"
+        },
         {
           "path": "scripts/seed-submarine-cables.mjs"
         }

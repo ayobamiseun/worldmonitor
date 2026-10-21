@@ -51,6 +51,14 @@ const {
 const xNewsAccounts = require('./lib/x-news-accounts.cjs');
 const { SAUDI_CIVIL_DEFENSE, MAX_POST_CHARS, publishSaudiCivilDefenseAlerts } = require('./lib/saudi-civil-defense-alerts.cjs');
 const { publishChokepointDisruptionAlerts } = require('./lib/chokepoint-disruption-alerts.cjs');
+// Loaded defensively: the gazetteer validates its data files at require time,
+// and a bad regenerated data file must disable only this feed, not the relay.
+let middleEastStrikes = null;
+try {
+  middleEastStrikes = require('./lib/middle-east-strikes.cjs');
+} catch (e) {
+  console.error('[MiddleEastStrikes] Module failed to load — strike feed disabled:', e?.message || e);
+}
 const { createPollGenerationGuard } = require('./lib/poll-generation-guard.cjs');
 const { createXPollCycle, xPollSlot } = require('./lib/x-poll-cycle.cjs');
 const { createGuardedLookup, SSRF_BLOCKED_ERROR_CODE } = require('./lib/notification-webhook-ssrf.cjs');
@@ -1213,6 +1221,7 @@ const telegramState = {
   cursorByHandle: Object.create(null),
   items: [],
   lastPollAt: 0,
+  lastSuccessfulPollAt: 0,
   lastError: null,
   startedAt: Date.now(),
 };
@@ -2133,6 +2142,9 @@ async function pollTelegramOnce() {
         if (!msg.message) { mediaSkipped++; continue; }
         const item = normalizeTelegramMessage(msg, channel);
         newItems.push(item);
+        // The 200-item feed buffer turns over in ~90 minutes; strike candidates
+        // are captured here so none age out before the 10-minute extractor runs.
+        noteMiddleEastStrikeItem(item);
         if (!telegramState.cursorByHandle[handle] || msg.id > telegramState.cursorByHandle[handle]) {
           telegramState.cursorByHandle[handle] = msg.id;
         }
@@ -2180,6 +2192,10 @@ async function pollTelegramOnce() {
   }
 
   telegramState.lastPollAt = Date.now();
+  // lastPollAt advances on every cycle, including one that a FLOOD_WAIT or a
+  // dead session ended with zero channels read. Freshness consumers (the
+  // Middle East strike feed's seed-meta gate) need the last cycle that read data.
+  if (channelsPolled > 0) telegramState.lastSuccessfulPollAt = telegramState.lastPollAt;
   const elapsed = ((Date.now() - pollStart) / 1000).toFixed(1);
   console.log(`[Relay] Telegram poll: ${channelsPolled}/${channels.length} channels, ${newItems.length} new msgs, ${telegramState.items.length} total, ${channelsFailed} errors, ${mediaSkipped} media-only skipped (${elapsed}s)`);
 
@@ -4697,7 +4713,9 @@ const CLASSIFY_CACHE_TTL = 86400;
 const CLASSIFY_SKIP_TTL = 1800;
 const CLASSIFY_BATCH_SIZE = 50;
 const CLASSIFY_VARIANTS = ['full', 'tech', 'finance', 'happy', 'commodity'];
-const CLASSIFY_VARIANT_STAGGER_MS = 3 * 60 * 1000;
+// Zero under RELAY_TEST_MODE so the /__test/seed-classify seam runs a full
+// five-variant cycle in milliseconds instead of twelve minutes.
+const CLASSIFY_VARIANT_STAGGER_MS = RELAY_TEST_MODE ? 0 : 3 * 60 * 1000;
 
 // Relay gates — active only when RELAY_GATES_READY=1 (see Appendix E of docs/internal/news-alerts-enhancements-from-trendradar.md).
 // When the flag is set the relay becomes the sole authoritative source of rss_alert events and
@@ -4884,7 +4902,14 @@ Focus: geopolitical events, conflicts, disasters, diplomacy.
 Classify by real-world event severity, not headline sentiment.`;
 
 const NEWS_THREAT_SUMMARY_KEY = 'news:threat:summary:v1';
-const NEWS_THREAT_SUMMARY_TTL = 1200; // 20 min — aligns with relay cadence
+// The cycle publishes only at its end, about 12 minutes after it starts (four
+// 3-minute variant staggers), and a restart discards the cycle in flight. So
+// the first write after a restart lands at least 27 minutes after the last
+// one; on 2026-10-21 three deploys in 40 minutes left a 48-minute gap, and the
+// old 20-minute TTL expired the key twice. Two hours outlasts that, and stays
+// above the 60-minute health budget (api/health.js SEED_META.newsThreatSummary)
+// so health reads STALE_SEED before the payload can vanish.
+const NEWS_THREAT_SUMMARY_TTL = 2 * 60 * 60;
 
 // Country name → ISO2 for threat summary geo-attribution (inline to avoid ESM import)
 const THREAT_COUNTRY_NAME_TO_ISO2 = {
@@ -4930,6 +4955,7 @@ const THREAT_COUNTRY_NAME_TO_ISO2 = {
   'tel aviv':'IL','gaza':'PS','damascus':'SY','sanaa':'YE','houthi':'YE',
   'kremlin':'RU','pentagon':'US','nato':'','irgc':'IR','hezbollah':'LB',
   'hamas':'PS','taliban':'AF','riyadh':'SA','ankara':'TR',
+  'saudi':'SA','houthis':'YE',
 };
 // Sort by name length desc so longer multi-word names match first (used for tie-breaking same position)
 const THREAT_COUNTRY_NAME_ENTRIES = Object.entries(THREAT_COUNTRY_NAME_TO_ISO2)
@@ -4959,6 +4985,62 @@ function matchCountryNamesInText(text) {
   }
   return [];
 }
+
+// City and region names -> ISO2 (scripts/build-news-places.mjs), longest phrase first.
+const NEWS_PLACES = require('./shared/news-places.json');
+const NEWS_PLACE_MAX_WORDS = 4;
+// Mirrors stripPublisherSuffix in scripts/shared/geo-extract.mjs.
+const THREAT_PUBLISHER_CREDIT_WORDS = /\b(?:post|times|news|journal|herald|tribune|guardian|telegraph|gazette|press|reuters|bloomberg|jazeera|bbc|cnn|nbc|cbs|npr|afp|tv|television|radio|daily|weekly|observer|independent|monitor|chronicle|express|mail|standard|insider|magazine|media|network|wire|agency|today|online)\b|\.(?:com|org|net|gov)\b/i;
+const THREAT_CREDIT_TAIL_CHARS = 120;
+// Every country a lowercased, diacritic-free text names. Place phrases resolve first and are
+// blanked, so "new mexico" is US, not MX; country names are then blanked as they match, so
+// "sudan" cannot also fire inside "south sudan".
+function countriesNamedInText(lower) {
+  const tokens = [...lower.matchAll(/[a-z]+/g)];
+  const found = [];
+  let rest = lower;
+  for (let i = 0; i < tokens.length; i++) {
+    for (let n = Math.min(NEWS_PLACE_MAX_WORDS, tokens.length - i); n >= 1; n--) {
+      const iso2 = NEWS_PLACES[tokens.slice(i, i + n).map((t) => t[0]).join(' ')];
+      if (!iso2) continue;
+      if (!found.includes(iso2)) found.push(iso2);
+      const end = tokens[i + n - 1].index + tokens[i + n - 1][0].length;
+      rest = rest.slice(0, tokens[i].index) + ' '.repeat(end - tokens[i].index) + rest.slice(end);
+      i += n - 1;
+      break;
+    }
+  }
+  for (const { iso2, regex } of THREAT_COUNTRY_NAME_ENTRIES) {
+    if (!regex.test(rest)) continue;
+    if (!found.includes(iso2)) found.push(iso2);
+    rest = rest.replace(new RegExp(regex.source, 'gi'), (m) => ' '.repeat(m.length));
+  }
+  return found;
+}
+
+// The threat summary feeds CII's information score, where a headline that names no
+// attack target still says something about every country it mentions: "Saudi Arabia
+// intercepts missile near Red Sea oil hub" has no target and used to count for nobody.
+// Alert routing keeps the strict single-country rule above.
+function threatSummaryCountries(text) {
+  const affected = matchCountryNamesInText(text);
+  if (affected.length > 0) return affected;
+  // Uppercase US/UK are the countries; lowercase "us" stays the pronoun.
+  let lower = text.replace(/\bU\.S\.(?:A\.)?/g, 'United States ').replace(/\bU\.K\./g, 'United Kingdom ')
+    .replace(/\bUS\b/g, 'United States').replace(/\bUK\b/g, 'United Kingdom')
+    .normalize('NFKD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+  // Drop a trailing " - The Washington Post" credit so the outlet's country is not counted.
+  const tailStart = Math.max(0, lower.length - THREAT_CREDIT_TAIL_CHARS);
+  const credit = /\s[-–—|]\s+([^-–—|]+)$/.exec(lower.slice(tailStart));
+  if (credit) {
+    const tail = credit[1].trim();
+    const isCredit = tail.split(/\s+/).length <= 6
+      && (THREAT_PUBLISHER_CREDIT_WORDS.test(tail) || countriesNamedInText(tail).length === 0);
+    if (isCredit) lower = lower.slice(0, tailStart + credit.index);
+  }
+  return countriesNamedInText(lower);
+}
+
 
 // v5 (2026-04-28): bumped from v4 in lockstep with
 // server/worldmonitor/intelligence/v1/_shared.ts and
@@ -5031,18 +5113,20 @@ const CLASSIFY_LLM_PROVIDERS = [
   },
 ];
 
-function classifyFetchLlmSingle(titles, _apiKey, apiUrl, model, headers, extraBody, timeout, maxTextChars = 200) {
+// options.systemPrompt / options.maxTokensPerItem let another index-aligned
+// classifier (the Middle East strike extractor) reuse this provider chain.
+function classifyFetchLlmSingle(titles, _apiKey, apiUrl, model, headers, extraBody, timeout, maxTextChars = 200, options = {}) {
   return new Promise((resolve) => {
     const sanitized = titles.map((t) => t.replace(/[\n\r]/g, ' ').replace(/\|/g, '/').slice(0, maxTextChars).trim());
     const prompt = sanitized.map((t, i) => `${i}|${t}`).join('\n');
     const bodyStr = JSON.stringify({
       model,
       messages: [
-        { role: 'system', content: CLASSIFY_SYSTEM_PROMPT },
+        { role: 'system', content: options.systemPrompt || CLASSIFY_SYSTEM_PROMPT },
         { role: 'user', content: prompt },
       ],
       temperature: 0,
-      max_tokens: titles.length * 40,
+      max_tokens: titles.length * (options.maxTokensPerItem || 40),
       ...extraBody,
     });
 
@@ -5076,7 +5160,7 @@ function classifyFetchLlmSingle(titles, _apiKey, apiUrl, model, headers, extraBo
   });
 }
 
-async function classifyFetchLlm(titles, maxTextChars = 200) {
+async function classifyFetchLlm(titles, maxTextChars = 200, options = {}) {
   for (const provider of CLASSIFY_LLM_PROVIDERS) {
     const envVal = process.env[provider.envKey];
     if (!envVal) continue;
@@ -5085,11 +5169,11 @@ async function classifyFetchLlm(titles, maxTextChars = 200) {
     const model = typeof provider.model === 'function' ? provider.model() : provider.model;
     const headers = provider.headers(envVal);
 
-    const result = await classifyFetchLlmSingle(titles, envVal, apiUrl, model, headers, provider.extraBody || {}, provider.timeout, maxTextChars);
+    const result = await classifyFetchLlmSingle(titles, envVal, apiUrl, model, headers, provider.extraBody || {}, provider.timeout, maxTextChars, options);
     if (result) {
       return result;
     }
-    console.warn(`[Classify] ${provider.name} failed, trying next provider...`);
+    console.warn(`[${options.label || 'Classify'}] ${provider.name} failed, trying next provider...`);
   }
   return null;
 }
@@ -5135,11 +5219,9 @@ async function seedClassifyForVariant(variant, seenTitles) {
         console.warn(formatClassifyDigestFetchFailure(resp.statusCode, RELAY_API_KEY));
         return { total: 0, classified: 0, skipped: 0, fetchFailed: true };
       }
-      const body = await new Promise((resolve) => {
-        let d = '';
-        resp.on('data', (c) => { d += c; });
-        resp.on('end', () => resolve(d));
-      });
+      let body = '';
+      resp.setEncoding('utf8');
+      for await (const chunk of resp) body += chunk;
       digest = JSON.parse(body);
       break;
     } catch (e) {
@@ -5161,8 +5243,11 @@ async function seedClassifyForVariant(variant, seenTitles) {
   // #7084: stale RSS titles already had their alert pass when served fresh.
   // Exclude only those digest-derived candidates; fresh X candidates remain
   // eligible because they are an independent input to the combined pass.
-  if (isStaleDigestReplay(digest)) {
-    console.log(`[Classify] digest is a stale replay (${digest.coverage.staleReason || 'unknown'}, ${digest.coverage.staleAgeSeconds ?? 0}s) — skipping digest-derived candidates for ${variant}`);
+  // The digest API answers 200 with `coverage.state: 'unavailable'` and no
+  // categories when it has no digest to serve; that is no news, not quiet news.
+  const staleReplay = isStaleDigestReplay(digest) || digest?.coverage?.state === 'unavailable';
+  if (staleReplay) {
+    console.log(`[Classify] digest is a stale replay or unavailable (${digest.coverage.staleReason || 'unknown'}, ${digest.coverage.staleAgeSeconds ?? 0}s) — skipping digest-derived candidates for ${variant}`);
   }
 
   // Map of title → item metadata; recency gate: skip articles older than 6h.
@@ -5177,7 +5262,7 @@ async function seedClassifyForVariant(variant, seenTitles) {
     RECENCY_GATE_MS,
   );
   const allTitles = buildClassifyCandidateMap(digest, xCandidates, variant, classifyNow, RECENCY_GATE_MS);
-  if (allTitles.size === 0) return { total: 0, classified: 0, skipped: 0 };
+  if (allTitles.size === 0) return { total: 0, classified: 0, skipped: 0, staleReplay };
 
   const titleArr = [...allTitles.keys()];
   const cacheKeys = titleArr.map((t) => classifyCacheKey(t));
@@ -5187,6 +5272,11 @@ async function seedClassifyForVariant(variant, seenTitles) {
   // byCountry accumulates threat counts while title+level are in scope
   const byCountry = {};
   const emptyLevel = () => ({ critical: 0, high: 0, medium: 0, low: 0, info: 0 });
+  // Country-naming titles with no usable label (a cached `_skip`, an unreadable
+  // entry, or one the LLM skipped below), so an empty byCountry cannot be read
+  // as a quiet cycle. A title that names no country cannot change byCountry.
+  let unlabelled = 0;
+  const countUnlabelled = (title) => { if (threatSummaryCountries(title).length > 0) unlabelled++; };
 
   for (let i = 0; i < titleArr.length; i++) {
     const hit = cached[i];
@@ -5196,18 +5286,18 @@ async function seedClassifyForVariant(variant, seenTitles) {
     }
     // Attribute cached hits while we still have the title
     let parsed = hit;
-    if (typeof hit === 'string') { try { parsed = JSON.parse(hit); } catch { continue; } }
+    if (typeof hit === 'string') { try { parsed = JSON.parse(hit); } catch { countUnlabelled(titleArr[i]); continue; } }
     const level = parsed?.level;
-    if (!CLASSIFY_VALID_LEVELS.includes(level)) continue;
+    if (!CLASSIFY_VALID_LEVELS.includes(level)) { countUnlabelled(titleArr[i]); continue; }
     if (seenTitles.has(titleArr[i])) continue;
     seenTitles.add(titleArr[i]);
-    for (const code of matchCountryNamesInText(titleArr[i])) {
+    for (const code of threatSummaryCountries(titleArr[i])) {
       if (!byCountry[code]) byCountry[code] = emptyLevel();
       byCountry[code][level]++;
     }
   }
 
-  if (misses.length === 0) return { total: titleArr.length, classified: 0, skipped: 0, byCountry };
+  if (misses.length === 0) return { total: titleArr.length, classified: 0, skipped: 0, byCountry, staleReplay, unlabelled };
 
   let classified = 0;
   let skipped = 0;
@@ -5221,6 +5311,7 @@ async function seedClassifyForVariant(variant, seenTitles) {
       for (const title of chunk) {
         await upstashSet(classifyCacheKey(title), { level: '_skip', timestamp: Date.now() }, CLASSIFY_SKIP_TTL);
         skipped++;
+        countUnlabelled(title);
       }
       continue;
     }
@@ -5241,7 +5332,7 @@ async function seedClassifyForVariant(variant, seenTitles) {
       // Attribute newly classified title to country stats (global dedup via seenTitles)
       if (!seenTitles.has(chunk[idx])) {
         seenTitles.add(chunk[idx]);
-        for (const code of matchCountryNamesInText(chunk[idx])) {
+        for (const code of threatSummaryCountries(chunk[idx])) {
           if (!byCountry[code]) byCountry[code] = emptyLevel();
           byCountry[code][level]++;
         }
@@ -5310,6 +5401,7 @@ async function seedClassifyForVariant(variant, seenTitles) {
       if (!classifiedSet.has(i)) {
         await upstashSet(classifyCacheKey(chunk[i]), { level: '_skip', timestamp: Date.now() }, CLASSIFY_SKIP_TTL);
         skipped++;
+        countUnlabelled(chunk[i]);
       }
     }
 
@@ -5323,7 +5415,7 @@ async function seedClassifyForVariant(variant, seenTitles) {
   if (shadow.asked > 0) {
     console.log(`[Classify] Jev shadow ${variant}: asked ${shadow.asked}, answered ${shadow.answered}, agreed ${shadow.agreed}, alert flips ${shadow.alertFlips}`);
   }
-  return { total: titleArr.length, classified, skipped, byCountry };
+  return { total: titleArr.length, classified, skipped, byCountry, staleReplay, unlabelled };
 }
 
 async function seedClassify() {
@@ -5362,6 +5454,9 @@ async function seedClassify() {
     let totalSkipped = 0;
     let fetchOk = 0;
     let fetchFailed = 0;
+    let staleReplays = 0;
+    let unlabelled = 0;
+    let variantErrors = 0;
     const mergedByCountry = {};
     const seenTitles = new Set();
     for (let v = 0; v < CLASSIFY_VARIANTS.length; v++) {
@@ -5370,6 +5465,8 @@ async function seedClassify() {
         const stats = await seedClassifyForVariant(CLASSIFY_VARIANTS[v], seenTitles);
         if (stats.fetchFailed) fetchFailed += 1;
         else fetchOk += 1;
+        if (stats.staleReplay) staleReplays += 1;
+        unlabelled += stats.unlabelled || 0;
         totalClassified += stats.classified;
         totalSkipped += stats.skipped;
         console.log(`[Classify] ${CLASSIFY_VARIANTS[v]}: ${stats.total} titles, ${stats.classified} classified, ${stats.skipped} skipped`);
@@ -5380,6 +5477,7 @@ async function seedClassify() {
           }
         }
       } catch (e) {
+        variantErrors += 1;
         console.warn(`[Classify] ${CLASSIFY_VARIANTS[v]} error:`, e?.message || e);
       }
     }
@@ -5389,10 +5487,25 @@ async function seedClassify() {
       return;
     }
 
-    await upstashSet('seed-meta:news:threat-summary', { fetchedAt: Date.now(), recordCount: Object.keys(mergedByCountry).length }, 604800);
-    if (Object.keys(mergedByCountry).length > 0) {
-      await envelopeWrite(NEWS_THREAT_SUMMARY_KEY, { byCountry: mergedByCountry, generatedAt: Date.now() }, NEWS_THREAT_SUMMARY_TTL, { recordCount: Object.keys(mergedByCountry).length, sourceVersion: 'news-threat-summary' });
-      console.log(`[Classify] Threat summary written for ${Object.keys(mergedByCountry).length} countries`);
+    // Written on every cycle that reached a digest, including one where no
+    // headline named a country (`byCountry: {}`): the CII reads an empty summary
+    // as a quiet input and a missing one as a dead input. An empty result is
+    // quiet only when every headline was fetched fresh and labelled: after a
+    // failed digest fetch, a variant that threw, a stale or unavailable digest
+    // (headlines skipped above) or country-naming titles the LLM could not
+    // label, the countries it would have named are unknown, so the last summary stays and its seed-meta ages. seed-meta advances only
+    // after the payload lands, so health never vouches for a missing key.
+    const threatCountryCount = Object.keys(mergedByCountry).length;
+    const threatSummaryAt = Date.now();
+    const threatSummaryDegraded = threatCountryCount === 0 && (fetchFailed > 0 || variantErrors > 0 || staleReplays > 0 || unlabelled > 0);
+    const threatSummaryWritten = !threatSummaryDegraded && await envelopeWrite(NEWS_THREAT_SUMMARY_KEY, { byCountry: mergedByCountry, generatedAt: threatSummaryAt }, NEWS_THREAT_SUMMARY_TTL, { fetchedAt: threatSummaryAt, recordCount: threatCountryCount, zeroOk: true, sourceVersion: 'news-threat-summary' });
+    if (threatSummaryWritten) {
+      await upstashSet('seed-meta:news:threat-summary', { fetchedAt: threatSummaryAt, recordCount: threatCountryCount }, 604800);
+      console.log(`[Classify] Threat summary written for ${threatCountryCount} countries`);
+    } else if (threatSummaryDegraded) {
+      console.warn(`[Classify] No country matches from a degraded cycle (${fetchFailed} digest fetch failure(s), ${variantErrors} variant error(s), ${staleReplays} stale replay(s), ${unlabelled} unlabelled title(s)) — keeping the last threat summary`);
+    } else {
+      console.warn('[Classify] Threat summary write failed — seed-meta:news:threat-summary not advanced');
     }
 
     await upstashSet('seed-meta:classify', { fetchedAt: Date.now(), recordCount: totalClassified }, 604800);
@@ -5412,6 +5525,173 @@ async function startClassifySeedLoop() {
   const activeProviders = CLASSIFY_LLM_PROVIDERS.filter((p) => !!process.env[p.envKey]).map((p) => p.name);
   console.log(`[Classify] Seed loop starting (interval ${CLASSIFY_SEED_INTERVAL_MS / 1000 / 60}min, providers:${activeProviders.length ? activeProviders.join(',') : 'none'})`);
   startBootSeedLoop('Classify', 'seed-meta:classify', CLASSIFY_SEED_INTERVAL_MS, seedClassify, (e) => console.warn('[Classify] Initial seed error:', e?.message || e), (e) => console.warn('[Classify] Seed error:', e?.message || e));
+}
+
+// ─────────────────────────────────────────────────────────────
+// Middle East strike feed — Telegram + GDELT -> conflict:iran-events:v1
+// (logic and tests: scripts/lib/middle-east-strikes.cjs). Replaces the manual
+// LiveUAMap dump. Off unless IRAN_EVENTS_ENABLED=true, the same switch every
+// reader of the key honours (api/health.js, api/bootstrap.js, ...).
+// ─────────────────────────────────────────────────────────────
+const MIDDLE_EAST_STRIKES_ENABLED = (process.env.IRAN_EVENTS_ENABLED ?? 'false').toLowerCase() === 'true';
+const MIDDLE_EAST_STRIKES_INTERVAL_MS = 10 * 60 * 1000;
+// Canonical outlives the 72h window it carries; health's 45-minute seed-meta
+// budget (api/health.js SEED_META.iranEvents) is what alarms on a dead loop.
+const MIDDLE_EAST_STRIKES_CANONICAL_TTL_S = 72 * 3600;
+const MIDDLE_EAST_STRIKES_STORE_TTL_S = 4 * 24 * 3600;
+const MIDDLE_EAST_STRIKES_META_TTL_S = 7 * 24 * 3600;
+// The 30-day strike-pressure tally (CII v12) outlives its window by 5 days, so
+// a relay outage shorter than that loses no history.
+const MIDDLE_EAST_STRIKE_PRESSURE_TTL_S = 35 * 24 * 3600;
+const MIDDLE_EAST_STRIKES_PENDING_MAX = 1000;
+const MIDDLE_EAST_STRIKES_PENDING_MAX_AGE_MS = 12 * 3600 * 1000;
+const MIDDLE_EAST_STRIKES_DONE_MAX = 5000;
+const middleEastStrikePending = new Map();
+// Posts already classified (strike or not): the feed buffer re-offers them
+// every cycle for ~90 minutes, and each re-offer would cost a cache read.
+const middleEastStrikeDone = new Set();
+const MIDDLE_EAST_STRIKES_MAX_MISSES = 3;
+const middleEastStrikeMisses = new Map();
+let middleEastStrikesInFlight = false;
+let middleEastGdeltBulkPromise = null;
+
+function noteMiddleEastStrikeItem(item) {
+  if (!MIDDLE_EAST_STRIKES_ENABLED || !middleEastStrikes || !item?.id || middleEastStrikePending.has(item.id) || middleEastStrikeDone.has(item.id)) return;
+  if (!middleEastStrikes.prefilterStrikeText(item.text)) return;
+  middleEastStrikePending.set(item.id, item);
+  while (middleEastStrikePending.size > MIDDLE_EAST_STRIKES_PENDING_MAX) {
+    const evicted = middleEastStrikePending.keys().next().value;
+    middleEastStrikePending.delete(evicted);
+    middleEastStrikeMisses.delete(evicted);
+  }
+}
+
+async function loadMiddleEastStrikeGdelt(processed) {
+  // Lazy and caught: a missing module degrades to a Telegram-only cycle
+  // instead of an unhandled rejection at relay start.
+  middleEastGdeltBulkPromise ??= import('./_conflict-gdelt-bulk.mjs');
+  let bulk;
+  try {
+    bulk = await middleEastGdeltBulkPromise;
+  } catch (e) {
+    middleEastGdeltBulkPromise = null; // a cached rejection would disable GDELT until restart
+    console.warn('[MiddleEastStrikes] GDELT module failed to load:', e?.message || e);
+    return { candidates: [], processed, errors: [String(e?.message || e)], fetched: 0 };
+  }
+  try {
+    return await middleEastStrikes.fetchGdeltStrikeCandidates({ bulk, processed });
+  } catch (e) {
+    console.warn('[MiddleEastStrikes] GDELT backstop unavailable:', e?.message || e);
+    return { candidates: [], processed, errors: [String(e?.message || e)], fetched: 0 };
+  }
+}
+
+async function seedMiddleEastStrikes() {
+  if (middleEastStrikesInFlight) return;
+  middleEastStrikesInFlight = true;
+  const t0 = Date.now();
+  try {
+    for (const item of telegramState.items) noteMiddleEastStrikeItem(item);
+    for (const [id, item] of middleEastStrikePending) {
+      const ts = Date.parse(item.ts);
+      if (!Number.isFinite(ts) || t0 - ts > MIDDLE_EAST_STRIKES_PENDING_MAX_AGE_MS) { middleEastStrikePending.delete(id); middleEastStrikeMisses.delete(id); }
+    }
+    const pendingItems = [...middleEastStrikePending.values()];
+    const { status, doneIds, result, pressureStatus } = await middleEastStrikes.publishStrikeCycle({
+      now: t0,
+      pendingItems,
+      readStore: async () => {
+        let ok = true;
+        const value = await upstashGet(middleEastStrikes.STORE_KEY, () => { ok = false; });
+        return { ok, value };
+      },
+      writeStore: (store) => upstashSet(middleEastStrikes.STORE_KEY, store, MIDDLE_EAST_STRIKES_STORE_TTL_S),
+      writeCanonical: (payload, recordCount) => envelopeWrite(middleEastStrikes.CANONICAL_KEY, payload, MIDDLE_EAST_STRIKES_CANONICAL_TTL_S, {
+        recordCount,
+        sourceVersion: middleEastStrikes.SOURCE_VERSION,
+        zeroOk: true,
+      }),
+      writeSeedMeta: (meta) => upstashSet(middleEastStrikes.SEED_META_KEY, meta, MIDDLE_EAST_STRIKES_META_TTL_S),
+      readCache: (key) => upstashGet(key),
+      writeCache: (key, value, ttl) => upstashSet(key, value, ttl),
+      classify: (texts) => classifyFetchLlm(texts, middleEastStrikes.CLASSIFY_MAX_TEXT_CHARS, {
+        systemPrompt: middleEastStrikes.STRIKE_CLASSIFIER_PROMPT,
+        maxTokensPerItem: 60,
+        label: 'MiddleEastStrikes',
+      }),
+      loadGdelt: loadMiddleEastStrikeGdelt,
+      telegramPolledAt: telegramState.lastSuccessfulPollAt,
+      readPressure: async () => {
+        let ok = true;
+        const value = await upstashGet(middleEastStrikes.PRESSURE_KEY, () => { ok = false; });
+        return { ok, value };
+      },
+      writePressure: (pressure) => upstashSet(middleEastStrikes.PRESSURE_KEY, pressure, MIDDLE_EAST_STRIKE_PRESSURE_TTL_S),
+      writePressureMeta: async (meta) => {
+        if (!await upstashSet(middleEastStrikes.PRESSURE_SEED_META_KEY, meta, MIDDLE_EAST_STRIKES_META_TTL_S)) return false;
+        // Durable, no TTL: health reads the key as pending until the first
+        // healthy tally publish and strict afterwards (api/health.js ACTIVATION_MARKERS).
+        await upstashEval("return redis.call('SET', KEYS[1], ARGV[1])", [middleEastStrikes.PRESSURE_ACTIVATION_KEY], [String(t0)]);
+        return true;
+      },
+    });
+    for (const id of doneIds) {
+      middleEastStrikePending.delete(id);
+      middleEastStrikeMisses.delete(id);
+      middleEastStrikeDone.add(id);
+    }
+    // A post the classifier keeps answering around (it answers the batch but
+    // never this index) is dropped after a few cycles, so one poison post
+    // cannot hold the feed unhealthy. A dead provider chain is not counted:
+    // those posts wait for the classifier to come back.
+    if (result && !result.classifierFailed) {
+      for (const item of result.pending) {
+        const misses = (middleEastStrikeMisses.get(item.id) || 0) + 1;
+        if (misses < MIDDLE_EAST_STRIKES_MAX_MISSES) {
+          middleEastStrikeMisses.set(item.id, misses);
+          continue;
+        }
+        console.warn(`[MiddleEastStrikes] Dropping ${item.id}: unclassified after ${misses} answered cycles`);
+        middleEastStrikePending.delete(item.id);
+        middleEastStrikeMisses.delete(item.id);
+        middleEastStrikeDone.add(item.id);
+      }
+    }
+    while (middleEastStrikeDone.size > MIDDLE_EAST_STRIKES_DONE_MAX) {
+      middleEastStrikeDone.delete(middleEastStrikeDone.values().next().value);
+    }
+    if (!result) {
+      console.warn(`[MiddleEastStrikes] ${status} — cycle skipped, seed-meta not advanced`);
+      return;
+    }
+    const s = result.stats;
+    const summary = `${s.events} events, ${s.prefiltered} posts (${s.cacheHits} cached, ${s.classified} classified, ${s.retry} retry), ${s.gdeltCandidates} GDELT clusters from ${s.gdeltExportsFetched} exports, ${s.storeCandidates} stored, telegramLive=${s.telegramLive}, pressure=${pressureStatus}`;
+    if (status === 'ok') console.log(`[MiddleEastStrikes] ${summary} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    else console.warn(`[MiddleEastStrikes] ${status} — seed-meta not advanced; ${summary}`);
+  } catch (e) {
+    console.warn('[MiddleEastStrikes] Seed error:', e?.message || e);
+  } finally {
+    middleEastStrikesInFlight = false;
+  }
+}
+
+function startMiddleEastStrikesLoop() {
+  if (!MIDDLE_EAST_STRIKES_ENABLED) {
+    console.log('[MiddleEastStrikes] Disabled (IRAN_EVENTS_ENABLED is not true)');
+    return;
+  }
+  if (!middleEastStrikes) {
+    console.error('[MiddleEastStrikes] Disabled (module failed to load; see the startup error) — health will report STALE');
+    return;
+  }
+  if (!UPSTASH_ENABLED) {
+    console.log('[MiddleEastStrikes] Disabled (no Upstash Redis)');
+    return;
+  }
+  console.log(`[MiddleEastStrikes] Loop starting (interval ${MIDDLE_EAST_STRIKES_INTERVAL_MS / 60000}min)`);
+  startBootSeedLoop('MiddleEastStrikes', middleEastStrikes.SEED_META_KEY, MIDDLE_EAST_STRIKES_INTERVAL_MS, seedMiddleEastStrikes,
+    (e) => console.warn('[MiddleEastStrikes] Initial seed error:', e?.message || e),
+    (e) => console.warn('[MiddleEastStrikes] Seed error:', e?.message || e));
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -11299,6 +11579,57 @@ async function handleOpenSkyRequest(req, res, PORT) {
   }
 }
 
+async function handleWitsRequest(req, res) {
+  const responseHeaders = {
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-store',
+    'CDN-Cache-Control': 'no-store',
+  };
+  if (req.method !== 'GET') {
+    return safeEnd(res, 405, { ...responseHeaders, Allow: 'GET' }, JSON.stringify({ error: 'Method not allowed' }));
+  }
+
+  const params = new URL(req.url, 'http://localhost').searchParams;
+  const upstreamPath = params.get('path') || '';
+  const rows = /^\/API\/V1\/SDMX\/V21\/datasource\/TRN\/reporter\/\d{3}\/partner\/(all|000)\/product\/\d{6}\/year\/(\d{1,4})\/datatype\/(reported|aveestimated)$/.exec(upstreamPath);
+  const validRows = rows && Number(rows[2]) >= 1 && Number(rows[2]) <= 2100
+    && (rows[3] === 'reported' ? rows[1] === 'all' : rows[1] === '000');
+  const validMetadata = /^\/API\/V1\/wits\/datasource\/trn\/(dataavailability\/country\/\d{3}\/year\/all|country\/all)$/.test(upstreamPath);
+  if (params.size !== 1 || (!validRows && !validMetadata)) {
+    return safeEnd(res, 400, responseHeaders, JSON.stringify({ error: 'Invalid WITS path' }));
+  }
+
+  try {
+    const upstreamUrl = new URL('https://wits.worldbank.org');
+    upstreamUrl.pathname = upstreamPath;
+    const upstream = await fetch(upstreamUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        Accept: 'application/xml,text/xml;q=0.9,*/*;q=0.1',
+      },
+      redirect: 'error',
+      signal: AbortSignal.timeout(9000),
+    });
+    const chunks = [];
+    let size = 0;
+    if (upstream.body) {
+      for await (const chunk of upstream.body) {
+        size += chunk.length;
+        if (size > 4 * 1024 * 1024) throw new Error('WITS response too large');
+        chunks.push(chunk);
+      }
+    }
+    return safeEnd(res, upstream.status, {
+      ...responseHeaders,
+      'Content-Type': upstream.headers.get('content-type') || 'application/xml',
+    }, Buffer.concat(chunks));
+  } catch (error) {
+    const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError';
+    return safeEnd(res, timedOut ? 504 : 502, responseHeaders,
+      JSON.stringify({ error: timedOut ? 'WITS request timed out' : 'WITS request failed' }));
+  }
+}
+
 // ── World Bank proxy (World Bank blocks Vercel edge IPs with 403) ──
 const worldbankCache = new Map(); // key: query string → { data, timestamp }
 const WORLDBANK_CACHE_TTL_MS = 30 * 60 * 1000; // 30 min — data rarely changes
@@ -12203,7 +12534,7 @@ const server = http.createServer(async (req, res) => {
   // prevention (rate limiting), not data protection. Cloudflare WAF provides edge-level protection.
   const isPublicRoute = pathname === '/health' || pathname === '/' || isRssRoute || pathname.startsWith('/widget-agent');
   if (!isPublicRoute) {
-    const authorized = pathname === '/status'
+    const authorized = pathname === '/status' || pathname === '/wits'
       ? Boolean(RELAY_SHARED_SECRET) && isAuthorizedRequest(req)
       : isAuthorizedRequest(req);
     if (!authorized) {
@@ -12445,6 +12776,14 @@ const server = http.createServer(async (req, res) => {
       'Content-Type': 'application/json',
       'Cache-Control': 'no-store',
     }, JSON.stringify(getRelayRollingMetrics()));
+  } else if (pathname === '/__test/seed-classify' && RELAY_TEST_MODE) {
+    // Test-only seam, same contract as /__test/seed-theater-posture: run one
+    // classify cycle on request.
+    await seedClassify();
+    return sendCompressed(req, res, 200, {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+    }, JSON.stringify({ ok: true }));
   } else if (pathname === '/__test/seed-theater-posture' && RELAY_TEST_MODE) {
     // Test-only seam: background seed loops are disabled in RELAY_TEST_MODE,
     // so tests trigger a single theater-posture cycle explicitly.
@@ -13123,6 +13462,8 @@ const server = http.createServer(async (req, res) => {
     handleOpenSkyRequest(req, res, PORT);
   } else if (pathname.startsWith('/worldbank')) {
     handleWorldBankRequest(req, res);
+  } else if (pathname === '/wits') {
+    return handleWitsRequest(req, res);
   } else if (pathname.startsWith('/polymarket')) {
     handlePolymarketRequest(req, res);
   } else if (pathname === '/yahoo-chart') {
@@ -15145,6 +15486,7 @@ server.listen(PORT, () => {
   startChokepointWarmPingLoop();
   startCableHealthWarmPingLoop();
   startClassifySeedLoop();
+  startMiddleEastStrikesLoop();
   startServiceStatusesSeedLoop();
   startTheaterPostureSeedLoop();
 

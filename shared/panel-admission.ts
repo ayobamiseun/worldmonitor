@@ -55,10 +55,22 @@ export const predictionPanelViewSchema = predictionPanelReadSchema.extend({
 
 export const conflictPanelAdmissionSchema = panelReceiptSchema.extend({ panel: z.literal('conflicts') });
 export type ConflictPanelAdmission = z.infer<typeof conflictPanelAdmissionSchema>;
+// Area and age filters shared by the conflict and disaster panels. Range and
+// combination rules are enforced earlier by the MCP argument validator.
+const latitude = z.number().finite().min(-90).max(90);
+const longitude = z.number().finite().min(-180).max(180);
+const eventAreaFields = {
+  bbox: z.object({ sw_lat: latitude, sw_lon: longitude, ne_lat: latitude, ne_lon: longitude }).strict().optional(),
+  lat: latitude.optional(),
+  lon: longitude.optional(),
+  radius_km: z.number().finite().positive().max(2000).optional(),
+  since_days: z.number().int().min(1).max(365).optional(),
+};
 export const conflictPanelReadSchema = z.object({
   country: z.string().optional().transform(value => value?.trim().toLowerCase() || undefined),
   min_fatalities: z.number().finite().optional(),
   limit: z.number().finite().default(30),
+  ...eventAreaFields,
 }).strict();
 export const conflictPanelViewSchema = conflictPanelReadSchema.extend({
   refresh: z.boolean().default(false),
@@ -72,6 +84,7 @@ export const disasterPanelReadSchema = z.object({
   min_magnitude: z.number().finite().optional(),
   active_only: z.boolean().optional(),
   limit: z.number().finite().default(30),
+  ...eventAreaFields,
 }).strict();
 export const disasterPanelViewSchema = disasterPanelReadSchema.extend({
   refresh: z.boolean().default(false),

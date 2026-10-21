@@ -50,11 +50,15 @@ export type ConflictSourceObservation = {
     candidateVersion?: string | null;
     candidateComplete?: boolean;
     annualFailedPages?: number;
+    newestItemAt?: number | null;
+    maxContentAgeMin?: number;
   };
 };
 
 export interface McpToolExecutionContext {
   readAccountAllowance?: () => Promise<import('./_account-allowance').McpAllowanceStatus>;
+  // The checkout session dispatch already created for `start_upgrade` (#9144).
+  startUpgradeResult?: import('./checkout').StartUpgradeResult;
   panelRequest?: import('./panel-requests').PaidPanelAdmission;
   panelScope?: 'forecasts';
   // Set only by dispatch for an original forecast read billed per tool call.
@@ -71,6 +75,8 @@ export interface McpToolExecutionContext {
 // Tool registry types
 // ---------------------------------------------------------------------------
 export interface BaseToolDef {
+  // Pure caller-input checks that must run before any allowance reservation.
+  _validateArgs?: (params: Record<string, unknown>) => void;
   name: string;
   title: string;
   description: string;
@@ -477,6 +483,9 @@ export interface McpHandlerDeps {
   // contacting Redis.
   guardUserApiKeyValidation: (request: Request, corsHeaders: Record<string, string>) => Promise<Response | null>;
   redisPipeline: PipelineFn;
+  // `start_upgrade` checkout relay (#9144). Optional so existing fixtures keep
+  // compiling; dispatch falls back to the production Convex relay.
+  createCheckout?: import('./checkout').McpCreateCheckout;
 }
 
 export interface AuthResolution {
@@ -522,6 +531,11 @@ export interface McpPreCheckPassed {
    * site only (#6716). Must never be set by relaxing `checkProMcpAccess`.
    */
   freeAccountAllowance?: true;
+  /**
+   * The entitlement's plan key, from the same read. Lets a denial recommend
+   * the plan one step up (#9144). Omitted when the row carries none.
+   */
+  planKey?: string;
 }
 export interface McpPreCheckRejected {
   ok: false;
