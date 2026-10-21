@@ -70,6 +70,7 @@ import {
 } from './lib/brief-compose.mjs';
 import {
   applyDigestScoreFloor,
+  createDigestMemo,
   carouselUrlsFrom,
   digestWindowStartMs,
   getDigestScoreMin,
@@ -1554,33 +1555,12 @@ async function composeBriefsForRun(rules, nowMs) {
     console.warn('[digest] brief: insights read failed, using zeroed stats:', err.message);
   }
 
-  // Memoize buildDigest by (variant, lang, sensitivity, windowStart).
-  // Many users share a variant/lang, so this saves ZRANGE + HGETALL
-  // round-trips across the per-user loop. Scoped to this cron run —
-  // no cross-run memoization needed (Redis is authoritative).
-  //
-  // Sensitivity is part of the key because buildDigest filters by
-  // rule.sensitivity BEFORE dedup — without it, a stricter user
-  // inherits a looser populator's pool (the earlier populator "wins"
-  // and decides which severity tiers enter the pool, so stricter
-  // users get a pool that contains severities they never wanted).
-  //
-  // windowStart is derived per-candidate from `lastSentAt`, matching
-  // the send loop's formula exactly (digestWindowStartMs). Without
-  // this, the canonical brief lead would be synthesized from a fixed
-  // 24h pool while the email/Slack body ships the actual cadence's
-  // window (7d for weekly, 12h for twice_daily) — a different flavor
-  // of the cross-surface divergence the canonical-brain refactor is
-  // designed to eliminate.
-  const digestCache = new Map();
-  async function digestFor(cand) {
-    const windowStart = digestWindowStartMs(cand.lastSentAt, nowMs, DIGEST_LOOKBACK_MS);
-    const key = `${cand.rule.variant ?? 'full'}:${cand.rule.lang ?? 'en'}:${cand.rule.sensitivity ?? 'high'}:${windowStart}`;
-    if (digestCache.has(key)) return digestCache.get(key);
-    const stories = await buildDigest(cand.rule, windowStart);
-    digestCache.set(key, stories ?? []);
-    return stories ?? [];
-  }
+  // Memoize buildDigest by (variant, lang, sensitivity, windowStart) for
+  // this cron run. The key and its sensitivity default live in
+  // scripts/lib/digest-orchestration-helpers.mjs (createDigestMemo) so
+  // tests/digest-memo-sensitivity.test.mjs can prove a stricter user never
+  // inherits a looser populator's pool, rather than grepping this file.
+  const digestFor = createDigestMemo(buildDigest, { nowMs, lookbackMs: DIGEST_LOOKBACK_MS });
 
   // Pre-annotate every eligible rule with its lastSentAt + isDue
   // status. The compose flow uses this to prefer a "due-this-tick"
