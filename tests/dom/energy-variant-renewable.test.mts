@@ -27,12 +27,13 @@ import { getInitialPanelSettingsForVariant } from '@/config/panels';
 import { hasPanelSettingEntry } from '@/app/news-panel-keys';
 
 interface LoaderInternals {
-  runHydrationTasks(tasks: Array<{ name: string }>, forceAll: boolean): Promise<void>;
+  runHydrationTasks(tasks: Array<{ name: string; task: () => Promise<void> }>, forceAll: boolean): Promise<void>;
+  loadRenewableData(): Promise<void>;
   updateSearchIndex(): void;
   shouldHydrateNews(forceAll: boolean): boolean;
 }
 
-async function scheduledTasks(panelSettings: AppContext['panelSettings']): Promise<string[]> {
+async function scheduledTasks(panelSettings: AppContext['panelSettings']) {
   const ctx = {
     statusPanel: { updateDigestCoverage: vi.fn(), updateFeed: vi.fn(), updateApi: vi.fn() },
     disabledSources: new Set<string>(),
@@ -58,11 +59,16 @@ async function scheduledTasks(panelSettings: AppContext['panelSettings']): Promi
   const loader = new DataLoaderManager(ctx, { renderCriticalBanner: () => undefined, refreshOpenCountryBrief: () => undefined });
   const internal = loader as unknown as LoaderInternals;
   const names: string[] = [];
-  internal.runHydrationTasks = async (tasks) => { names.push(...tasks.map((t) => t.name)); };
+  const loadRenewableData = vi.fn(async () => undefined);
+  internal.loadRenewableData = loadRenewableData;
+  internal.runHydrationTasks = async (tasks) => {
+    names.push(...tasks.map((t) => t.name));
+    await tasks.find((t) => t.name === 'renewable')?.task();
+  };
   internal.updateSearchIndex = () => undefined;
   internal.shouldHydrateNews = () => false;
   await loader.loadAllData(true);
-  return names;
+  return { names, loadRenewableData };
 }
 
 beforeEach(() => {
@@ -78,10 +84,11 @@ describe('energy variant renewable panel', () => {
     }
   });
 
-  it('is scheduled for hydration under the energy variant alongside the non-happy loaders', async () => {
-    const names = await scheduledTasks(getInitialPanelSettingsForVariant('energy'));
+  it('runs its hydration callback under the energy variant alongside the non-happy loaders', async () => {
+    const { names, loadRenewableData } = await scheduledTasks(getInitialPanelSettingsForVariant('energy'));
     expect(names).toContain('renewable');
     expect(names).toContain('markets');
+    expect(loadRenewableData).toHaveBeenCalledTimes(1);
   });
 
   it('is created by the layout through the same panel-setting read', () => {
