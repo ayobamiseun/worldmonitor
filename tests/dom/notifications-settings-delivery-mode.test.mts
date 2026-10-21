@@ -148,8 +148,8 @@ describe('notification settings delivery mode and sensitivity', () => {
     expect(q(container, '#usRealtimeSection').style.display).toBe('');
   });
 
-  it('snaps to critical when switching into realtime and saves the pair atomically', async () => {
-    const container = await mount(rule({ digestMode: 'daily', sensitivity: 'all' }));
+  it.each(['all', 'high'] as const)('snaps %s to critical when switching into realtime and saves the pair atomically', async (initialSensitivity) => {
+    const container = await mount(rule({ digestMode: 'daily', sensitivity: initialSensitivity }));
     vi.useFakeTimers();
     const mode = q<HTMLSelectElement>(container, '#usDigestMode');
     const sensitivity = q<HTMLSelectElement>(container, '#usNotifSensitivity');
@@ -162,7 +162,8 @@ describe('notification settings delivery mode and sensitivity', () => {
     expect(q(container, '#usRealtimeSection').style.display).toBe('');
     const hint = q(container, '#usSensitivityHint');
     expect(hint.style.display).toBe('');
-    expect(hint.textContent).toContain("doesn't support All events");
+    const previousLabel = initialSensitivity === 'all' ? 'All events' : 'High & critical';
+    expect(hint.textContent).toContain(`doesn't support ${previousLabel}`);
 
     await vi.advanceTimersByTimeAsync(800);
     expect(channelMocks.setNotificationConfig).toHaveBeenCalledTimes(1);
