@@ -1181,6 +1181,13 @@ async function mcpHandlerInner(
   // actually passed the gates above.
   const sseOwner = sseReplayOwner(context);
 
+  if (['tools/list', 'prompts/list', 'resources/list', 'resources/templates/list'].includes(method)) {
+    const cursor = (body.params as { cursor?: unknown } | undefined)?.cursor;
+    if (cursor !== undefined && typeof cursor !== 'string') {
+      return maybeStreamJsonRpcResponse(req, sseOwner, rpcError(id, -32602, 'Invalid params: cursor must be a string', corsHeaders));
+    }
+  }
+
   // Dispatch
   switch (method) {
     case 'initialize': {
@@ -1280,7 +1287,7 @@ async function mcpHandlerInner(
     case 'prompts/list':
       return maybeStreamJsonRpcResponse(req, sseOwner, rpcOk(id, { prompts: PROMPT_LIST_RESPONSE }, corsHeaders));
     case 'prompts/get': {
-      const params = body.params as { name?: unknown; arguments?: Record<string, unknown> } | null;
+      const params = body.params as { name?: unknown; arguments?: unknown } | null;
       if (!params || typeof params.name !== 'string') {
         return maybeStreamJsonRpcResponse(req, sseOwner, rpcError(id, -32602, 'Invalid params: missing prompt name', corsHeaders));
       }

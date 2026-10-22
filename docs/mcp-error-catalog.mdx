@@ -367,7 +367,7 @@ The `method` field was a string but didn't match any handler. Methods this serve
 
 ### `-32602` — Invalid params
 
-The most common error code, shared across `tools/call`, `prompts/get`, `resources/read`, and `logging/setLevel`. The main triggers:
+The most common error code, shared across list methods, `tools/call`, `prompts/get`, `resources/read`, and `logging/setLevel`. The main triggers:
 
 | Trigger                                                | Site                              | Example `message`                                                          |
 |--------------------------------------------------------|-----------------------------------|----------------------------------------------------------------------------|
@@ -375,6 +375,8 @@ The most common error code, shared across `tools/call`, `prompts/get`, `resource
 | `tools/call` with `name` that isn't in the registry    | `api/mcp/dispatch.ts` `dispatchToolsCall` registry lookup | `Unknown tool: get_foo`                                  |
 | `tools/call` arguments fail the input schema or caller-input hook | `api/mcp/_validate-args.ts`, before allowance reservation | `Invalid params` — with `error.data.violations[]`, an array of `{field, description}` pairs |
 | `prompts/get` with no/non-string `name`                | `api/mcp/handler.ts` `prompts/get` switch branch       | `Invalid params: missing prompt name`                        |
+| `tools/list`, `prompts/list`, `resources/list`, or `resources/templates/list` with a non-string `cursor` | `api/mcp/handler.ts` list cursor guard | `Invalid params: cursor must be a string` |
+| `prompts/get` with null, array, or non-object `arguments`, or any non-string argument value | `api/mcp/prompts/index.ts` `buildPromptResponse` | `Invalid params: prompt arguments must be an object with string values` |
 | `prompts/get` with unknown name or missing required arg | `api/mcp/prompts/index.ts` `buildPromptResponse`       | `Unknown prompt: …` / `Missing required argument "iso2" for prompt "country-briefing"` |
 | `resources/read` with no/unknown/malformed `uri`       | `api/mcp/resources/index.ts` (`buildPublicResourceResponse` / `buildResourceResponse`) | `Invalid params: missing resource uri` / `Unknown resource uri "..."` |
 | `resources/read` of an unknown `ui://` widget resource | `api/mcp/ui/registry.ts`                               | `Unknown resource uri "ui://..."`                                          |
@@ -388,6 +390,8 @@ The most common error code, shared across `tools/call`, `prompts/get`, `resource
   "error": { "code": -32602, "message": "Unknown tool: get_marekt_data" }
 }
 ```
+
+List methods return the complete catalog without `nextCursor`. An absent cursor or any string cursor, including an unknown token, returns that same terminal list. Other cursor types return `-32602`. Prompt arguments can be omitted or supplied as an object containing only string values. This also applies to undeclared argument names. Values are not coerced to strings.
 
 **What to do.** Read the `message` — it always tells you what was missing or wrong. For tools, names are in `tools/list`. For prompts, names + argument schemas are in `prompts/list`. For resources, the concrete URIs are in `resources/list` and the parameterised URI templates are in `resources/templates/list`. For `logging/setLevel`, valid levels are the [RFC 5424 subset](https://www.rfc-editor.org/rfc/rfc5424#section-6.2.1) listed above.
 

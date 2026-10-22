@@ -91,6 +91,8 @@ const patchedLocks = [
   ['shell-quote', '1.11.0', pnpmLockVersions, '../docker/umami/runtime/pnpm-lock.yaml'],
   ['hono', '4.13.11', pnpmLockVersions, '../docker/umami/runtime/pnpm-lock.yaml'],
   ['markdown-it', '14.3.3', npmLockVersions, '../package-lock.json'],
+  ['@vitest/mocker', '4.1.12', npmLockVersions, '../package-lock.json'],
+  ['@vitest/mocker', '4.1.12', npmLockVersions, '../consumer-prices-core/package-lock.json'],
   ['simple-git', '4.0.1', npmLockVersions, '../integrations/zapier/package-lock.json'],
   ['@simple-git/argv-parser', '2.0.1', npmLockVersions, '../integrations/zapier/package-lock.json'],
   ['adm-zip', '0.6.1', npmLockVersions, '../integrations/zapier/package-lock.json'],

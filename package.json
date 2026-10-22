@@ -265,7 +265,7 @@
     "typescript": "^5.7.2",
     "vite": "^6.4.5",
     "vite-plugin-pwa": "^1.2.0",
-    "vitest": "^4.1.0",
+    "vitest": "^4.1.12",
     "webmcp-types": "^0.1.3"
   },
   "dependencies": {

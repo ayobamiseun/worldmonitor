@@ -150,6 +150,44 @@ describe('api/mcp.ts — transport conformance over real HTTP', () => {
     Object.assign(process.env, originalEnv);
   });
 
+  it('returns method parameter errors and valid controls over HTTP JSON and SSE', async () => {
+    const initialized = await fetch(server.url, {
+      method: 'POST', headers: mcpHeaders({ Accept: 'application/json' }),
+      body: JSON.stringify(initBody()),
+    });
+    const sessionId = initialized.headers.get('mcp-session-id');
+    assert.ok(sessionId);
+    await initialized.json();
+    const cases = [
+      ...['tools/list', 'prompts/list', 'resources/list', 'resources/templates/list']
+        .map((method) => [method, { cursor: 17 }, { cursor: 'opaque-token' }]),
+      ['prompts/get', { name: 'market-open-prep', arguments: 17 }, { name: 'market-open-prep' }],
+      ['prompts/get', { name: 'country-view', arguments: { iso2: 17 } }, { name: 'country-view', arguments: { iso2: '17' } }],
+    ];
+    for (const accept of ['application/json', 'text/event-stream']) {
+      for (const [method, invalid, valid] of cases) {
+        for (const [params, expectedError] of [[invalid, true], [valid, false]]) {
+          const res = await fetch(server.url, {
+            method: 'POST',
+            headers: mcpHeaders({ Accept: accept, 'MCP-Protocol-Version': '2025-06-18', 'Mcp-Session-Id': sessionId }),
+            body: JSON.stringify(rpcBody('method-params', method, params)),
+          });
+          assert.equal(res.status, 200);
+          assert.match(res.headers.get('cache-control'), /\bno-store\b/);
+          assert.ok(res.headers.get('content-type').startsWith(accept));
+          const body = accept === 'text/event-stream'
+            ? JSON.parse((await readAllSseEvents(res))[0].data)
+            : await res.json();
+          if (expectedError) {
+            assertJsonRpcError(body, { id: 'method-params', code: -32602 });
+          } else {
+            assertJsonRpcResult(body, { id: 'method-params' });
+          }
+        }
+      }
+    }
+  });
+
   it('rejects unsupported transport versions before reading or dispatching a request', async () => {
     for (const [method, version] of [
       ['POST', '2099-99-99'], ['GET', '2099-99-99'], ['HEAD', '2099-99-99'],
