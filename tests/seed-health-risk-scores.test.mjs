@@ -1,3 +1,10 @@
+// Cross-file constant parity by design (#8690, section 2). The CII
+// risk-score freshness budget is declared in scripts/seed-health.mjs and
+// again in api/health.js, and the relay's warm-ping must defer the record
+// count to the RPC handler. Both seed-health and the relay are entry points
+// that cannot be imported without starting them, so the two declarations
+// are compared as text.
+//
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

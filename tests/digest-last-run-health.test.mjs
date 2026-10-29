@@ -1,3 +1,11 @@
+// Text checks by design (#8690, section 2). The digest cron is an entry
+// point that exits on missing env and calls main() on load, so its last-run
+// heartbeat keys, the SEED_ERROR stamp on a rule-fetch failure and the exit
+// code are matched in its source and compared with api/health.js. The
+// orchestration helpers it calls run for real in
+// tests/digest-orchestration-helpers.test.mjs; this file pins the cron-side
+// wiring those helpers cannot see.
+//
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

@@ -1,3 +1,9 @@
+// Source guard by design (#8690, section 2). The thermal escalation handler
+// must read the seeded Redis key and never call NASA FIRMS from the edge:
+// FIRMS is rate-limited per key and the seeder owns that budget. Which
+// upstream a handler references is a property of its imports and URL
+// literals; the handler's read path runs in the thermal runtime suites.
+//
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

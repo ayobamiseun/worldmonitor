@@ -1,3 +1,9 @@
+// Published-document check by design (#8690, section 2). public/world-monitor.md
+// is the brand page crawlers and agents quote: its H1, NAP table, press
+// citations, Wikidata items and JSON-LD blocks are the contract, and the
+// canonical URL must match the sitemap's host. A static page has no runtime;
+// its bytes are what the crawler sees.
+//
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';

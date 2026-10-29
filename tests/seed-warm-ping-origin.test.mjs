@@ -1,3 +1,9 @@
+// Text checks by design (#8690, section 2). The warm-ping seeders are cron
+// entry points that run on load; what is pinned is that each one sends the
+// app Origin header, without which the edge gateway rejects the ping. The
+// header is a literal in the request options, and the gateway's rejection
+// is covered by the gateway suites.
+//
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

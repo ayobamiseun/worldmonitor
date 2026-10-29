@@ -1,3 +1,10 @@
+// Cache-key contract by design (#8690, section 2). Every request option
+// that varies the upstream Travelpayouts response must appear in the cache
+// key, or two different requests share one cached answer. The key template
+// literals are read from the provider source because the provider is only
+// reachable through a keyed upstream; the shared-cache behaviour itself runs
+// in the cache helper suites.
+//
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

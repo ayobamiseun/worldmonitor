@@ -1,3 +1,10 @@
+// Docs-parity check by design (#8690, section 2). The public signal docs
+// publish the signal count, the hotspot escalation math, the convergence
+// caps and the Escalation Monitor weights; each figure is parsed from the
+// implementing module and compared with the prose, so the docs can only
+// drift by failing here. The behaviour behind each figure runs in its own
+// suite; the published numbers are documents.
+//
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

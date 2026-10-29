@@ -1,3 +1,9 @@
+// Call-site guard by design (#8690, section 2). Every window.open with
+// _blank under src/ must pass noopener,noreferrer, or the opened page can
+// navigate the dashboard (reverse tabnabbing). The AST walk over src/ is
+// the only way to see every call site at once; the exemption list requires
+// the exempted file to sever the opener itself.
+//
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';

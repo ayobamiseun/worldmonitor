@@ -1,3 +1,9 @@
+// Committed-HTML and CSP check by design (#8690, section 2). The inline
+// variant bootstrap in index.html must name every public variant host and
+// its hash must be allowed by the CSP in vercel.json, or the dashboard boots
+// as the wrong variant or not at all. Both are documents the browser reads
+// before any module runs, so their text is the contract.
+//
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';

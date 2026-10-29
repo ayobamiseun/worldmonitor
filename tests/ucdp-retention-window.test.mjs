@@ -1,3 +1,9 @@
+// Deliberate constant pins by design (#8690, section 2; named in #8683 as a
+// text check to keep). The UCDP Redis writer keeps one year while the CII
+// scorer classifies over two, and the relay reader caps pages separately;
+// the three windows are intentional and documented, and the messages say
+// to update the guard and the docs together when one moves.
+//
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
