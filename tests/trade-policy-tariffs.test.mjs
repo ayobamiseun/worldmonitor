@@ -42,8 +42,9 @@ describe('FRED effective tariff rate seed integration', () => {
 describe('tariffTrendsUs health-check is meta-only and sits inside TARIFF_TTL', () => {
   // #6316 moved tariffTrendsUs off the single US years=10 data key onto the
   // fleet seed-meta record (same shape as tradeFlows). A meta-only probe
-  // watches a 7-day meta TTL, so maxStaleMin MUST sit inside the 8h data TTL
-  // — otherwise health stays green while every data key has already expired.
+  // watches a 7-day meta TTL, so maxStaleMin MUST sit inside the data TTL
+  // (24h since #4873) — otherwise health stays green while every data key
+  // has already expired.
   // Prior to that change maxStaleMin was 540 (outside the old single-key
   // budget) and created an 8h–15h silent EMPTY window; see the 2026-04-27
   // incident notes that originally locked this suite.
@@ -70,8 +71,14 @@ describe('tariffTrendsUs health-check is meta-only and sits inside TARIFF_TTL', 
     return m[1];
   }
 
-  it('TARIFF_TTL is 28800s (8h) — pinned so the relationship below stays meaningful', () => {
-    assert.equal(extractSeconds('TARIFF_TTL'), 28800);
+  it('TARIFF_TTL is 86400s (24h) — ~3 missed 6h cycles of gap-buffer (#4873), pinned so the relationship below stays meaningful', () => {
+    assert.equal(extractSeconds('TARIFF_TTL'), 86400);
+  });
+
+  it('every supply-chain-trade data TTL buffers at least three 6h cron cycles', () => {
+    for (const name of ['SHIPPING_TTL', 'TRADE_TTL', 'TARIFF_TTL']) {
+      assert.ok(extractSeconds(name) >= 3 * 6 * 3600, `${name} must cover three missed 6h cycles`);
+    }
   });
 
   it('tariffTrendsUs probes the fleet seed-meta key, not a single data key', () => {
@@ -79,7 +86,7 @@ describe('tariffTrendsUs health-check is meta-only and sits inside TARIFF_TTL', 
     assert.match(healthSrc, /tariffTrendsUs:\s*'seed-meta:trade:tariffs'/);
   });
 
-  it('tariffTrendsUs.maxStaleMin is 420min — inside TARIFF_TTL (480), not outside it', () => {
+  it('tariffTrendsUs.maxStaleMin is 420min — inside TARIFF_TTL (1440), not outside it', () => {
     assert.equal(extractMaxStaleMin('tariffTrendsUs'), 420);
   });
 

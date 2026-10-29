@@ -1655,7 +1655,7 @@ const SEED_META = {
   // the sample) while the 30-year window picks up reporters with no recent data.
   // 200 leaves ~26% headroom for reporter-list drift and still fires well before
   // a real collapse.
-  // maxStaleMin sits INSIDE the 480min (8h) TRADE_TTL, not outside it. This is
+  // maxStaleMin sits INSIDE the 1440min (24h, #4873) TRADE_TTL, not outside it. This is
   // a meta-only probe (STANDALONE_KEYS.tradeFlows is the seed-meta key itself,
   // because the payload is sharded one key per reporter), so the hasData/EMPTY
   // backstop watches the meta record — which writeSeedMeta gives a 7-day TTL —
@@ -1666,8 +1666,8 @@ const SEED_META = {
   // meta-only comtradeBilateralHs4 entry above (35d budget, 40d payload TTL).
   tradeFlows:          { key: 'seed-meta:trade:flows',                        maxStaleMin: 420, minRecordCount: 200, dominantFailureMode: true },
   // Same meta-only shape as tradeFlows above (#6316 moved tariffs off the
-  // single-key US years=10 probe). maxStaleMin 420 sits inside TARIFF_TTL
-  // (480min); minRecordCount 150 leaves headroom under a ~200+ reporter fleet.
+  // single-key US years=10 probe). maxStaleMin 420 sits well inside TARIFF_TTL
+  // (1440min since #4873); minRecordCount 150 leaves headroom under a ~200+ reporter fleet.
   tariffTrendsUs:      { key: 'seed-meta:trade:tariffs',                      maxStaleMin: 420, minRecordCount: 150 },
   // publish.ts runs each day at 02:30-05:30 UTC (hourly); seed-meta TTL=52h — maxStaleMin must cover the full 24h cycle
   consumerPricesOverview:   { key: 'seed-meta:consumer-prices:overview:ae',     maxStaleMin: 1500, minSuccessRate: 0.5 }, // 25h = 24h cadence + 1h grace; warn when <50% snapshots succeeded

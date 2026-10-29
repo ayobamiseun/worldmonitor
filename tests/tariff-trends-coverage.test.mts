@@ -235,8 +235,8 @@ describe('seeder and handler agree on the cache contract', () => {
     assert.equal(tariffTrendCoverageId('840'), '840');
   });
 
-  test('TARIFF_TTL is 8h so the meta-only health budget can pin against it', () => {
-    assert.equal(TARIFF_TTL, 28800);
+  test('TARIFF_TTL is 24h (#4873) so the meta-only health budget can pin against it', () => {
+    assert.equal(TARIFF_TTL, 86400);
   });
 });
 
