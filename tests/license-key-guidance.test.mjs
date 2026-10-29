@@ -1,3 +1,9 @@
+// Docs-content checks by design (#8690, section 2). The API-key help page,
+// the docs navigation and every locale's settings copy must describe the
+// launched key flow (create, show once, revoke and recreate) rather than the
+// retired waitlist. The documents and locale strings are the contract; the
+// key flow itself is covered by the API-key handler and settings suites.
+//
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';

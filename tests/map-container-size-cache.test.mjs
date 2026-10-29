@@ -1,3 +1,11 @@
+// Text checks by design (#8690, section 2). What is pinned is WHICH call
+// sites read the live container geometry (clientWidth/clientHeight): the
+// forced-reflow regression in #5017 came from live reads on the render path,
+// and a layout read is invisible to happy-dom, which lays nothing out. The
+// call-site allowlist is the contract until a layout-aware harness can
+// measure reflows; the cached-size accessor and its resize refresh are
+// exercised by the map runtime suites.
+//
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

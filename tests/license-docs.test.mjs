@@ -1,3 +1,9 @@
+// Docs-content checks by design (#8690, section 2). The project licence
+// pages, README and EULA are prose read by people and by legal review; what
+// is pinned is that they keep the canonical AGPL header first and do not
+// repeat retired or incorrect claims about commercial use. There is no
+// runtime for a licence document.
+//
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';

@@ -1,3 +1,9 @@
+// Contract-document check by design (#8690, section 2). The public OpenAPI
+// specs must not expose provider-redistribution enums (OpenSky) that the
+// internal product proto keeps, per the provider's terms. The generated specs
+// and the proto are the documents consumers and the generator read; the
+// check compares them as data.
+//
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';

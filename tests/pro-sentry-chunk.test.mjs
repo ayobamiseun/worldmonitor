@@ -1,3 +1,10 @@
+// Build-output check by design (#8690, section 2). This reads the emitted
+// pro-test bundle (public/pro/assets) to prove the Sentry SDK lands in
+// exactly one lazily loaded chunk and that the entry HTML preloads it with
+// the static CSP nonce. Chunk splitting is a property of the build artifact,
+// not of any module a test can import; it skips in a checkout that has not
+// built /pro and fails when CI says it has.
+//
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';

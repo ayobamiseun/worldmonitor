@@ -1,3 +1,10 @@
+// Cross-file constant audit by design (#8690, section 2). The classify
+// cache prefix is written in a .ts module and duplicated inline in the AIS
+// relay, which cannot import TypeScript; the only guard against the relay
+// being left on a stale prefix is to compare every literal in the repo with
+// the canonical one. A runtime test of either side alone cannot see the
+// other.
+//
 // U4 prefix-bump audit (per cache-prefix-bump-propagation-scope learning).
 //
 // The classify cache prefix lives in three independent sites:

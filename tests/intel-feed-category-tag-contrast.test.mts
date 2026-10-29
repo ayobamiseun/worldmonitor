@@ -1,3 +1,11 @@
+// Text checks by design (#8690, section 2). This computes WCAG contrast from
+// the colour tokens declared in main.css and happy-theme.css and from the
+// class the NewsPanel source applies to the category tag. The stylesheets
+// are the contract: happy-dom does not resolve CSS custom properties or
+// cascade, so a mounted panel cannot report the rendered colour, and the
+// numbers checked here are the ones a browser would compute from these
+// declarations.
+//
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';

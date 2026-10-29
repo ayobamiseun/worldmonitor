@@ -1,3 +1,10 @@
+// Repo-policy guard by design (#8690, section 2). Every CI gate CLI must
+// detect "run as main module" through the shared realpath-safe helper rather
+// than an inline, symlink-unsafe comparison. Which guard a script uses is a
+// property of its source; the helper's behaviour is exercised here for real
+// through spawned fixtures, including a symlinked invocation, so the policy
+// test cannot pass vacuously.
+//
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
