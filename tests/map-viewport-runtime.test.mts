@@ -147,6 +147,66 @@ before(async () => {
   harness = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`) as MapContainerHarness;
 });
 
+describe('deferred renderer replay (#8690)', () => {
+  function deferredHarness() {
+    const { map, internals } = harness.createMapContainerHarness();
+    const calls: Array<[string, unknown]> = [];
+    const renderer = {
+      setView() {}, setCenter() {}, destroy() {},
+      getState: () => ({ view: 'global', zoom: 2, pan: { x: 0, y: 0 }, layers: {}, timeRange: '24h' }),
+      setTrafficAnomalies: (v: unknown) => calls.push(['trafficAnomalies', v]),
+      setDdosLocations: (v: unknown) => calls.push(['ddosLocations', v]),
+      setChokepointData: (v: unknown) => calls.push(['chokepointData', v]),
+      openChokepoint: (v: unknown) => calls.push(['openChokepoint', v]),
+    };
+    Object.assign(internals as Record<string, unknown>, {
+      cachedNotamAirspace: [],
+      layerLoadingState: new Map(),
+      layerReadyState: new Map(),
+      hiddenLayerToggles: new Set(),
+    });
+    return { map: map as unknown as Record<string, (...args: unknown[]) => unknown>, internals, calls, renderer };
+  }
+
+  it('caches data setters that arrive before the renderer exists and replays them on rehydrate', () => {
+    const { map, internals, calls, renderer } = deferredHarness();
+    const anomalies = [{ id: 'a1' }];
+    const ddos = [{ id: 'd1' }];
+    const chokepoints = { chokepoints: [] };
+    map.setTrafficAnomalies(anomalies);
+    map.setDdosLocations(ddos);
+    map.setChokepointData(chokepoints);
+    assert.deepEqual(calls, [], 'no renderer yet, so nothing is forwarded');
+
+    internals.deckGLMap = renderer;
+    (internals.rehydrateActiveMap as () => void).call(map);
+    assert.deepEqual(calls, [
+      ['trafficAnomalies', anomalies],
+      ['ddosLocations', ddos],
+      ['chokepointData', chokepoints],
+    ]);
+  });
+
+  it('queues a chokepoint open until the renderer is ready and does not consume it on rehydrate', () => {
+    const { map, internals, calls, renderer } = deferredHarness();
+    map.openChokepoint('hormuz');
+    assert.equal(internals.pendingChokepointOpen, 'hormuz');
+
+    internals.deckGLMap = renderer;
+    (internals.rehydrateActiveMap as () => void).call(map);
+    assert.equal(internals.pendingChokepointOpen, 'hormuz', 'rehydrate must not open a chokepoint before readiness or fallback settles');
+    assert.equal(calls.some(([name]) => name === 'openChokepoint'), false);
+
+    (internals.markRendererReady as (token: number) => void).call(map, 7);
+    assert.deepEqual(calls.filter(([name]) => name === 'openChokepoint'), [['openChokepoint', 'hormuz']]);
+    assert.equal(internals.pendingChokepointOpen, null);
+
+    map.openChokepoint('suez');
+    assert.deepEqual(calls.filter(([name]) => name === 'openChokepoint').map(([, id]) => id), ['hormuz', 'suez'], 'a ready renderer opens directly');
+    assert.equal(internals.pendingChokepointOpen, null);
+  });
+});
+
 describe('map viewport runtime lifecycle', () => {
   it('preserves the live viewport and layers when DeckGL fails at runtime', () => {
     const { map, internals } = harness.createMapContainerHarness();
