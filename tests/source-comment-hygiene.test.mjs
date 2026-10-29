@@ -1,3 +1,7 @@
+// Source-hygiene guard by design (#8690, section 2). This pins that retired
+// ESLint suppressions and retired claims or hand-maintained totals do not
+// come back in comments. Comments have no runtime; the text is the only
+// thing there is to check.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

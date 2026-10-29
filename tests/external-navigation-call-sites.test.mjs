@@ -1,3 +1,9 @@
+// Call-site allowlist by design (#8690, section 2). Every renderer file that
+// hands a URL to the desktop shell must do so through openExternalUrl, and no
+// migrated file may regain a raw window.open. The openExternalUrl behaviour
+// runs in its own suite; this file is the ratchet over WHICH files call it,
+// which is a property of the source and is enforced the same way the
+// safe-local-storage ratchet is.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';

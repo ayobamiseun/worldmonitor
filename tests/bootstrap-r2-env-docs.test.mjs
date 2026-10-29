@@ -1,3 +1,8 @@
+// Text checks by design (#8690, section 2). The contract under test IS the
+// text: .env.example must document each R2 credential name exactly once with
+// no value, and the Railway runbook must keep publisher and edge credentials
+// in separate environments. Nothing executes these documents; a runtime test
+// could not observe what an operator reads.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
