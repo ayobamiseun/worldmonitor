@@ -43,14 +43,15 @@ describe('welcome page a11y (#7382), built output', { skip }, () => {
     const window = new Window();
     try {
       window.document.body.innerHTML = nav;
-      const topLevelLinks = window.document.querySelectorAll('nav > div > a');
-      assert.equal(topLevelLinks.length, 2, 'the nav must have one lockup link and one Launch CTA');
+      const chromeLinks = [...window.document.querySelectorAll('nav a')]
+        .filter((a) => !a.closest('nav > div > details#welcome-tablet-navigation, nav > div > div.hidden[class~="lg:flex"]'));
+      assert.equal(chromeLinks.length, 2, 'outside the desktop and tablet menus, the nav must have one lockup link and one Launch CTA');
       assert.equal(
-        [...topLevelLinks].filter((a) => a.getAttribute('data-umami-event-target') === 'welcome-nav').length,
+        chromeLinks.filter((a) => a.getAttribute('data-umami-event-target') === 'welcome-nav').length,
         1,
         'one of the two links must be the Launch CTA',
       );
-      const lockup = [...topLevelLinks].find((a) => a.getAttribute('data-umami-event-target') !== 'welcome-nav');
+      const lockup = chromeLinks.find((a) => a.getAttribute('data-umami-event-target') !== 'welcome-nav');
       for (const token of ['flex', 'items-center', 'gap-2']) {
         assert.ok(lockup.classList.contains(token), `the lockup must have an unconditional ${token} class`);
       }
@@ -90,7 +91,20 @@ describe('welcome page a11y (#7382), built output', { skip }, () => {
     const footer = section(html(), '<footer', '</footer>');
     assert.match(footer, /class="[^"]*\btext-xs text-wm-muted\b[^"]*"/, 'the footer text block is muted by colour');
     assert.match(footer, /©|&copy;/, 'the copyright line is rendered');
-    assert.doesNotMatch(footer, /\bopacity-(?:40|60)\b/);
+    const window = new Window();
+    try {
+      window.document.body.innerHTML = footer;
+      for (const element of window.document.querySelectorAll('[class]')) {
+        for (const token of element.classList) {
+          const match = token.match(/(?:^|:)opacity-(?:(\d+(?:\.\d+)?)|\[(\d+(?:\.\d+)?|\.\d+)(%?)\])$/);
+          if (!match) continue;
+          const opacity = match[1] !== undefined ? Number(match[1]) / 100 : Number(match[2]) / (match[3] ? 100 : 1);
+          assert.ok(opacity >= 1, `${token} must not reduce footer opacity`);
+        }
+      }
+    } finally {
+      window.close();
+    }
     assert.doesNotMatch(footer, /style="[^"]*opacity/, 'no inline opacity fade either');
   });
 
