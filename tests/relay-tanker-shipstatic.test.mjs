@@ -43,6 +43,7 @@ function harness({ now = 1_700_000_000_000 } = {}) {
     classifyVesselType: () => 'other',
     GRID_SIZE: 1,
     DENSITY_WINDOW: 30 * 60 * 1000,
+    GAP_THRESHOLD: 60 * 60 * 1000,
     MAX_VESSELS: 10_000,
     MAX_VESSEL_HISTORY: 10_000,
     MAX_DENSITY_CELLS: 10_000,
@@ -105,6 +106,24 @@ describe('PositionReport classification through the cache', () => {
     assert.equal(h.processPositionReportForSnapshot(positionFrame('211123411')), true);
     assert.equal(h.tankerReports.has('211123411'), false);
     assert.equal(h.vessels.get('211123411')?.shipType, undefined);
+  });
+
+  it('updates a tracked tanker when another position report arrives', () => {
+    const h = harness();
+    const mmsi = '211123416';
+    h.processShipStaticDataForMeta(staticFrame(mmsi, 85));
+    assert.equal(h.processPositionReportForSnapshot(positionFrame(mmsi)), true);
+
+    h.clock.now += 60_000;
+    const next = positionFrame(mmsi);
+    next.Message.PositionReport.Longitude = 55.4;
+    assert.equal(h.processPositionReportForSnapshot(next), true);
+    const tanker = h.tankerReports.get(mmsi);
+    assert.equal(tanker.shipType, 85);
+    assert.equal(tanker.name, 'STATIC NAME');
+    assert.equal(tanker.lon, 55.4);
+    assert.equal(tanker.timestamp, h.clock.now);
+    assert.equal(h.tankerReports.size, 1);
   });
 
   it('keeps non-tanker types out of the tanker layer and lets wrapper ShipType win over the cache', () => {
