@@ -2226,3 +2226,15 @@ test("inventory pages scan every row once and bound document bytes", async () =>
     vi.restoreAllMocks();
   }
 });
+
+
+test("foreign top hits do not displace compatible results from the candidate window", async () => {
+  const t = convexTest(schema, modules);
+  await seed(t, [
+    { dedupeKey: "wrong-space-first", title: "foreign", occurredAt: NOW, embedding: unitVector(0), embeddingModel: "other/model@512" },
+    { dedupeKey: "compatible-second", title: "compatible", occurredAt: NOW, embedding: unitVector(0, 0.5), embeddingModel: INTEL_HISTORY_EMBED_MODEL },
+  ]);
+  const result = await t.action(internal.intelHistory.search, { embedding: unitVector(0), limit: 1 });
+  expect(result.records.map((row) => row.title)).toEqual(["compatible"]);
+  expect(result.partial).toBe(true);
+});
