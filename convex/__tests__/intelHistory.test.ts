@@ -11,6 +11,7 @@ import {
   INTEL_HISTORY_RETENTION_DAYS,
   TIMELINE_MAX_LIMIT,
   INTEL_HISTORY_EMBED_MODEL,
+  isCurrentEmbeddingModel,
 } from "../intelHistory";
 
 const modules = import.meta.glob("../**/*.ts");
@@ -2179,6 +2180,7 @@ describe("intelHistory.embeddingModelInventory (#5742)", () => {
       current: INTEL_HISTORY_EMBED_MODEL,
       scanned: 4,
       partial: false,
+      nextCursor: "",
       models: { [INTEL_HISTORY_EMBED_MODEL]: 2, "other/model@512": 1, unstamped: 1 },
     });
 
@@ -2187,4 +2189,40 @@ describe("intelHistory.embeddingModelInventory (#5742)", () => {
     expect(newest.partial).toBe(true);
     expect(newest.models).toEqual({ unstamped: 1, "other/model@512": 1 });
   });
+});
+
+
+test("unstamped rows keep their original model identity after a model change", () => {
+  expect(isCurrentEmbeddingModel(undefined)).toBe(true);
+  expect(isCurrentEmbeddingModel(undefined, "replacement/model@512")).toBe(false);
+  expect(isCurrentEmbeddingModel("replacement/model@512", "replacement/model@512")).toBe(true);
+});
+
+test("inventory pages scan every row once and bound document bytes", async () => {
+  const t = convexTest(schema, modules);
+  await seed(t, Array.from({ length: 5 }, (_, i) => ({
+    dedupeKey: `inventory-${i}`, occurredAt: NOW, ingestedAt: NOW + i,
+    embeddingModel: INTEL_HISTORY_EMBED_MODEL,
+  })));
+  let cursor = "";
+  let scanned = 0;
+  do {
+    const page = await t.query(internal.intelHistory.embeddingModelInventory, { limit: 2, cursor });
+    scanned += page.scanned;
+    cursor = page.nextCursor;
+    expect(page.partial).toBe(Boolean(cursor));
+  } while (cursor);
+  expect(scanned).toBe(5);
+
+  const paginate = vi.fn().mockResolvedValue({ page: [], isDone: true, continueCursor: "" });
+  await t.run(async (ctx) => {
+    const query = ctx.db.query("intelHistory").withIndex("by_ingestedAt").order("desc");
+    vi.spyOn(Object.getPrototypeOf(query), "paginate").mockImplementation(paginate);
+  });
+  try {
+    await t.query(internal.intelHistory.embeddingModelInventory, { limit: 10_000 });
+    expect(paginate).toHaveBeenCalledWith(expect.objectContaining({ maximumBytesRead: 2_000_000 }));
+  } finally {
+    vi.restoreAllMocks();
+  }
 });
