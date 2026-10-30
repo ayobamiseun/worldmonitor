@@ -83,7 +83,7 @@ import {
 } from '@/services/military-vessels-lazy';
 
 type AppInternals = {
-  state: { isDestroyed: boolean; map: { destroy: () => void } | null; findingsBadge: { destroy: () => void } | null };
+  state: { isDestroyed: boolean; map: { destroy: () => void } | null; findingsBadge: { destroy: () => void } | null; panelSettings: Record<string, { enabled: boolean }> };
   modules: Array<{ destroy(): void }>;
   lifecycleController: AbortController;
   webMcpController: AbortController | null;
@@ -93,6 +93,13 @@ type AppInternals = {
   viewportHydrationReady: boolean;
   viewportHydrationReadyAt: number;
   viewportTriggersArmed: boolean;
+  slowTierWaitTimedOut: boolean;
+  completePendingSlowTierFanout: () => void;
+  panelLayout: {
+    afterPanelMounted: (key: string, panel: { getElement: () => HTMLElement; toggle: (enabled: boolean) => void }) => void;
+    observePanelForHydration: () => void;
+    scheduleHydrationForPanelElement: (element: HTMLElement, phase: string) => void;
+  };
   handleViewportPrime: (event?: Event) => void;
   runVisibleDataFanout: () => Promise<void>;
   primeVisiblePanelData: () => Promise<void>;
@@ -260,6 +267,47 @@ describe('App.destroy', () => {
 });
 
 describe('viewport prime handler', () => {
+  it('opens a timed-out bootstrap fan-out once and cannot reopen it after destroy', async () => {
+    const { app, internals } = makeApp();
+    const load = vi.spyOn(internals.dataLoader, 'loadAllData').mockResolvedValue(undefined);
+    vi.spyOn(internals, 'primeVisiblePanelData').mockResolvedValue(undefined);
+    const fanout = vi.spyOn(internals, 'runVisibleDataFanout');
+    internals.completePendingSlowTierFanout();
+    expect(fanout).not.toHaveBeenCalled();
+    internals.slowTierWaitTimedOut = true;
+    internals.completePendingSlowTierFanout();
+    await fanout.mock.results[0]!.value;
+    expect(internals.slowTierWaitTimedOut).toBe(false);
+    expect(internals.viewportTriggersArmed).toBe(true);
+    internals.completePendingSlowTierFanout();
+    expect(load).toHaveBeenCalledTimes(1);
+    app.destroy();
+    internals.slowTierWaitTimedOut = true;
+    internals.completePendingSlowTierFanout();
+    expect(fanout).toHaveBeenCalledTimes(1);
+  });
+
+  it('hydrates a newly mounted enabled panel before priming it, only after readiness', () => {
+    const { app, internals } = makeApp();
+    const order: string[] = [];
+    const element = document.createElement('div');
+    const panel = { getElement: () => element, toggle: vi.fn() };
+    internals.state.panelSettings['test-deferred-panel'] = { enabled: true };
+    vi.spyOn(internals.panelLayout, 'observePanelForHydration').mockImplementation(() => {});
+    const schedule = vi.spyOn(internals.panelLayout, 'scheduleHydrationForPanelElement').mockImplementation(() => { order.push('hydrate'); });
+    vi.spyOn(internals, 'primeVisiblePanelData').mockImplementation(async () => { order.push('prime'); });
+    internals.panelLayout.afterPanelMounted('test-deferred-panel', panel);
+    expect(order).toEqual(['hydrate']);
+    internals.viewportHydrationReady = true;
+    internals.panelLayout.afterPanelMounted('test-deferred-panel', panel);
+    expect(order).toEqual(['hydrate', 'hydrate', 'prime']);
+    expect(schedule).toHaveBeenCalledWith(element, 'near');
+    expect(panel.toggle).toHaveBeenCalledWith(true);
+    app.destroy();
+    internals.panelLayout.afterPanelMounted('test-deferred-panel', panel);
+    expect(order.filter(value => value === 'prime')).toHaveLength(1);
+  });
+
   function armed() {
     const { app, internals } = makeApp();
     let nextId = 1;
