@@ -462,10 +462,15 @@ describe('cloud preference write serialization', () => {
         'worldmonitor-theme': 'light',
       }, 2);
 
-      await cloudPrefs.onSignIn('user-1', 'full');
+      try {
+        await cloudPrefs.onSignIn('user-1', 'full');
 
-      assert.equal(localStorage.getItem('wm-market-watchlist-v1'), '["LOCAL"]');
-      assert.equal(localStorage.getItem('worldmonitor-theme'), 'light');
+        assert.equal(localStorage.getItem('wm-market-watchlist-v1'), '["LOCAL"]');
+        assert.equal(localStorage.getItem('worldmonitor-theme'), 'light');
+      } finally {
+        // Clear the scheduled upload while this harness still owns the globals.
+        await cloudPrefs.syncNow();
+      }
     });
   });
 
