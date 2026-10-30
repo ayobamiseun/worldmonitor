@@ -207,6 +207,48 @@ describe('deferred renderer replay (#8690)', () => {
   });
 });
 
+describe('renderer readiness demand', () => {
+  for (const timing of ['before', 'during'] as const) {
+    it(`releases the DeckGL demand gate when readiness is requested ${timing} the wait`, async (t) => {
+      const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+      const timers = new Set<number>();
+      let timerId = 0;
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: {
+          setTimeout: () => { timers.add(++timerId); return timerId; },
+          clearTimeout: (id: number) => timers.delete(id),
+        },
+      });
+      t.after(() => {
+        if (windowDescriptor) Object.defineProperty(globalThis, 'window', windowDescriptor);
+        else Reflect.deleteProperty(globalThis, 'window');
+      });
+      const { map, internals } = harness.createMapContainerHarness();
+      (internals.container as Record<string, unknown>).addEventListener = () => {};
+      const waitForDemand = internals.waitForDeckRendererDemand as (token: number) => Promise<boolean>;
+      let ready: Promise<void>;
+      let demandReleased: boolean | undefined;
+      if (timing === 'before') ready = map.whenRendererReady();
+      const demand = waitForDemand.call(map, 7).then((released) => { demandReleased = released; });
+      await Promise.resolve();
+      if (timing === 'during') {
+        assert.equal(demandReleased, undefined, 'the demand gate must start pending');
+        assert.equal(timers.size, 1, 'the backstop is armed but never fired');
+        ready = map.whenRendererReady();
+        await Promise.resolve();
+      }
+      assert.equal(demandReleased, true, 'explicit demand must release without a timer or user interaction');
+      assert.equal(timers.size, 0, 'explicit demand must clear the backstop');
+      assert.equal(internals.releaseRendererDemand, null);
+      await demand;
+      internals.deckGLMap = {};
+      (internals.markRendererReady as (token: number) => void).call(map, 7);
+      await ready!;
+    });
+  }
+});
+
 describe('map viewport runtime lifecycle', () => {
   it('preserves the live viewport and layers when DeckGL fails at runtime', () => {
     const { map, internals } = harness.createMapContainerHarness();

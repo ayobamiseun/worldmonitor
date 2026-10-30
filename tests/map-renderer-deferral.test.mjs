@@ -1,5 +1,5 @@
 // Import-graph and build-output guards for the deferred map renderers, plus
-// three renderer-internal checks kept as text (#8690, section 2).
+// renderer-internal and startup checks kept as text (#8690, section 2).
 //
 // Why the text is the contract for what remains:
 // - the first seven cases pin WHICH modules MapContainer may import
@@ -13,7 +13,9 @@
 //   harness exists;
 // - "gates desktop DeckGL startup" pins the idle/interaction gate wiring in
 //   MapContainer.waitForDeckRendererDemand, whose timers and listeners the
-//   viewport harness does not drive.
+//   viewport harness only drives for explicit readiness demand.
+// - startup readiness stays pinned here because the viewport harness calls
+//   markRendererReady directly instead of loading the real renderer modules.
 //
 // What this file no longer holds: the MapContainer deferral behaviour
 // (cached data replay, queued chokepoint opens, queued viewport commands and
@@ -352,6 +354,25 @@ describe('map renderer deferral boundary', () => {
       const offenders = preloads.filter((href) => /\/assets\/(?:maplibre|deck-stack|protomaps|h3-js)-[A-Za-z0-9_-]+\.js$/.test(href));
       assert.deepEqual(offenders, [], `WebGL vendor chunks must not be modulepreloaded by dashboard.html: ${offenders.join(', ')}`);
     }
+  });
+
+  it('publishes startup readiness after DeckGL initialization and SVG fallback creation', () => {
+    const cls = mapContainerClass(parseSource('src/components/MapContainer.ts'));
+    assert.match(
+      methodBodyText(cls, 'createDeckGLMap'),
+      /await\s+this\.deckGLMap\.whenReady\(\)[\s\S]*this\.markRendererReady\(token\)/,
+      'DeckGL must announce readiness after its asynchronous initialization',
+    );
+    assert.doesNotMatch(
+      methodBodyText(cls, 'createDeckGLMap'),
+      /this\.markRendererReady\(token\)[\s\S]*await\s+this\.deckGLMap\.whenReady\(\)/,
+      'DeckGL must not announce readiness before initialization settles',
+    );
+    assert.match(
+      methodBodyText(cls, 'initSvgMap'),
+      /this\.svgMap\s*=\s*new MapComponent[\s\S]*this\.rehydrateActiveMap\(\)[\s\S]*this\.markRendererReady\(token\)/,
+      'SVG fallback must announce readiness after creation and data replay',
+    );
   });
 
   it('publishes settled viewport state from animated DeckGL and globe moves', () => {
