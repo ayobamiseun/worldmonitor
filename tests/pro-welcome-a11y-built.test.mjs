@@ -56,7 +56,8 @@ describe('welcome page a11y (#7382), built output', { skip }, () => {
     const lockups = anchors(nav).filter((a) => textOf(a.inner) === 'WORLD MONITOR');
     assert.equal(lockups.length, 1, 'exactly one lockup anchor in the nav');
     const [lockup] = lockups;
-    assert.doesNotMatch(lockup.attrs, /aria-label=/, 'the name must come from the visible text');
+    assert.doesNotMatch(lockup.full, /aria-label(?:ledby)?=/, 'neither the lockup nor its descendants may override the visible name');
+    assert.match(lockup.attrs, /class="[^"]*\bflex items-center gap-2\b/, 'the glyph and wordmark share one flex target');
     assert.match(lockup.attrs, /href="https:\/\/worldmonitor\.app"/);
     const glyphWrapper = lockup.inner.match(/<span\b[^>]*>/);
     assert.ok(glyphWrapper && /aria-hidden="true"/.test(glyphWrapper[0]), 'the glyph wrapper is decorative');
@@ -71,7 +72,10 @@ describe('welcome page a11y (#7382), built output', { skip }, () => {
       assert.equal(launch.length, 1, 'one Launch CTA in the nav');
       const label = launch[0].attrs.match(/aria-label="([^"]*)"/)?.[1];
       assert.ok(label, 'the Launch CTA must have an aria-label');
-      assert.equal(textOf(launch[0].inner), label);
+      const copy = JSON.parse(readFileSync(new URL(`../pro-test/src/locales/${locale.id}.json`, import.meta.url), 'utf8'));
+      const expected = copy.welcome.nav.launch;
+      assert.equal(label, expected, 'the label must use the locale copy');
+      assert.equal(textOf(launch[0].inner), expected, 'the visible CTA must use the locale copy');
     });
   }
 
