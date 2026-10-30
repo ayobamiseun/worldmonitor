@@ -40,6 +40,9 @@ const UNIT_MAP = new Map<string, { base: string; factor: number }>([
   ['ltr', { base: 'ml', factor: 1000 }],
   ['litre', { base: 'ml', factor: 1000 }],
   ['liter', { base: 'ml', factor: 1000 }],
+  // BR/PT storefronts write "1,5 Litros"; `litros` resolves through the
+  // plural strip in normalizeUnit (#5445).
+  ['litro', { base: 'ml', factor: 1000 }],
   ['ml', { base: 'ml', factor: 1 }],
   ['millilitre', { base: 'ml', factor: 1 }],
   ['milliliter', { base: 'ml', factor: 1 }],
@@ -123,10 +126,24 @@ function matchPack(text: string): { count: string; rest: string } | null {
   return null;
 }
 
+// Comma-decimal and thousands-separator sizes (#5445). SIZE_PATTERN accepts
+// only a dot decimal, so on "2,8 kg" the leading digits failed to match and
+// the scan resumed after the comma: a confident 8000 g, not a null parse.
+// "1,500 g" likewise parsed as 500 g. The first pass drops a thousands
+// separator (a comma followed by exactly three digits), the second turns a
+// decimal comma (one or two digits) into a dot. Both must land together with
+// the `litro` unit: mapping the unit alone would make "1,5 Litros" a
+// confident 5 L and hard-fail the quantity window for the right product.
+function normalizeDecimalSeparators(text: string): string {
+  return text
+    .replace(/(\d),(\d{3})(?!\d)/g, '$1$2')
+    .replace(/(\d),(\d{1,2})(?!\d)/g, '$1.$2');
+}
+
 export function parseSize(raw: string | null | undefined, context?: SizeContext): ParsedSize | null {
   if (!raw) return null;
 
-  const text = raw.trim().toLowerCase();
+  const text = normalizeDecimalSeparators(raw.trim().toLowerCase());
 
   const contextualUnit = context?.baseUnit === 'ct'
     ? { pattern: /^(\d+)\s*(pack)$/, base: 'ct', factor: 1 }
