@@ -1219,6 +1219,12 @@ test.describe('dashboard container scroll hydration (#5876)', () => {
       // Keep this fixture to already-mounted panels: a deferred neighbor's
       // mount callback would independently prime data and mask the lost scroll.
       await page.addStyleTag({ content: '[data-deferred-panel="true"] { display: none !important; }' });
+      // Hiding a shell does not cancel its in-flight import. Let those mounts
+      // restore their grid slots before the initial viewport scan runs.
+      await expect.poll(async () => (
+        await lcpMarkCount(page, 'wm:panel:deferred-mount-start')
+        - await lcpMarkCount(page, 'wm:panel:deferred-mount-ready')
+      )).toBe(0);
       slowBootstrap.release();
       await navigation;
       await waitForLcpMark(page, 'wm:data:initial-fanout-start');
