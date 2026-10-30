@@ -33,10 +33,8 @@ const KEYS = {
 // #4864 restored republishing with the lockTtlMs bump below. #4873 widens
 // retention to 24h so keys survive three missed 6h ticks at 6h, 12h and 18h.
 // Trade and tariff health probes watch only their 7-day seed-meta records;
-// shipping also probes its data key. Keep maxStaleMin at 420: above the 6h
-// cron interval, but below the 1440min data TTL, so a stopped seeder alarms
-// before data expires. Longer retention preserves last-good data without
-// delaying the health warning.
+// shipping also probes its data key. maxStaleMin is 1140: three 6h ticks plus
+// 1h grace, below the 1440min data TTL so health warns 5h before expiry.
 // Pinned by tests/trade-policy-tariffs.test.mjs, tests/trade-flows-health.test.mjs
 // and tests/tariff-trends-coverage.test.mts.
 export const SHIPPING_TTL = 86400; // 24h
@@ -1549,7 +1547,7 @@ if (process.argv[1]?.endsWith('seed-supply-chain-trade.mjs')) {
 
     declareRecords,
     schemaVersion: 1,
-    maxStaleMin: 420,
+    maxStaleMin: 1140,
     contentMeta: supplyChainContentMeta,
     maxContentAgeMin: SUPPLY_CHAIN_MAX_CONTENT_AGE_MIN,
   }).catch((err) => {

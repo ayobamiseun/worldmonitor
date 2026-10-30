@@ -134,14 +134,14 @@ for (const [name, ttl] of [
     const key = STANDALONE_KEYS[name];
     const config = SEED_META[name];
     const ttlMin = ttl / 60;
-    assert.equal(config.maxStaleMin, 420);
+    assert.equal(config.maxStaleMin, 1140);
     assert.ok(config.maxStaleMin > 360 && config.maxStaleMin < ttlMin);
     for (const [ageMin, expected] of [
       [360, 'OK'],
       [config.maxStaleMin, 'OK'],
       [config.maxStaleMin + 1, 'STALE_SEED'],
-      [12 * 60, 'STALE_SEED'],
-      [18 * 60, 'STALE_SEED'],
+      [12 * 60, 'OK'],
+      [18 * 60, 'OK'],
       [ttlMin - 1, 'STALE_SEED'],
       [ttlMin + 1, name === 'shippingRates' ? 'EMPTY' : 'STALE_SEED'],
     ]) {

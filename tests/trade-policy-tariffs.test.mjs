@@ -58,7 +58,7 @@ describe('tariffTrendsUs health-check is meta-only and sits inside TARIFF_TTL', 
   }
 
   function extractMaxStaleMin(name) {
-    const re = new RegExp(`${name}:\\s*\\{[^}]*?maxStaleMin:\\s*(\\d+)`, 'ms');
+    const re = new RegExp(`^\\s*${name}:\\s*\\{[^}]*?maxStaleMin:\\s*(\\d+)`, 'ms');
     const m = healthSrc.match(re);
     if (!m) throw new Error(`could not find ${name}.maxStaleMin in health src`);
     return parseInt(m[1], 10);
@@ -82,8 +82,13 @@ describe('tariffTrendsUs health-check is meta-only and sits inside TARIFF_TTL', 
     assert.match(healthSrc, /tariffTrendsUs:\s*'seed-meta:trade:tariffs'/);
   });
 
-  it('tariffTrendsUs.maxStaleMin is 420min — inside TARIFF_TTL (1440), not outside it', () => {
-    assert.equal(extractMaxStaleMin('tariffTrendsUs'), 420);
+  it('health budgets cover three missed 6h ticks plus 1h grace, inside the 24h data TTL', () => {
+    for (const name of ['shippingRates', 'tradeFlows', 'tariffTrendsUs']) {
+      assert.equal(extractMaxStaleMin(name), 1140);
+    }
+    const publisherBudget = seedSrc.match(/runSeed\('supply_chain', 'shipping'[\s\S]*?maxStaleMin:\s*(\d+)/);
+    assert.ok(publisherBudget, 'shipping publisher must declare its freshness budget');
+    assert.equal(Number(publisherBudget[1]), extractMaxStaleMin('shippingRates'));
   });
 
   it('maxStaleMin <= TARIFF_TTL_min (no silent green after data keys expire)', () => {
