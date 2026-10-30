@@ -10,7 +10,9 @@
 //   hash route the prerender never visits;
 // - blog-site/src/layouts/Base.astro belongs to a separate Astro build that
 //   the test runners do not produce.
-// Move each check into the built-output suite when its surface is prerendered.
+// The source anchor count also stays: HTML parsers repair nested anchors, and
+// counting only wordmark links misses a second link with different text.
+// Move the client-only checks into the built-output suite when prerendered.
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,6 +38,11 @@ const LOCKUP_SOURCES = Object.entries({
 });
 
 describe('welcome a11y invariants (#7382)', () => {
+  it('keeps the whole Logo lockup in exactly one anchor', () => {
+    const anchors = logo.match(/<a[\s>]/g) ?? [];
+    assert.equal(anchors.length, 1, 'Logo must render exactly one anchor');
+  });
+
   it('keeps the press-row label at solid muted contrast (no opacity fade)', () => {
     // #7383 added this row with the same opacity-60 fade #7414 swept out of
     // Footer/Logo, so it kept color-contrast red at 3.42:1 against #020202.

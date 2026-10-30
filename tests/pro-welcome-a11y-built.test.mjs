@@ -1,7 +1,7 @@
 // Runtime proof of the welcome-page a11y invariants from #7382 against the
 // prerendered page (#8690, replacing the source-text checks that were in
 // tests/a11y-issue-7382-welcome-invariants.test.mjs for the parts the build
-// renders). Every assertion reads public/pro/welcome.html, built by
+// renders). Assertions read public/pro/welcome.html and localized landings, built by
 // `npm run build:pro` (#6898): it skips in a checkout that has not built
 // /pro and fails when WM_EXPECT_BUILT_OUTPUT=1 says CI did.
 //
@@ -18,7 +18,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
-import { guardProBuiltOutput, shouldSkipProBuiltOutput } from './_lib/pro-built-output.mjs';
+import { INDEXABLE_LANDING_LOCALES } from '../shared/indexable-landing-locales.ts';
+import { guardProBuiltOutput, landingBuiltOutputPath, shouldSkipProBuiltOutput } from './_lib/pro-built-output.mjs';
 
 const skip = shouldSkipProBuiltOutput();
 guardProBuiltOutput();
@@ -45,16 +46,20 @@ describe('welcome page a11y (#7382), built output', { skip }, () => {
     assert.match(lockup.attrs, /href="https:\/\/worldmonitor\.app"/);
     const glyphWrapper = lockup.inner.match(/<span\b[^>]*>/);
     assert.ok(glyphWrapper && /aria-hidden="true"/.test(glyphWrapper[0]), 'the glyph wrapper is decorative');
-    assert.equal(anchors(lockup.inner).length, 0, 'no nested anchor inside the lockup');
+    assert.doesNotMatch(lockup.inner, /<a\b/i, 'no nested anchor inside the lockup');
   });
 
-  it('keeps the Launch CTA aria-label equal to its visible copy', () => {
-    const nav = section(html(), '<nav data-wm-nav="primary"', '</nav>');
-    const launch = anchors(nav).filter((a) => /aria-label="[^"]*Launch[^"]*"/.test(a.attrs));
-    assert.equal(launch.length, 1, 'one Launch CTA in the nav');
-    const label = launch[0].attrs.match(/aria-label="([^"]*)"/)[1];
-    assert.equal(textOf(launch[0].inner), label);
-  });
+  for (const locale of INDEXABLE_LANDING_LOCALES) {
+    it(`keeps the ${locale.id} Launch CTA aria-label equal to its visible copy`, () => {
+      const page = readFileSync(new URL(`../${landingBuiltOutputPath(locale)}`, import.meta.url), 'utf8');
+      const nav = section(page, '<nav data-wm-nav="primary"', '</nav>');
+      const launch = anchors(nav).filter((a) => /data-umami-event-target="welcome-nav"/.test(a.attrs));
+      assert.equal(launch.length, 1, 'one Launch CTA in the nav');
+      const label = launch[0].attrs.match(/aria-label="([^"]*)"/)?.[1];
+      assert.ok(label, 'the Launch CTA must have an aria-label');
+      assert.equal(textOf(launch[0].inner), label);
+    });
+  }
 
   it('keeps footer copyright and byline at solid muted contrast with no opacity fade', () => {
     const footer = section(html(), '<footer', '</footer>');
