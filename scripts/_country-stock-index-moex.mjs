@@ -5,7 +5,7 @@
 // Yahoo Finance stopped serving MOEX data after 2022, so the RU entry in the
 // public country enum was flagged `unavailable` (#6240). ISS is the exchange's
 // own API: keyless, no registration, 15-minute delayed, UTF-8 JSON. The
-// history endpoint returns a columnar `{ columns, data }` table, so every cell
+// endpoints return columnar `{ columns, data }` tables, so every cell
 // is read by column NAME, never by position, and an upstream column insertion
 // cannot shift a field silently.
 //
@@ -35,52 +35,89 @@ export function moexHistoryUrl(symbol, now = new Date()) {
   return `${MOEX_ISS_ORIGIN}/iss/history/engines/stock/markets/index/securities/${encodeURIComponent(symbol)}.json?${params.toString()}`;
 }
 
-/**
- * Daily closes in trade-date order from an ISS history response.
- * Rows without a finite CLOSE are dropped; an unexpected shape yields [].
- * @param {unknown} payload
- * @returns {number[]}
- */
-export function parseMoexHistoryCloses(payload) {
-  const history = /** @type {{ columns?: unknown, data?: unknown } | undefined} */ (
-    payload && typeof payload === 'object' ? /** @type {any} */ (payload).history : undefined
-  );
-  if (!history || !Array.isArray(history.columns) || !Array.isArray(history.data)) return [];
+/** @param {unknown} payload @param {string} name */
+function moexTable(payload, name) {
+  if (!payload || typeof payload !== 'object') return null;
+  const table = /** @type {Record<string, unknown>} */ (payload)[name];
+  if (!table || typeof table !== 'object' || !('columns' in table) || !('data' in table)) return null;
+  if (!Array.isArray(table.columns) || !Array.isArray(table.data)) return null;
+  return { columns: table.columns, data: table.data };
+}
+
+/** @param {unknown} value */
+function positivePrice(value) {
+  return (typeof value === 'number' || (typeof value === 'string' && value.trim() !== ''))
+    && Number.isFinite(Number(value)) && Number(value) > 0;
+}
+
+/** @param {unknown} payload @param {string} [beforeDate] @returns {number[]} */
+export function parseMoexHistoryCloses(payload, beforeDate) {
+  const history = moexTable(payload, 'history');
+  if (!history) return [];
   const dateAt = history.columns.indexOf('TRADEDATE');
   const closeAt = history.columns.indexOf('CLOSE');
   if (dateAt === -1 || closeAt === -1) return [];
-  const finiteClose = (value) => (typeof value === 'number' || (typeof value === 'string' && value.trim() !== ''))
-    && Number.isFinite(Number(value));
   return history.data
-    .filter((row) => Array.isArray(row) && typeof row[dateAt] === 'string' && finiteClose(row[closeAt]))
+    .filter((row) => Array.isArray(row) && typeof row[dateAt] === 'string'
+      && (!beforeDate || row[dateAt] < beforeDate) && positivePrice(row[closeAt]))
     .sort((a, b) => String(a[dateAt]).localeCompare(String(b[dateAt])))
     .map((row) => Number(row[closeAt]));
 }
 
-/**
- * The public RPC snapshot for a MOEX-served country, or null when fewer than
- * two closes came back (the same refusal the Yahoo leg applies).
- * @param {unknown} payload
- * @param {{ code: string, symbol: string, name: string }} index
- * @param {string} [fetchedAt]
- */
-export function buildMoexCountryStockIndexSnapshot(payload, index, fetchedAt = new Date().toISOString()) {
-  return buildCountryStockIndexSnapshotFromCloses(parseMoexHistoryCloses(payload), MOEX_CURRENCY, fetchedAt, index);
+/** @param {string} symbol */
+export function moexMarketdataUrl(symbol) {
+  const params = new URLSearchParams({
+    'iss.meta': 'off', 'iss.only': 'marketdata',
+    'marketdata.columns': 'SECID,CURRENTVALUE,TRADEDATE,UPDATETIME',
+  });
+  return `${MOEX_ISS_ORIGIN}/iss/engines/stock/markets/index/securities/${encodeURIComponent(symbol)}.json?${params.toString()}`;
+}
+
+/** @param {unknown} payload @param {string} symbol */
+function currentIndex(payload, symbol) {
+  const market = moexTable(payload, 'marketdata');
+  if (!market) return null;
+  const symbolAt = market.columns.indexOf('SECID');
+  const priceAt = market.columns.indexOf('CURRENTVALUE');
+  const dateAt = market.columns.indexOf('TRADEDATE');
+  if (symbolAt < 0 || priceAt < 0 || dateAt < 0) return null;
+  const row = market.data.find((row) => Array.isArray(row) && row[symbolAt] === symbol);
+  if (!row || !positivePrice(row[priceAt]) || typeof row[dateAt] !== 'string'
+    || !/^\d{4}-\d{2}-\d{2}$/.test(row[dateAt]) || !Number.isFinite(Date.parse(row[dateAt]))) return null;
+  return { price: Number(row[priceAt]), tradeDate: row[dateAt] };
 }
 
 /**
- * Fetch the ISS history for one index. `fetchImpl` is injectable for tests.
+ * Current delayed quote plus the preceding daily closes. History can already
+ * contain today's close, so exclude that date before appending the quote.
+ * @param {unknown} history
+ * @param {unknown} marketdata
+ * @param {{ code: string, symbol: string, name: string }} index
+ * @param {string} [fetchedAt]
+ */
+export function buildMoexCountryStockIndexSnapshot(history, marketdata, index, fetchedAt = new Date().toISOString()) {
+  const current = currentIndex(marketdata, index.symbol);
+  if (!current) return null;
+  const closes = parseMoexHistoryCloses(history, current.tradeDate);
+  return buildCountryStockIndexSnapshotFromCloses([...closes, current.price], MOEX_CURRENCY, fetchedAt, index);
+}
+
+/**
  * @param {{ code: string, symbol: string, name: string }} index
  * @param {{ fetchImpl?: typeof fetch, now?: Date }} [options]
  */
 export async function fetchMoexCountryStockIndexSnapshot(index, { fetchImpl = (...args) => globalThis.fetch(...args), now = new Date() } = {}) {
-  const response = await fetchImpl(moexHistoryUrl(index.symbol, now), {
-    headers: { 'User-Agent': MOEX_USER_AGENT, Accept: 'application/json' },
-    signal: AbortSignal.timeout(MOEX_TIMEOUT_MS),
-  });
-  if (!response.ok) throw new Error(`MOEX ISS HTTP ${response.status}`);
-  const payload = await response.json();
-  const snapshot = buildMoexCountryStockIndexSnapshot(payload, index, now.toISOString());
-  if (!snapshot) throw new Error('insufficient closes');
+  const [history, marketdata] = await Promise.all(
+    [moexHistoryUrl(index.symbol, now), moexMarketdataUrl(index.symbol)].map(async (url) => {
+      const response = await fetchImpl(url, {
+        headers: { 'User-Agent': MOEX_USER_AGENT, Accept: 'application/json' },
+        signal: AbortSignal.timeout(MOEX_TIMEOUT_MS),
+      });
+      if (!response.ok) throw new Error(`MOEX ISS HTTP ${response.status}`);
+      return response.json();
+    }),
+  );
+  const snapshot = buildMoexCountryStockIndexSnapshot(history, marketdata, index, now.toISOString());
+  if (!snapshot) throw new Error('insufficient market data');
   return snapshot;
 }

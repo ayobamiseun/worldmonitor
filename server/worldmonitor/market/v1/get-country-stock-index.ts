@@ -113,7 +113,8 @@ export async function getCountryStockIndex(
   // request that returns nothing for this symbol.
   if (index.source && index.source !== 'yahoo') {
     const cachedNonYahoo = stockIndexCache[code];
-    return cachedNonYahoo ? cachedNonYahoo.data : notAvailable;
+    return cachedNonYahoo && Date.now() - cachedNonYahoo.ts < STOCK_INDEX_CACHE_TTL
+      ? cachedNonYahoo.data : notAvailable;
   }
 
   const cached = stockIndexCache[code];
