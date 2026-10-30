@@ -53,8 +53,13 @@ export const INTEL_HISTORY_EMBED_DIMS = 512;
 export const INTEL_HISTORY_EMBED_MODEL = "openai/text-embedding-3-small@512";
 
 /** Rows written before the stamp existed were all produced by the one model ever used. */
-function isCurrentEmbeddingModel(embeddingModel: string | undefined): boolean {
-  return embeddingModel === undefined || embeddingModel === INTEL_HISTORY_EMBED_MODEL;
+const LEGACY_EMBEDDING_MODEL = "openai/text-embedding-3-small@512";
+
+export function isCurrentEmbeddingModel(
+  embeddingModel: string | undefined,
+  currentModel = INTEL_HISTORY_EMBED_MODEL,
+): boolean {
+  return (embeddingModel ?? LEGACY_EMBEDDING_MODEL) === currentModel;
 }
 
 /**
@@ -780,31 +785,33 @@ export const getByIds = internalQuery({
 });
 
 /**
- * Bounded census of the vector spaces present in the table (#5742): how many
- * of the newest `limit` rows carry each `embeddingModel` stamp (`unstamped`
- * for rows older than the stamp). A second key beside the current one means
- * a migration is in progress or went wrong; the runbook reads this before
- * and after a cutover. Scans by `by_ingestedAt` so the cost is the limit,
- * never the table.
+ * Byte-bounded census page in newest-ingested order. Accumulate `models`
+ * across `nextCursor` pages until `partial` is false for a complete census.
  */
 export const embeddingModelInventory = internalQuery({
-  args: { limit: v.optional(v.number()) },
+  args: { limit: v.optional(v.number()), cursor: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const limit = clamp(args.limit ?? 1000, 1, 10_000);
-    const rows = await ctx.db
+    const limit = clamp(args.limit ?? 200, 1, 1000);
+    const result = await ctx.db
       .query("intelHistory")
       .withIndex("by_ingestedAt")
       .order("desc")
-      .take(limit + 1);
+      .paginate({
+        cursor: args.cursor || null,
+        numItems: limit,
+        maximumRowsRead: 1000,
+        maximumBytesRead: 2_000_000,
+      });
     const models: Record<string, number> = {};
-    for (const row of rows.slice(0, limit)) {
+    for (const row of result.page) {
       const key = row.embeddingModel ?? "unstamped";
       models[key] = (models[key] ?? 0) + 1;
     }
     return {
       current: INTEL_HISTORY_EMBED_MODEL,
-      scanned: Math.min(rows.length, limit),
-      partial: rows.length > limit,
+      scanned: result.page.length,
+      partial: !result.isDone,
+      nextCursor: result.isDone ? "" : result.continueCursor,
       models,
     };
   },
