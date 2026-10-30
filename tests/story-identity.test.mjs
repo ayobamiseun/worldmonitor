@@ -197,8 +197,7 @@ describe('feature-hash salt (#4925 item 2)', () => {
     assert.ok(unsalted && salted);
     const differing = Array.from(unsalted.u).filter((v, i) => Math.abs(v - salted.u[i]) > 1e-12).length;
     assert.ok(differing > 0, 'a salt must change the projection');
-    // Cross-salt vectors are not comparable; the salt only has to be stable within a process.
-    assert.ok(cosineSimilarity(unsalted, salted) < 0.99, 'different salts must not share a vector space');
+    assert.ok(Math.abs(cosineSimilarity(unsalted, salted) - 1) < 1e-9, 'lexical identity is independent of projection salt');
     setFeatureHashSalt('deploy-secret');
     assert.deepEqual(Array.from(storyVector(TITLE).u), Array.from(salted.u), 'same salt, same projection');
   });
@@ -819,4 +818,37 @@ describe('story key TTL ordering (#4924 external review P2)', () => {
       'a track outside the digest freshness floor must not be adopted — it is ageing out and the story would re-fork',
     );
   });
+});
+
+
+it('keeps every labeled decision stable across deployment salts', () => {
+  for (const salt of ['deploy-3', 'deploy-30', 'secret-92', 'secret-120', ...Array.from({ length: 16 }, (_, i) => `regression-deploy-${i}`)]) {
+    setFeatureHashSalt(salt);
+    for (const [a, b] of POSITIVE_PAIRS) assert.ok(isSameStory(a, b), `positive split under ${salt}: ${a}`);
+    for (const [a, b] of NEGATIVE_PAIRS) assert.ok(!isSameStory(a, b), `negative merged under ${salt}: ${a}`);
+  }
+});
+
+it('does not alias salts whose old FNV seeds shared nine low bits', () => {
+  setFeatureHashSalt('secret-92');
+  const first = storyVector('Apple unveils new AI features at WWDC keynote');
+  setFeatureHashSalt('secret-120');
+  const second = storyVector('Apple unveils new AI features at WWDC keynote');
+  assert.notDeepEqual(Array.from(first.u), Array.from(second.u));
+});
+
+it('loads the environment salt after import and freezes it on first use', async () => {
+  const previous = process.env.STORY_FEATURE_HASH_SALT;
+  delete process.env.STORY_FEATURE_HASH_SALT;
+  try {
+    const fresh = await import(`../shared/story-identity.js?lazy-env=${Date.now()}`);
+    process.env.STORY_FEATURE_HASH_SALT = 'loaded-by-loadEnvFile';
+    fresh.storyVector('A headline after environment loading');
+    assert.equal(fresh.activeFeatureHashSalt(), fresh.deriveFeatureHashSalt('loaded-by-loadEnvFile'));
+    process.env.STORY_FEATURE_HASH_SALT = 'later-edit';
+    assert.equal(fresh.activeFeatureHashSalt(), fresh.deriveFeatureHashSalt('loaded-by-loadEnvFile'));
+  } finally {
+    if (previous === undefined) delete process.env.STORY_FEATURE_HASH_SALT;
+    else process.env.STORY_FEATURE_HASH_SALT = previous;
+  }
 });
