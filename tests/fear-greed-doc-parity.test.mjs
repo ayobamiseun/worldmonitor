@@ -1,9 +1,6 @@
-// Docs-parity check by design (#8690, section 2). The category weights, the
-// sentiment fallback gates and the breadth branch weights are parsed out of
-// scripts/seed-fear-greed.mjs and compared with the published methodology
-// doc, so the doc can only drift by failing here. The seeder is a cron entry
-// point; the constants are literals in its source, and the published figures
-// are prose, so both sides are read as text.
+// These text checks compare Fear & Greed weights, fallback rules, output fields,
+// and Redis keys with the published methodology (#8690, section 2).
+// Executing the seeder cannot verify the figures and examples readers see.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';

@@ -1,9 +1,6 @@
-// Text checks by design (#8690, section 2). The documentation audit protocol
-// and its templates are Markdown that reviewers follow by hand; the required
-// roles, the evidence columns and the forbidden "fully aligned" wording are
-// the contract and have no runtime. The Redis guardrail cases pin the non-empty
-// discovery guard in both the relay and standalone UCDP writer. Reading both
-// sources verifies this cross-file contract without external data or Redis writes.
+// These text checks pin audit protocol wording and cross-file Redis guardrails,
+// including non-empty discovery checks in both UCDP writers (#8690, section 2).
+// Running a seeder cannot verify the audit templates or all writer declarations.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';

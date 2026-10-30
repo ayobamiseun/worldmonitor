@@ -1,9 +1,6 @@
-// Docs-parity check by design (#8690, section 2). The Idempotency-Key prose
-// in docs/ must mirror the machine-readable route exceptions and the handler
-// wiring in api/create-checkout.ts and api/notify.ts. The idempotency
-// behaviour itself runs in the handler suites; what is pinned here is that
-// the published text names the same limits and endpoints, which only a
-// comparison of the documents can observe.
+// These text checks pin Idempotency-Key documentation against OpenAPI, route
+// exceptions, and handler wiring (#8690, section 2).
+// Handler tests exercise replay behavior, but cannot verify published prose.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';

@@ -1,9 +1,6 @@
-// Docs-parity check by design (#8690, section 2). The set of banner origins
-// is read from the alert service source and compared with the English and
-// Chinese architecture and algorithms docs, so the documentation can drift
-// from the wired origins only by failing here. The source side is a literal
-// list of origin strings; executing the service would not expose it any more
-// faithfully than reading it.
+// These text checks compare wired banner origins with the English and Chinese
+// documentation (#8690, section 2).
+// Executing alerts cannot verify that the published docs describe those origins.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

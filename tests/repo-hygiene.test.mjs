@@ -1,8 +1,6 @@
-// Repository-hygiene guard by design (#8690, section 2). What is checked is
-// the tracked file set (via git ls-files) and the Mintlify ignore list, so
-// archival backlog and playground artifacts never return to the repo root or
-// the published docs. There is no behaviour to execute; the tracked tree is
-// the contract.
+// These checks pin the tracked archive/playground paths and Mintlify exclusions
+// (#8690, section 2).
+// Application runtime tests cannot verify Git tracking or documentation exclusions.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';

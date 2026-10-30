@@ -1,9 +1,6 @@
-// CI-shape checks by design (#8690, section 2). The built-output guard only
-// protects anything if the test workflow builds /pro and the dashboard
-// immediately before the suites that read them, so this file reads
-// .github/workflows/test.yml and pins that ordering, then runs the guard
-// primitive for real in a spawned probe. The workflow is a YAML document;
-// its step order is the contract and can only be checked as text.
+// These source checks pin CI build/test ordering and built-output guard wiring
+// (#8690, section 2).
+// The spawned probes exercise guard behavior, but cannot verify workflow ordering.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

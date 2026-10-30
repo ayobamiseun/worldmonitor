@@ -1,9 +1,6 @@
-// Text checks by design (#8690, section 2). This pins the ACLED resolution
-// feed contract across the seeders, forecast resolver, and health registry:
-// which Redis key each hard count is routed to, that the display payload stays
-// capped while a separate 60-day paginated feed is published, and how missing
-// credentials versus an unreachable configured feed are reported. Source checks pin this
-// cross-file key wiring without fetching external data or writing to Redis.
+// These text checks pin ACLED display and resolution-feed wiring across the
+// seeders, forecast resolver, and health registries (#8690, section 2).
+// Executing one producer would not establish that all source declarations agree.
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
 import { readFileSync } from 'node:fs';

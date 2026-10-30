@@ -1,11 +1,6 @@
-// Import-boundary and call-site guard by design (#8690, section 2). The embed
-// entry must boot the shared map container without pulling in the
-// authenticated app shell, reach the network only through the composed
-// map-frame endpoint, and never send the embedding key on a data poll. Those
-// are properties of which modules and URLs the source references, which an
-// import scan sees directly and a mounted embed could only reveal
-// indirectly; the lint-boundaries script covers layer direction, not these
-// entry-specific allowlists.
+// These source checks pin embed-specific imports, request wiring, and credential
+// boundaries beyond the layer linter's rules (#8690, section 2).
+// A mounted embed exercises selected paths, not every forbidden source reference.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
