@@ -2,8 +2,8 @@
 // scroll handler (#8690, replacing the source-text checks in
 // tests/app-destroy-lifecycle.test.mjs).
 //
-// App is constructed for real (the constructor needs only the container) and
-// destroyed without init, the same way main.ts tears down a boot that failed.
+// App is constructed for real and torn down both before init and after a
+// controlled failure at the first startup checkpoint.
 // Module teardown, the map/AIS tail, listener removal, the queued-frame
 // cancel and the WebMCP controller are observed through spies; the viewport
 // handler is driven with real Events; the lazy vessel runtime is driven
@@ -19,7 +19,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const spies = vi.hoisted(() => ({
   disconnectAisStream: vi.fn(),
+  startFlightHistoryCleanup: vi.fn(),
   stopFlightHistoryCleanup: vi.fn(),
+  initI18n: vi.fn<() => Promise<void>>(),
   terminate: vi.fn(),
   destroyBreakingNewsAlerts: vi.fn(),
   cancelBootstrapSlowTier: vi.fn(),
@@ -35,7 +37,12 @@ vi.mock('@/services', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services')>()),
   initDB: vi.fn(async () => undefined),
   disconnectAisStream: spies.disconnectAisStream,
+  startFlightHistoryCleanup: spies.startFlightHistoryCleanup,
   stopFlightHistoryCleanup: spies.stopFlightHistoryCleanup,
+}));
+vi.mock('@/services/i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/i18n')>()),
+  initI18n: spies.initI18n,
 }));
 vi.mock('@/services/ml-worker', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/ml-worker')>();
@@ -66,6 +73,7 @@ vi.mock('@/components/IntelligenceGapBadge', () => ({
 }));
 
 import { App } from '@/App';
+import { dataFreshness } from '@/services/data-freshness';
 import {
   VesselRuntimeStoppedError,
   enableVesselRuntime,
@@ -79,6 +87,8 @@ type AppInternals = {
   modules: Array<{ destroy(): void }>;
   lifecycleController: AbortController;
   webMcpController: AbortController | null;
+  appDestroyed: Promise<void>;
+  freeTierGate: { cancelFallback: () => void };
   visiblePanelPrimeRaf: number | null;
   viewportHydrationReady: boolean;
   viewportHydrationReadyAt: number;
@@ -86,7 +96,11 @@ type AppInternals = {
   handleViewportPrime: (event?: Event) => void;
   runVisibleDataFanout: () => Promise<void>;
   primeVisiblePanelData: () => Promise<void>;
-  dataLoader: { loadAllData: (forceAll?: boolean, trigger?: 'full' | 'viewport') => Promise<void> };
+  dataLoader: {
+    loadAllData: (forceAll?: boolean, trigger?: 'full' | 'viewport') => Promise<void>;
+    loadMilitary: () => Promise<void>;
+    loadIntelligenceSignals: () => Promise<void>;
+  };
   initFindingsBadge: () => Promise<void>;
 };
 
@@ -105,8 +119,15 @@ function scrollFrom(target: Element, timeStamp?: number): Event {
   return event;
 }
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
-  for (const spy of [spies.disconnectAisStream, spies.stopFlightHistoryCleanup, spies.terminate, spies.destroyBreakingNewsAlerts, spies.cancelBootstrapSlowTier, spies.badgeDestroy]) spy.mockClear();
+  for (const spy of [spies.disconnectAisStream, spies.startFlightHistoryCleanup, spies.stopFlightHistoryCleanup, spies.terminate, spies.destroyBreakingNewsAlerts, spies.cancelBootstrapSlowTier, spies.badgeDestroy]) spy.mockClear();
+  spies.initI18n.mockReset();
   for (const spy of Object.values(spies.vessels)) spy.mockClear();
   vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network disabled in test'));
 });
@@ -117,8 +138,10 @@ afterEach(() => {
 });
 
 describe('App.destroy', () => {
-  it('tears down the map, AIS, flight cleanup, workers and WebMCP even when a module destructor throws', () => {
+  it('tears down the map, AIS, flight cleanup, workers and WebMCP even when a module destructor throws', async () => {
     const { app, internals } = makeApp();
+    enableVesselRuntime();
+    await getMilitaryVesselsModule();
     const order: string[] = [];
     internals.modules = [
       { destroy: () => { order.push('first'); } },
@@ -130,17 +153,29 @@ describe('App.destroy', () => {
     const webMcp = new AbortController();
     internals.webMcpController = webMcp;
     const lifecycle = internals.lifecycleController;
+    lifecycle.signal.addEventListener('abort', () => order.push('lifecycle'));
+    webMcp.signal.addEventListener('abort', () => order.push('webmcp'));
+    const cancelFallback = vi.spyOn(internals.freeTierGate, 'cancelFallback');
+    let readinessWaitFinished = false;
+    void internals.appDestroyed.then(() => { readinessWaitFinished = true; });
 
     expect(() => app.destroy()).not.toThrow();
+    await Promise.resolve();
 
     // modules destroy in reverse order and the map still follows a throwing module
-    expect(order).toEqual(['last', 'throws', 'first', 'map']);
+    expect(order).toEqual(['lifecycle', 'webmcp', 'last', 'throws', 'first', 'map']);
+    expect(readinessWaitFinished).toBe(true);
+    expect(cancelFallback).toHaveBeenCalledTimes(1);
     expect(internals.state.isDestroyed).toBe(true);
     expect(lifecycle.signal.aborted).toBe(true);
     expect(webMcp.signal.aborted).toBe(true);
     expect(internals.webMcpController).toBeNull();
     expect(spies.disconnectAisStream).toHaveBeenCalledTimes(1);
     expect(spies.stopFlightHistoryCleanup).toHaveBeenCalledTimes(1);
+    expect(spies.vessels.stopVesselHistoryCleanup).toHaveBeenCalledTimes(1);
+    expect(spies.vessels.disconnectMilitaryVesselStream).toHaveBeenCalledTimes(1);
+    await expect(getMilitaryVesselsModule()).rejects.toBeInstanceOf(VesselRuntimeStoppedError);
+    expect(spies.vessels.startVesselHistoryCleanup).toHaveBeenCalledTimes(1);
     expect(spies.terminate).toHaveBeenCalledTimes(1);
     expect(spies.destroyBreakingNewsAlerts).toHaveBeenCalledTimes(1);
     expect(spies.cancelBootstrapSlowTier).toHaveBeenCalledTimes(1);
@@ -155,14 +190,21 @@ describe('App.destroy', () => {
     const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
     const raf = vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(42);
     vi.spyOn(internals, 'primeVisiblePanelData').mockResolvedValue(undefined);
-    vi.spyOn(internals.dataLoader, 'loadAllData').mockResolvedValue(undefined);
+    const initialLoad = deferred();
+    vi.spyOn(internals.dataLoader, 'loadAllData').mockReturnValue(initialLoad.promise);
     const scroller = document.createElement('div');
     scroller.className = 'main-content';
     document.body.appendChild(scroller);
 
-    await internals.runVisibleDataFanout();
+    const fanout = internals.runVisibleDataFanout();
     expect(add).toHaveBeenCalledWith('scroll', internals.handleViewportPrime, { passive: true, capture: true });
     expect(add).toHaveBeenCalledWith('resize', internals.handleViewportPrime);
+    scroller.dispatchEvent(new Event('scroll'));
+    expect(raf).not.toHaveBeenCalled();
+    expect(internals.viewportTriggersArmed).toBe(false);
+    initialLoad.resolve();
+    await fanout;
+    expect(internals.viewportTriggersArmed).toBe(true);
     scroller.dispatchEvent(new Event('scroll'));
     expect(raf).toHaveBeenCalledTimes(1);
     expect(internals.visiblePanelPrimeRaf).toBe(42);
@@ -188,6 +230,32 @@ describe('App.destroy', () => {
     app.destroy();
     await pending;
     expect(internals.state.findingsBadge).toBeNull();
+  });
+
+  it('restarts flight cleanup and re-enables lazy vessels during a later startup', async () => {
+    stopLoadedVesselHistoryCleanup();
+    const { app } = makeApp();
+    const checkpoint = new Error('stop at the i18n startup checkpoint');
+    spies.initI18n.mockRejectedValue(checkpoint);
+    try {
+      await expect(app.init(null)).rejects.toBe(checkpoint);
+      expect(spies.startFlightHistoryCleanup).toHaveBeenCalledTimes(1);
+      expect(spies.vessels.startVesselHistoryCleanup).not.toHaveBeenCalled();
+      await getMilitaryVesselsModule();
+      expect(spies.vessels.startVesselHistoryCleanup).toHaveBeenCalledTimes(1);
+    } finally {
+      app.destroy();
+    }
+  });
+
+  it.each(['loadMilitary', 'loadIntelligenceSignals'] as const)('treats a stopped vessel runtime as cancellation in %s', async (method) => {
+    const { app, internals } = makeApp();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const recordError = vi.spyOn(dataFreshness, 'recordError');
+    app.destroy();
+    await internals.dataLoader[method]();
+    expect(error.mock.calls.filter(([message]) => String(message).includes('Military'))).toEqual([]);
+    expect(recordError.mock.calls.filter(([source]) => source === 'opensky')).toEqual([]);
   });
 });
 
@@ -281,13 +349,50 @@ describe('lazy vessel runtime lifecycle', () => {
     expect(spies.vessels.stopVesselHistoryCleanup).toHaveBeenCalledTimes(2);
   });
 
-  it('rejects a load that straddles a teardown, even after the runtime is re-enabled', async () => {
+  it('rejects a cached module await that straddles teardown, even after re-enabling', async () => {
     enableVesselRuntime();
     const pending = getMilitaryVesselsModule();
     stopLoadedVesselHistoryCleanup();
     enableVesselRuntime();
     await expect(pending).rejects.toSatisfy((err: unknown) => isVesselRuntimeStoppedError(err));
     expect(spies.vessels.startVesselHistoryCleanup).not.toHaveBeenCalled();
+  });
+
+  it('stops an uncached module whose import resolves after teardown and re-enabling', async () => {
+    const importStarted = deferred();
+    const importReady = deferred();
+    const lateModule = {
+      fetchMilitaryVessels: vi.fn(async () => []),
+      initMilitaryVesselStream: vi.fn(),
+      isMilitaryVesselTrackingConfigured: () => false,
+      startVesselHistoryCleanup: vi.fn(),
+      stopVesselHistoryCleanup: vi.fn(),
+      disconnectMilitaryVesselStream: vi.fn(),
+    };
+    vi.resetModules();
+    vi.doMock('@/services/military-vessels', async () => {
+      importStarted.resolve();
+      await importReady.promise;
+      return lateModule;
+    });
+    try {
+      const runtime = await import('@/services/military-vessels-lazy');
+      const pending = runtime.getMilitaryVesselsModule();
+      const stopped = expect(pending).rejects.toBeInstanceOf(runtime.VesselRuntimeStoppedError);
+      await importStarted.promise;
+      runtime.stopLoadedVesselHistoryCleanup();
+      runtime.enableVesselRuntime();
+      expect(lateModule.stopVesselHistoryCleanup).not.toHaveBeenCalled();
+      importReady.resolve();
+      await stopped;
+      expect(lateModule.startVesselHistoryCleanup).not.toHaveBeenCalled();
+      expect(lateModule.stopVesselHistoryCleanup).toHaveBeenCalledTimes(1);
+      expect(lateModule.disconnectMilitaryVesselStream).toHaveBeenCalledTimes(1);
+    } finally {
+      importReady.resolve();
+      vi.doUnmock('@/services/military-vessels');
+      vi.resetModules();
+    }
   });
 });
 
