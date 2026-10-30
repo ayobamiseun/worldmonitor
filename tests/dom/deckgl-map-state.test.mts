@@ -641,6 +641,6 @@ describe('DeckGL renderer readiness and settlement', () => {
     await Promise.resolve();
     expect(center).toHaveBeenCalledTimes(destroyed ? 0 : 1);
     expect(show).toHaveBeenCalledTimes(destroyed ? 0 : 1);
-    if (!destroyed) expect(show.mock.calls[0][0]).toMatchObject({ type: 'waterway', x: 20, y: 30 });
+    if (!destroyed) expect(show).toHaveBeenCalledWith(expect.objectContaining({ type: 'waterway', x: 20, y: 30 }));
   });
 });

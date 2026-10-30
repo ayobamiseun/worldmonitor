@@ -134,6 +134,6 @@ describe('Globe viewport runtime', () => {
     expect(show).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1500);
     expect(show).toHaveBeenCalledTimes(destroyed ? 0 : 1);
-    if (!destroyed) expect(show.mock.calls[0][0]).toMatchObject({ type: 'waterway', x: 50, y: 30 });
+    if (!destroyed) expect(show).toHaveBeenCalledWith(expect.objectContaining({ type: 'waterway', x: 50, y: 30 }));
   });
 });
