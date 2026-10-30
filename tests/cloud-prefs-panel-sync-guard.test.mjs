@@ -13,7 +13,8 @@
 // get a harness (#5892), move each check there and delete it here.
 //
 // What this file no longer holds: the dirty-key persistence checks, which
-// run for real in tests/cloud-prefs-sync-concurrency.test.mts (two-tab
+// run for real in tests/cloud-prefs-sync-concurrency.test.mts (reload
+// recovery at "restores a persisted dirty marker", two-tab
 // union and settle at "two-tab dirty-key persistence", sign-out cleanup at
 // "cloud prefs sign-out cleanup", partial-import markers at "settings
 // import cloud transaction"); and the panel-order sync-key checks, which
