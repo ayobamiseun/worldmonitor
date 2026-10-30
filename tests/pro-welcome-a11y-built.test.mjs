@@ -18,6 +18,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
+import { Window } from 'happy-dom';
 import { INDEXABLE_LANDING_LOCALES } from '../shared/indexable-landing-locales.ts';
 import { guardProBuiltOutput, landingBuiltOutputPath, shouldSkipProBuiltOutput } from './_lib/pro-built-output.mjs';
 
@@ -39,6 +40,19 @@ const section = (markup, open, close) => {
 describe('welcome page a11y (#7382), built output', { skip }, () => {
   it('renders the nav lockup as one anchor named by its visible WORLD MONITOR text', () => {
     const nav = section(html(), '<nav data-wm-nav="primary"', '</nav>');
+    const window = new Window();
+    try {
+      window.document.body.innerHTML = nav;
+      const topLevelLinks = window.document.querySelectorAll('nav > div > a');
+      assert.equal(topLevelLinks.length, 2, 'the nav must have one lockup link and one Launch CTA');
+      assert.equal(
+        [...topLevelLinks].filter((a) => a.getAttribute('data-umami-event-target') === 'welcome-nav').length,
+        1,
+        'one of the two links must be the Launch CTA',
+      );
+    } finally {
+      window.close();
+    }
     const lockups = anchors(nav).filter((a) => textOf(a.inner) === 'WORLD MONITOR');
     assert.equal(lockups.length, 1, 'exactly one lockup anchor in the nav');
     const [lockup] = lockups;
