@@ -1,9 +1,9 @@
 // Build-wiring check by design (#8690, section 2). The 3MB+ third-party
 // notices file is generated per build and never committed, so what is
 // pinned is the wiring that produces and ships it: the installer licence
-// setting, the resource entry, the generate step order in the workflow, and
+// setting, the resource entry, the generator command in package.json, and
 // the About dialog strings. The generator itself is run for real below;
-// everything else is a property of the Tauri config and the workflow.
+// the other checks read configuration, source text, and documentation.
 //
 /**
  * The desktop bundle must carry its licence and its third-party notices (#6977).
