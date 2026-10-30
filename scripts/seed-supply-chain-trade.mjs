@@ -30,30 +30,24 @@ const KEYS = {
   customsRevenue: 'trade:customs-revenue:v1',
 };
 
-// NOTE (issue #4864): these TTLs are DELIBERATELY left at 8h. The data-loss fix
-// ("manual seed required" — canonical key lapsed and could not be recreated) is the
-// lockTtlMs bump in runSeed opts below, which lets slow-but-legit runs complete and
-// reach atomicPublish again — restoring republishing every 6h so the key stays alive
-// and, once lost, is RECOVERABLE on the next good run (before, it never republished).
-// #4873: 24h gives ~3 missed 6h cycles of gap-buffer (skipped Railway ticks,
-// a deploy window, a Redis error in extendExistingTtl) before a key drops.
-// Each TTL is co-pinned to a health-check maxStaleMin, and the probes are
-// meta-only (seed-meta carries its own 7-day TTL): maxStaleMin MUST stay
-// below TTL_min so health reads STALE_SEED before the data keys can expire
-// (no silent EMPTY), and above the cron interval (no false STALE). The
-// maxStaleMin values stay at 420 on purpose: widening the TTL widens the
-// recoverable window, it does not move when operators hear about a stall.
+// #4864 restored republishing with the lockTtlMs bump below. #4873 widens
+// retention to 24h so keys survive three missed 6h ticks at 6h, 12h and 18h.
+// Trade and tariff health probes watch only their 7-day seed-meta records;
+// shipping also probes its data key. Keep maxStaleMin at 420: above the 6h
+// cron interval, but below the 1440min data TTL, so a stopped seeder alarms
+// before data expires. Longer retention preserves last-good data without
+// delaying the health warning.
 // Pinned by tests/trade-policy-tariffs.test.mjs, tests/trade-flows-health.test.mjs
 // and tests/tariff-trends-coverage.test.mts.
-export const SHIPPING_TTL = 86400; // 24h — ~3 missed 6h cycles (was 8h = 1 cycle)
+export const SHIPPING_TTL = 86400; // 24h
 // Exported so tests/trade-flows-health.test.mjs can assert the tradeFlows
 // staleness budget against the REAL data TTL. A test that hardcoded the
 // minutes would stay green if this constant moved, re-opening the silent
 // window where the flow keys have expired but health still reads OK.
-export const TRADE_TTL = 86400; // 24h — ~3 missed 6h cycles (was 8h = 1 cycle)
+export const TRADE_TTL = 86400; // 24h
 // Exported so tests can pin the tariffTrendsUs staleness budget against the
 // real data TTL the same way tradeFlows pins TRADE_TTL.
-export const TARIFF_TTL = 86400; // 24h — ~3 missed 6h cycles (was 8h = 1 cycle)
+export const TARIFF_TTL = 86400; // 24h
 const CUSTOMS_TTL = 86400; // 24h — monthly Treasury data, matches maxStaleMin:1440 (was TRADE_TTL=6h = 0 buffer)
 
 // Reporter list fetched dynamically from WTO API at startup.

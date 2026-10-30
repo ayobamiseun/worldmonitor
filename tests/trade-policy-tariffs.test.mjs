@@ -71,13 +71,9 @@ describe('tariffTrendsUs health-check is meta-only and sits inside TARIFF_TTL', 
     return m[1];
   }
 
-  it('TARIFF_TTL is 86400s (24h) — ~3 missed 6h cycles of gap-buffer (#4873), pinned so the relationship below stays meaningful', () => {
-    assert.equal(extractSeconds('TARIFF_TTL'), 86400);
-  });
-
-  it('every supply-chain-trade data TTL buffers at least three 6h cron cycles', () => {
+  it('every supply-chain-trade data TTL retains the 24h buffer through three missed 6h ticks', () => {
     for (const name of ['SHIPPING_TTL', 'TRADE_TTL', 'TARIFF_TTL']) {
-      assert.ok(extractSeconds(name) >= 3 * 6 * 3600, `${name} must cover three missed 6h cycles`);
+      assert.equal(extractSeconds(name), 86400, `${name} must retain the 24h buffer`);
     }
   });
 

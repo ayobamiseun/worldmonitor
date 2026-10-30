@@ -1659,10 +1659,10 @@ const SEED_META = {
   // a meta-only probe (STANDALONE_KEYS.tradeFlows is the seed-meta key itself,
   // because the payload is sharded one key per reporter), so the hasData/EMPTY
   // backstop watches the meta record — which writeSeedMeta gives a 7-day TTL —
-  // and not the 8h data keys. Nothing else would notice the data expiring. A
-  // budget past 480 would therefore be silently green while every flow key was
+  // and not the 24h data keys. Nothing else would notice the data expiring. A
+  // budget past 1440 would therefore be silently green while every flow key was
   // already gone. 420 = the 6h cron plus one hour of grace, so health reaches
-  // STALE_SEED an hour BEFORE the keys it vouches for lapse. Same shape as the
+  // STALE_SEED 17 hours BEFORE the keys it vouches for lapse. Same shape as the
   // meta-only comtradeBilateralHs4 entry above (35d budget, 40d payload TTL).
   tradeFlows:          { key: 'seed-meta:trade:flows',                        maxStaleMin: 420, minRecordCount: 200, dominantFailureMode: true },
   // Same meta-only shape as tradeFlows above (#6316 moved tariffs off the
