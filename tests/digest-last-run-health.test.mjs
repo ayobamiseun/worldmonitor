@@ -1,10 +1,7 @@
-// Text checks by design (#8690, section 2). The digest cron is an entry
-// point that exits on missing env and calls main() on load, so its last-run
-// heartbeat keys, the SEED_ERROR stamp on a rule-fetch failure and the exit
-// code are checked against fixed patterns in the cron source. The
-// orchestration helpers it calls run for real in
-// tests/digest-orchestration-helpers.test.mjs; this file pins the cron-side
-// wiring those helpers cannot see.
+// Cron-source check by design (#8690, section 2): this suite pins heartbeat
+// keys, error metadata, and nonzero-exit wiring against fixed source patterns.
+// The cron runs main() on import, so checking its declarations without
+// starting the cron requires reading its source.
 //
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

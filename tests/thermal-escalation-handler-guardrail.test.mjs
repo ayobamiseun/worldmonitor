@@ -1,8 +1,7 @@
-// Source guard by design (#8690, section 2). The thermal escalation handler
-// must read the seeded Redis key and never call NASA FIRMS from the edge:
-// FIRMS is rate-limited per key and the seeder owns that budget. Which
-// upstream a handler references is a property of its imports and URL
-// literals; the handler's read path runs in the thermal runtime suites.
+// Source guard by design (#8690, section 2): this suite pins the handler's
+// seeded Redis read and prohibits direct fetch and NASA FIRMS references.
+// Runtime fixtures exercise selected paths, while this source check also
+// catches those references in paths the fixtures do not reach.
 //
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

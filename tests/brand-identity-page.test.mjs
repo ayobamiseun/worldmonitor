@@ -1,8 +1,6 @@
-// Published-document check by design (#8690, section 2). public/world-monitor.md
-// is the brand page crawlers and agents quote: its H1, NAP table, press
-// citations, Wikidata items and JSON-LD blocks are the contract, and the
-// canonical URL must match the sitemap's host. A static page has no runtime;
-// its bytes are what the crawler sees.
+// Published-document check by design (#8690, section 2): this suite pins
+// the brand page, its discovery links, and Organization JSON-LD identity data.
+// Runtime application tests do not check the document bytes crawlers read.
 //
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

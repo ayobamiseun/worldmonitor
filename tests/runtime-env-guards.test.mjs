@@ -1,9 +1,7 @@
-// Allow-list guard by design (#8690, section 2). Which import.meta.env
-// properties runtime.ts and the desktop-runtime leaf read, and that
-// runtime-config.ts never reads the env object dynamically for secrets, is a
-// property of the source: Vite inlines each explicit property at build time,
-// so a whole-object read would ship every VITE_ value, and no runtime test
-// can observe what a build would have inlined.
+// Env-source guard by design (#8690, section 2): this suite checks explicit
+// Vite env reads and rejects whole-object and dynamic-access source patterns.
+// Runtime values after Vite replaces env expressions cannot show which
+// source-access pattern produced them.
 //
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

@@ -1,8 +1,7 @@
-// Text checks by design (#8690, section 2). The warm-ping seeders are cron
-// entry points that run on load; what is pinned is that each one sends the
-// app Origin header, without which the edge gateway rejects the ping. The
-// header is a literal in the request options, and the gateway's rejection
-// is covered by the gateway suites.
+// Cron-source check by design (#8690, section 2): this suite pins the app
+// Origin header and best-effort exit policy in the warm-ping entry points.
+// The scripts run on import, so reading their source checks those
+// declarations without starting live upstream requests.
 //
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

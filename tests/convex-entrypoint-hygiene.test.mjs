@@ -1,9 +1,6 @@
-// Import-boundary guard by design (#8690, section 2). Convex pushes every
-// file under convex/ with an entry-point extension, so a module that uses
-// import.meta, a test file, or a path a Convex module name cannot express
-// breaks the deploy, not a test. The check mirrors the bundler's extension
-// list and walks the tree, because the deploy-time analysis is the only
-// runtime these files have.
+// Import-boundary guard by design (#8690, section 2): this suite mirrors
+// Convex entry-point selection and rejects unsupported imports and paths.
+// Runtime unit tests do not exercise the deploy's module-selection rules.
 //
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';

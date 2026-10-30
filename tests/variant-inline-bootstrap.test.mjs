@@ -1,8 +1,7 @@
-// Committed-HTML and CSP check by design (#8690, section 2). The inline
-// variant bootstrap in index.html must name every public variant host and
-// its hash must be allowed by the CSP in vercel.json, or the dashboard boots
-// as the wrong variant or not at all. Both are documents the browser reads
-// before any module runs, so their text is the contract.
+// Committed-HTML contract by design (#8690, section 2): this suite pins
+// variant-host declarations and the inline script's CSP hash in vercel.json.
+// Runtime module tests do not check the committed HTML and header policy
+// that the browser reads before those modules run.
 //
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

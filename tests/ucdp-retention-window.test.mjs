@@ -1,8 +1,8 @@
-// Deliberate constant pins by design (#8690, section 2; named in #8683 as a
-// text check to keep). The UCDP Redis writer keeps one year while the CII
-// scorer classifies over two, and the relay reader caps pages separately;
-// the three windows are intentional and documented, and the messages say
-// to update the guard and the docs together when one moves.
+// Deliberate constant pins by design (#8690, section 2; #8683): this suite
+// pins the one-year Redis retention, two-year CII classification window,
+// and separate relay page cap alongside their documentation.
+// Runtime samples cannot establish these declared limits, and the failure
+// messages require deliberate updates to the guard and docs together.
 //
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

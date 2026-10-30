@@ -1,9 +1,7 @@
-// Cache-key contract by design (#8690, section 2). Every request option
-// that varies the upstream Travelpayouts response must appear in the cache
-// key, or two different requests share one cached answer. The key template
-// literals are read from the provider source because the provider is only
-// reachable through a keyed upstream; the shared-cache behaviour itself runs
-// in the cache helper suites.
+// Cache-key source contract by design (#8690, section 2): this suite pins
+// provider key templates to each upstream request's varying options.
+// Runtime shared-cache helper tests do not inspect these provider-specific
+// template literals.
 //
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

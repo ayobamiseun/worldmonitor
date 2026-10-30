@@ -1,8 +1,8 @@
-// Call-site guard by design (#8690, section 2). Every window.open with
-// _blank under src/ must pass noopener,noreferrer, or the opened page can
-// navigate the dashboard (reverse tabnabbing). The AST walk over src/ is
-// the only way to see every call site at once; the exemption list requires
-// the exempted file to sever the opener itself.
+// Call-site guard by design (#8690, section 2): this AST scan requires
+// noopener,noreferrer on literal window.open(..., '_blank') calls unless
+// the file has an asserted manual opener-severing exemption.
+// Runtime fixtures reach selected calls, while this scan checks the direct
+// TypeScript call sites across src/.
 //
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

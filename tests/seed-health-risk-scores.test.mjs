@@ -1,9 +1,8 @@
-// Cross-file constant parity by design (#8690, section 2). The CII
-// risk-score freshness budget is declared in api/seed-health.js and
-// again in api/health.js, and the relay's warm-ping must defer the record
-// count to the RPC handler. The freshness budgets belong to separate Edge
-// entry points, so this suite compares their declarations as text. The relay
-// starts on import, so its warm-ping wiring is also checked in source.
+// Cross-file source check by design (#8690, section 2): this suite compares
+// freshness declarations in api/seed-health.js and api/health.js and pins
+// relay warm-ping ownership of health metadata.
+// A runtime handler result does not expose those freshness declarations,
+// and importing the relay starts its server and background loops.
 //
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
