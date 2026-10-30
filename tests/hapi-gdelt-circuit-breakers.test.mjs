@@ -1,11 +1,9 @@
-// Text checks by design (#8690, section 2). Which breaker instance each GDELT
-// fetch is wired to, and that the two breakers carry distinct names, is a
-// static property of src/services/gdelt-intel.ts; the breaker behaviour
-// itself runs in the circuit-breaker suites. Exercising this wiring at
-// runtime would mean tripping one breaker with live-shaped failures and
-// proving the other still fetches, which the service's network layer does
-// not expose a seam for. If gdelt-intel gains an injectable fetch, move these
-// cases there.
+// Mixed checks by design (#8690, section 2). Section 1 checks which breaker
+// each GDELT fetch uses and that the breakers have distinct names. Section 2
+// runs CircuitBreaker isolation tests for cooldown and independent caches.
+// The service's network layer has no injectable fetch, so these tests do not
+// exercise the gdelt-intel network path. If the service gains that seam, move
+// the static wiring checks to runtime tests of the service.
 //
 /**
  * Regression tests for split GDELT circuit breakers (PR #879).

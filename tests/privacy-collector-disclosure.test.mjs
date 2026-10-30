@@ -1,9 +1,9 @@
-// Policy-parity check by design (#8690, section 2). The privacy policy
-// claims a complete subprocessor list, so the hosts the client code sends
-// beacons to are compared with the hosts the policy names, and the DebugBear
-// sampling rate in the code with the rate the policy states. Collectors are
-// third-party scripts loaded on real hosts; no test runner loads them, so the
-// declared host set in the source is the observable side.
+// Policy-parity check by design (#8690, section 2). This extracts declared
+// telemetry script hosts from the listed client call sites and checks that
+// the policy names their providers. It also compares the DebugBear sampling
+// rate in the code with the rate in the policy. It does not observe beacon
+// destinations or compare hostnames in the policy; loaded scripts may send
+// requests to other hosts.
 //
 /**
  * The privacy policy claims its subprocessor list is complete ("listed in full
