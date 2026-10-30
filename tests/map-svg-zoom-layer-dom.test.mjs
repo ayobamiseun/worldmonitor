@@ -1,10 +1,7 @@
-// Text checks by design (#8690, section 2). The SVG map must schedule ONE
-// overlay rebuild when a zoom interaction crosses a layer-visibility
-// threshold and none from render-time transform syncs. The checks walk the
-// Map.ts AST for the scheduling calls inside the named methods, because the
-// SVG renderer's zoom path depends on real element geometry that happy-dom
-// does not compute; tests/dom/map-svg-first-paint-deferral.test.mts covers
-// the first-paint half, which does not need geometry.
+// This inspects the MapComponent AST to pin zoom-threshold rebuild scheduling,
+// render-time opt-outs and guards on zoom-hidden marker allocation (#8690,
+// section 2). The zoom path needs real element geometry that happy-dom does
+// not compute, so these checks inspect the source contract.
 //
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

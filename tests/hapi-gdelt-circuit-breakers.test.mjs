@@ -1,9 +1,7 @@
-// Mixed checks by design (#8690, section 2). Section 1 checks which breaker
-// each GDELT fetch uses and that the breakers have distinct names. Section 2
-// runs CircuitBreaker isolation tests for cooldown and independent caches.
-// The service's network layer has no injectable fetch, so these tests do not
-// exercise the gdelt-intel network path. If the service gains that seam, move
-// the static wiring checks to runtime tests of the service.
+// Static checks pin GDELT breaker wiring and distinct names because the
+// service exposes no injectable fetch (#8690, section 2). This suite also runs
+// CircuitBreaker cooldown and cache-isolation tests, which do not exercise the
+// service's network path.
 //
 /**
  * Regression tests for split GDELT circuit breakers (PR #879).

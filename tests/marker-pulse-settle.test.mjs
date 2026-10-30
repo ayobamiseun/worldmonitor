@@ -1,9 +1,7 @@
-// Stylesheet contract by design (#8690, section 2). Every map-scoped
-// infinite CSS pulse must be settled under .markers-settled or listed as
-// exempt, and Map.ts must arm the settle window on overlay renders. The
-// animations live in main.css, which no test runner animates or composites,
-// so the rule set itself is the contract; the compositing-layer outcome
-// (#4669) was measured in the browser when the rule was introduced.
+// This pins the settled or exempt CSS pulse rules and the MapComponent
+// settle-window wiring (#8690, section 2). These unit tests inspect
+// declarations because their Node runner does not animate CSS or measure
+// compositing layers.
 //
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

@@ -1,9 +1,7 @@
-// Build-output check by design (#8690, section 2). This reads the emitted
-// pro-test bundle (public/pro/assets) to prove the Sentry SDK lands in
-// exactly one separate, statically imported chunk that the entry HTML
-// preloads with the static CSP nonce. Chunk splitting is a property of the
-// build artifact, not of any module a test can import; it skips in a checkout
-// that has not built /pro and fails when CI says it has.
+// This pins the built /pro output to one separate Sentry chunk, static entry
+// imports and HTML modulepreloads with the CSP nonce (#8690, section 2). Chunk
+// splitting is a build-artifact contract that importing a source module cannot
+// verify; the suite skips without built output unless CI requires it.
 //
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

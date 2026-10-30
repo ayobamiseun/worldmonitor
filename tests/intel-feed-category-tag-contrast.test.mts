@@ -1,10 +1,8 @@
-// Text checks by design (#8690, section 2). This computes WCAG contrast from
-// the colour tokens declared in main.css and happy-theme.css and from the
-// class the NewsPanel source applies to the category tag. The stylesheets
-// are the contract: happy-dom does not resolve CSS custom properties or
-// cascade, so a mounted panel cannot report the rendered colour, and the
-// numbers checked here are the ones a browser would compute from these
-// declarations.
+// This pins the NewsPanel category-tag declarations and models contrast using
+// direct hex tokens, 0x20 alpha and the --surface backdrop (#8690, section 2).
+// The source declarations define this model because happy-dom does not resolve
+// rendered colours; this does not verify custom-property chains, cascade,
+// fallbacks or ancestor backgrounds.
 //
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

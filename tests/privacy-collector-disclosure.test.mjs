@@ -1,9 +1,8 @@
-// Policy-parity check by design (#8690, section 2). This extracts declared
-// telemetry script hosts from the listed client call sites and checks that
-// the policy names their providers. It also compares the DebugBear sampling
-// rate in the code with the rate in the policy. It does not observe beacon
-// destinations or compare hostnames in the policy; loaded scripts may send
-// requests to other hosts.
+// This compares declared telemetry script hosts with provider names in policy
+// text and checks the DebugBear sampling rate (#8690, section 2). Source and
+// policy text define this parity check without loading third-party scripts; it
+// does not observe beacon destinations or verify that the policy names those
+// hosts.
 //
 /**
  * The privacy policy claims its subprocessor list is complete ("listed in full
