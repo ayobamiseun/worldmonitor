@@ -865,8 +865,9 @@ export const search = internalAction({
       (pushedDown === "domain" && args.country !== undefined) ||
       args.from !== undefined ||
       args.to !== undefined;
+    // Model identity is always post-filtered, even without a country/date filter.
     const vectorLimit = Math.min(
-      needsPostFilter ? limit * POST_FILTER_OVERFETCH : limit,
+      limit * POST_FILTER_OVERFETCH,
       VECTOR_SEARCH_MAX_LIMIT,
     );
 
