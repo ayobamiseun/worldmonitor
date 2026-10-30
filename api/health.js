@@ -1664,11 +1664,11 @@ const SEED_META = {
   // already gone. 1140 = three 6h ticks plus one hour of grace, so health reaches
   // STALE_SEED 5 hours BEFORE the keys it vouches for lapse. Same shape as the
   // meta-only comtradeBilateralHs4 entry above (35d budget, 40d payload TTL).
-  tradeFlows:          { key: 'seed-meta:trade:flows',                        maxStaleMin: 1140, minRecordCount: 200, dominantFailureMode: true },
+  tradeFlows:          { key: 'seed-meta:trade:flows',                        maxStaleMin: 1140, legacyMaxStaleMin: 420, minRecordCount: 200, dominantFailureMode: true },
   // Same meta-only shape as tradeFlows above (#6316 moved tariffs off the
   // single-key US years=10 probe). maxStaleMin 1140 sits inside TARIFF_TTL
   // (1440min since #4873); minRecordCount 150 leaves headroom under a ~200+ reporter fleet.
-  tariffTrendsUs:      { key: 'seed-meta:trade:tariffs',                      maxStaleMin: 1140, minRecordCount: 150 },
+  tariffTrendsUs:      { key: 'seed-meta:trade:tariffs',                      maxStaleMin: 1140, legacyMaxStaleMin: 420, minRecordCount: 150 },
   // publish.ts runs each day at 02:30-05:30 UTC (hourly); seed-meta TTL=52h — maxStaleMin must cover the full 24h cycle
   consumerPricesOverview:   { key: 'seed-meta:consumer-prices:overview:ae',     maxStaleMin: 1500, minSuccessRate: 0.5 }, // 25h = 24h cadence + 1h grace; warn when <50% snapshots succeeded
   consumerPricesCategories: { key: 'seed-meta:consumer-prices:categories:ae:30d',            maxStaleMin: 1500 },
@@ -3596,7 +3596,17 @@ function isCascadeCovered(name, hasData, keyStrens, keyErrors) {
 
 function classifyKey(name, redisKey, opts, ctx) {
   const { keyStrens, keyErrors, keyMetaValues, keyMetaErrors, now } = ctx;
-  const seedCfg = SEED_META[name];
+  let seedCfg = SEED_META[name];
+  // API and worker releases can arrive in either order. Keep the old limit
+  // until this fleet's successful publish proves retention beyond the new
+  // budget. Retain this fallback while an eight-hour worker can still run.
+  if (seedCfg?.legacyMaxStaleMin != null) {
+    const published = unwrapEnvelope(parseRedisValue(keyMetaValues.get(seedCfg.key))).data;
+    const payloadTtlSeconds = published?.payloadTtlSeconds;
+    if (!Number.isFinite(payloadTtlSeconds) || payloadTtlSeconds <= seedCfg.maxStaleMin * 60) {
+      seedCfg = { ...seedCfg, maxStaleMin: seedCfg.legacyMaxStaleMin };
+    }
+  }
   ctx.containmentEvidenceByName?.delete(name);
   // #6095 audited this grace and DELIBERATELY kept it soft when the marker read
   // failed, unlike the content-freshness grace below. What it gates is why:

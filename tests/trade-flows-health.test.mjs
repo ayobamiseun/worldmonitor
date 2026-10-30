@@ -43,7 +43,7 @@ function classifyAt(now, { ageMin = 1, recordCount = 256, present = true } = {})
       keyStrens: new Map(present ? [[KEY, 4096]] : []),
       keyErrors: new Map(),
       keyMetaValues: new Map(present
-        ? [[META, JSON.stringify({ fetchedAt: now - ageMin * ONE_MIN_MS, recordCount })]]
+        ? [[META, JSON.stringify({ fetchedAt: now - ageMin * ONE_MIN_MS, recordCount, payloadTtlSeconds: TRADE_TTL })]]
         : []),
       keyMetaErrors: new Map(),
       now,
@@ -60,7 +60,7 @@ function classifyWithMeta(meta, { ageMin = 1, recordCount = 256, present = true 
       keyStrens: new Map(present ? [[KEY, 4096]] : []),
       keyErrors: new Map(),
       keyMetaValues: new Map(present
-        ? [[META, JSON.stringify({ fetchedAt: STRICT_NOW - ageMin * ONE_MIN_MS, recordCount, ...meta })]]
+        ? [[META, JSON.stringify({ fetchedAt: STRICT_NOW - ageMin * ONE_MIN_MS, recordCount, payloadTtlSeconds: TRADE_TTL, ...meta })]]
         : []),
       keyMetaErrors: new Map(),
       now: STRICT_NOW,
@@ -152,6 +152,7 @@ for (const [name, ttl] of [
         keyMetaValues: new Map([[config.key, JSON.stringify({
           fetchedAt: NOW - ageMin * ONE_MIN_MS,
           recordCount: 256,
+          payloadTtlSeconds: ttl,
         })]]),
         keyMetaErrors: new Map(),
         now: NOW,
@@ -192,3 +193,28 @@ test('the absent-fleet alarm is not softened by any exemption list', () => {
   assert.notEqual(entry.status, 'OK');
   assert.notEqual(entry.status, 'ROLLOUT_PENDING');
 });
+
+for (const name of ['tradeFlows', 'tariffTrendsUs']) {
+  test(`${name} retains the old health limit until its publisher proves longer retention`, () => {
+    const key = STANDALONE_KEYS[name];
+    for (const payloadTtlSeconds of [undefined, null, '86400', 28800, 68400, 86400]) {
+      const budget = payloadTtlSeconds === 86400 ? 1140 : 420;
+      for (const ageMin of [420, 421, 480, 720, 1080, 1140, 1141]) {
+        const entry = classifyKey(name, key, {}, {
+          keyStrens: new Map([[key, 4096]]),
+          keyErrors: new Map(),
+          keyMetaValues: new Map([[key, JSON.stringify({
+            fetchedAt: NOW - ageMin * ONE_MIN_MS,
+            recordCount: 256,
+            payloadTtlSeconds,
+          })]]),
+          keyMetaErrors: new Map(),
+          now: NOW,
+        });
+        assert.equal(entry.maxStaleMin, budget);
+        assert.equal(entry.status, ageMin > budget ? 'STALE_SEED' : 'OK',
+          `${name}, TTL ${payloadTtlSeconds}, age ${ageMin}`);
+      }
+    }
+  });
+}

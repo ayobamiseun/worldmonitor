@@ -948,6 +948,7 @@ export async function publishTradeFlows({ flows, manifest }) {
     // manifest comment in fetchTradeFlows). An envelope-less top-level field is
     // the one thing health can read and echo verbatim.
     dominantFailureMode: dominantFailureMode(manifest.stats ?? {}),
+    payloadTtlSeconds: TRADE_TTL,
   });
 }
 
@@ -1267,7 +1268,9 @@ export async function publishTariffTrends({ trends, manifest }) {
   // previous meta record then ages out on its own TTL instead of crashing the
   // seeder. Mirrors the isolation policy in _seed-utils.mjs.
   try {
-    await writeSeedMeta(TARIFF_KEY_PREFIX, written, TARIFF_META_KEY);
+    await writeSeedMeta(TARIFF_KEY_PREFIX, written, TARIFF_META_KEY, undefined, undefined, {
+      payloadTtlSeconds: TARIFF_TTL,
+    });
   } catch (err) {
     console.warn(`  Tariff trends: seed-meta write failed: ${err?.message || err}`);
   }
