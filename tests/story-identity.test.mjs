@@ -16,9 +16,15 @@ import {
   isSameStory,
   clusterTexts,
   setStoryVectorProvider,
+  setFeatureHashSalt,
+  activeFeatureHashSalt,
+  deriveFeatureHashSalt,
 } from '../shared/story-identity.js';
 
-afterEach(() => setStoryVectorProvider(null));
+afterEach(() => {
+  setStoryVectorProvider(null);
+  setFeatureHashSalt(null);
+});
 
 // ── Labeled pairs (tuning ground truth) ────────────────────────────────────
 //
@@ -164,6 +170,56 @@ describe('clusterTexts', () => {
     const texts = ['Fed holds interest rates steady', 'Fed holds rates steady'];
     assert.equal(clusterTexts(texts, { threshold: 0.999 }).length, 2);
     assert.equal(clusterTexts(texts).length, 1);
+  });
+});
+
+describe('feature-hash salt (#4925 item 2)', () => {
+  const TITLE = 'Iran threatens to close Strait of Hormuz';
+
+  it('is unsalted by default and derives a stable non-zero seed from a salt string', () => {
+    assert.equal(activeFeatureHashSalt(), 0);
+    assert.equal(deriveFeatureHashSalt(undefined), 0);
+    assert.equal(deriveFeatureHashSalt(''), 0);
+    assert.equal(deriveFeatureHashSalt('   '), 0);
+    const seed = deriveFeatureHashSalt('deploy-secret');
+    assert.notEqual(seed, 0);
+    assert.equal(seed, deriveFeatureHashSalt('deploy-secret'));
+    assert.equal(seed, deriveFeatureHashSalt('  deploy-secret  '), 'surrounding whitespace is not part of the salt');
+    assert.notEqual(seed, deriveFeatureHashSalt('deploy-secret-2'));
+    assert.equal(setFeatureHashSalt('deploy-secret'), seed);
+    assert.equal(activeFeatureHashSalt(), seed);
+  });
+
+  it('moves every feature to a different projection, so an offline collision search is deploy-specific', () => {
+    const unsalted = storyVector(TITLE);
+    setFeatureHashSalt('deploy-secret');
+    const salted = storyVector(TITLE);
+    assert.ok(unsalted && salted);
+    const differing = Array.from(unsalted.u).filter((v, i) => Math.abs(v - salted.u[i]) > 1e-12).length;
+    assert.ok(differing > 0, 'a salt must change the projection');
+    // Cross-salt vectors are not comparable; the salt only has to be stable within a process.
+    assert.ok(cosineSimilarity(unsalted, salted) < 0.99, 'different salts must not share a vector space');
+    setFeatureHashSalt('deploy-secret');
+    assert.deepEqual(Array.from(storyVector(TITLE).u), Array.from(salted.u), 'same salt, same projection');
+  });
+
+  it('keeps the labeled ground truth separating under a salt', () => {
+    setFeatureHashSalt('deploy-secret');
+    for (const [a, b] of POSITIVE_PAIRS) {
+      assert.ok(isSameStory(a, b), `salted positive must merge: ${a} | ${b}`);
+    }
+    for (const [a, b] of NEGATIVE_PAIRS) {
+      assert.ok(!isSameStory(a, b), `salted negative must stay apart: ${a} | ${b}`);
+    }
+    assert.ok(Math.abs(storySimilarity(TITLE, TITLE) - 1) < 1e-9);
+  });
+
+  it('restores the unsalted hashes when cleared', () => {
+    const before = Array.from(storyVector(TITLE).u);
+    setFeatureHashSalt('deploy-secret');
+    setFeatureHashSalt(null);
+    assert.equal(activeFeatureHashSalt(), 0);
+    assert.deepEqual(Array.from(storyVector(TITLE).u), before);
   });
 });
 

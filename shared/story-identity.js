@@ -72,6 +72,45 @@ function fnv1a(str, seed) {
   return h >>> 0;
 }
 
+// Per-deploy feature-hash salt (#4925 item 2). FNV-1a at DIM=512 is unkeyed
+// and public, so an offline collision search could craft gibberish tokens
+// that project onto a target story's dimensions and forge a merge. Folding a
+// deploy-private seed into both hashes (index + sign) breaks that search:
+// the attacker cannot compute which dimension a token lands on. Vectors are
+// never persisted and never compared across processes, so the salt may
+// differ between deployments without invalidating any state; it only has to
+// be stable for the lifetime of one process. Unset keeps the historical
+// unsalted hashes.
+const SIGN_SEED = 0x9e3779b9;
+const SALT_SEED = 0x5bd1e995;
+
+/** @param {unknown} value @returns {number} 32-bit seed, 0 when unset */
+export function deriveFeatureHashSalt(value) {
+  if (typeof value !== 'string') return 0;
+  const trimmed = value.trim();
+  return trimmed ? fnv1a(trimmed, SALT_SEED) : 0;
+}
+
+let featureHashSalt = deriveFeatureHashSalt(globalThis.process?.env?.STORY_FEATURE_HASH_SALT);
+
+/**
+ * Test/ops seam: install a salt string (or null/'' to restore the unsalted
+ * hashes). Returns the derived 32-bit seed. The env var is read once at
+ * module load; this exists so a suite can prove salting changes the
+ * projection without re-importing the module.
+ * @param {string | null | undefined} value
+ * @returns {number}
+ */
+export function setFeatureHashSalt(value) {
+  featureHashSalt = deriveFeatureHashSalt(value);
+  return featureHashSalt;
+}
+
+/** @returns {number} the active 32-bit salt seed (0 = unsalted) */
+export function activeFeatureHashSalt() {
+  return featureHashSalt;
+}
+
 /**
  * Generic story-text normalization: lowercase, strip everything that is
  * not a Unicode letter/number, collapse whitespace. Callers that know
@@ -254,8 +293,8 @@ function contentTokens(text) {
 
 /** @param {Float64Array} vec @param {string} feature @param {number} weight */
 function addFeature(vec, feature, weight) {
-  const idx = fnv1a(feature, 0) % DIM;
-  const sign = (fnv1a(feature, 0x9e3779b9) & 1) === 1 ? 1 : -1;
+  const idx = fnv1a(feature, featureHashSalt) % DIM;
+  const sign = (fnv1a(feature, (SIGN_SEED ^ featureHashSalt) >>> 0) & 1) === 1 ? 1 : -1;
   vec[idx] += sign * weight;
 }
 
