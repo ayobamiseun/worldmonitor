@@ -41,6 +41,23 @@ import {
 export const INTEL_HISTORY_EMBED_DIMS = 512;
 
 /**
+ * Identity of the vector space every stored row lives in, stamped on each
+ * row by `append` (#5742). MUST equal `${EMBED_MODEL}@${EMBED_DIMS}` from
+ * scripts/lib/brief-dedup-consts.mjs (pinned by
+ * tests/intel-history-endpoints.test.mts). A model or dimension change is a
+ * table migration (docs/operations/intel-history-embedding-migration-runbook.md);
+ * the stamp exists so that a row from another space is visible in
+ * `embeddingModelInventory` and skipped by `search`, rather than silently
+ * ranked against vectors it cannot be compared with.
+ */
+export const INTEL_HISTORY_EMBED_MODEL = "openai/text-embedding-3-small@512";
+
+/** Rows written before the stamp existed were all produced by the one model ever used. */
+function isCurrentEmbeddingModel(embeddingModel: string | undefined): boolean {
+  return embeddingModel === undefined || embeddingModel === INTEL_HISTORY_EMBED_MODEL;
+}
+
+/**
  * Per-call ingest cap. Each record carries a 512-float vector (~4KB before
  * encoding), so this bounds both the mutation's write set and the request
  * body the relay route has to parse. Seeders chunk larger runs.
@@ -317,6 +334,7 @@ export const append = internalMutation({
         ingestedAt,
         dedupeKey: rec.dedupeKey,
         embedding: rec.embedding,
+        embeddingModel: INTEL_HISTORY_EMBED_MODEL,
       });
       inserted += 1;
     }
@@ -755,7 +773,40 @@ export const getByIds = internalQuery({
     // rather than serially. Promise.all resolves in input order, which IS the
     // relevance order the caller depends on.
     const docs = await Promise.all(args.ids.map((id) => ctx.db.get(id)));
-    return docs.filter((doc) => doc !== null).map((doc) => projectRecord(doc));
+    return docs
+      .filter((doc) => doc !== null)
+      .map((doc) => ({ ...projectRecord(doc), embeddingModel: doc.embeddingModel }));
+  },
+});
+
+/**
+ * Bounded census of the vector spaces present in the table (#5742): how many
+ * of the newest `limit` rows carry each `embeddingModel` stamp (`unstamped`
+ * for rows older than the stamp). A second key beside the current one means
+ * a migration is in progress or went wrong; the runbook reads this before
+ * and after a cutover. Scans by `by_ingestedAt` so the cost is the limit,
+ * never the table.
+ */
+export const embeddingModelInventory = internalQuery({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const limit = clamp(args.limit ?? 1000, 1, 10_000);
+    const rows = await ctx.db
+      .query("intelHistory")
+      .withIndex("by_ingestedAt")
+      .order("desc")
+      .take(limit + 1);
+    const models: Record<string, number> = {};
+    for (const row of rows.slice(0, limit)) {
+      const key = row.embeddingModel ?? "unstamped";
+      models[key] = (models[key] ?? 0) + 1;
+    }
+    return {
+      current: INTEL_HISTORY_EMBED_MODEL,
+      scanned: Math.min(rows.length, limit),
+      partial: rows.length > limit,
+      models,
+    };
   },
 });
 
@@ -825,12 +876,20 @@ export const search = internalAction({
     if (hits.length === 0) return { records: [], partial: false };
 
     const scoreById = new Map(hits.map((hit) => [hit._id as string, hit._score]));
-    const hydrated: IntelHistoryRecord[] = await ctx.runQuery(
+    const hydrated: Array<IntelHistoryRecord & { embeddingModel?: string }> = await ctx.runQuery(
       internal.intelHistory.getByIds,
       { ids: hits.map((hit) => hit._id) },
     );
 
-    const records = hydrated
+    // A row from another vector space scored against this query vector is a
+    // number, not a similarity (#5742). Drop it rather than rank it, and
+    // report the result as partial so a caller can tell a thinned answer
+    // from a complete one.
+    const sameSpace = hydrated.filter((rec) => isCurrentEmbeddingModel(rec.embeddingModel));
+    const droppedForeignSpace = sameSpace.length !== hydrated.length;
+
+    const records = sameSpace
+      .map(({ embeddingModel: _embeddingModel, ...rec }) => rec)
       .filter((rec) => {
         if (pushedDown === "domain" && args.country !== undefined) {
           if (rec.country !== args.country) return false;
@@ -846,7 +905,10 @@ export const search = internalAction({
       .slice(0, limit)
       .map((rec) => ({ ...rec, _score: scoreById.get(rec.id) ?? 0 }));
 
-    return { records, partial: needsPostFilter && hits.length === vectorLimit };
+    return {
+      records,
+      partial: (needsPostFilter && hits.length === vectorLimit) || droppedForeignSpace,
+    };
   },
 });
 

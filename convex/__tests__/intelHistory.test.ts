@@ -10,6 +10,7 @@ import {
   INTEL_HISTORY_MAX_RETRACT_IDENTIFIERS,
   INTEL_HISTORY_RETENTION_DAYS,
   TIMELINE_MAX_LIMIT,
+  INTEL_HISTORY_EMBED_MODEL,
 } from "../intelHistory";
 
 const modules = import.meta.glob("../**/*.ts");
@@ -138,6 +139,15 @@ describe("intelHistory.append", () => {
       summary: "Overnight drone strike on infrastructure",
       sourceUrl: "https://example.test/1",
     });
+  });
+
+  test("stamps every inserted row with the current embedding model (#5742)", async () => {
+    const t = await intelHistoryAppendTest();
+    await t.mutation(internal.intelHistory.append, appendArgs([record({ dedupeKey: "stamped" })]));
+    const rows = await t.run((ctx) => ctx.db.query("intelHistory").collect());
+    expect(rows).toHaveLength(1);
+    expect(rows[0].embeddingModel).toBe(INTEL_HISTORY_EMBED_MODEL);
+    expect(INTEL_HISTORY_EMBED_MODEL).toMatch(/@512$/);
   });
 
   test("skips a dedupeKey that already exists from an earlier run", async () => {
@@ -549,6 +559,34 @@ describe("intelHistory.getByIds", () => {
 });
 
 describe("intelHistory.search", () => {
+  test("drops rows from another vector space and reports the answer as partial (#5742)", async () => {
+    const t = convexTest(schema, modules);
+    await seed(t, [
+      { dedupeKey: "current", title: "current", occurredAt: NOW - DAY, embedding: unitVector(0), embeddingModel: INTEL_HISTORY_EMBED_MODEL },
+      { dedupeKey: "legacy", title: "legacy", occurredAt: NOW - DAY, embedding: unitVector(0, 0.5) },
+      { dedupeKey: "foreign", title: "foreign", occurredAt: NOW - DAY, embedding: unitVector(0), embeddingModel: "other/model@512" },
+    ]);
+
+    const res = await t.action(internal.intelHistory.search, { embedding: unitVector(0) });
+
+    // The foreign row scored 1.0 against the query, which is exactly why it
+    // must not be ranked: that number is not a similarity in this space.
+    expect(res.records.map((r) => r.title)).toEqual(["current", "legacy"]);
+    expect(res.partial).toBe(true);
+    for (const rec of res.records) expect(rec).not.toHaveProperty("embeddingModel");
+  });
+
+  test("a table with one vector space is not partial", async () => {
+    const t = convexTest(schema, modules);
+    await seed(t, [
+      { dedupeKey: "a", title: "a", occurredAt: NOW - DAY, embedding: unitVector(0), embeddingModel: INTEL_HISTORY_EMBED_MODEL },
+      { dedupeKey: "b", title: "b", occurredAt: NOW - DAY, embedding: unitVector(3) },
+    ]);
+    const res = await t.action(internal.intelHistory.search, { embedding: unitVector(0) });
+    expect(res.records).toHaveLength(2);
+    expect(res.partial).toBe(false);
+  });
+
   test("ranks by cosine similarity and attaches _score", async () => {
     const t = convexTest(schema, modules);
     await seed(t, [
@@ -2124,5 +2162,29 @@ describe("relay retraction routes — validation edges", () => {
       const res = await t.fetch(path, post(body, ""));
       expect(res.status, `${path} must reject when no secret is configured`).toBe(401);
     }
+  });
+});
+
+describe("intelHistory.embeddingModelInventory (#5742)", () => {
+  test("tallies the newest rows by stamp, naming unstamped rows and the current space", async () => {
+    const t = convexTest(schema, modules);
+    await seed(t, [
+      { dedupeKey: "a", occurredAt: NOW - DAY, ingestedAt: NOW - 3, embeddingModel: INTEL_HISTORY_EMBED_MODEL },
+      { dedupeKey: "b", occurredAt: NOW - DAY, ingestedAt: NOW - 2, embeddingModel: INTEL_HISTORY_EMBED_MODEL },
+      { dedupeKey: "c", occurredAt: NOW - DAY, ingestedAt: NOW - 1, embeddingModel: "other/model@512" },
+      { dedupeKey: "d", occurredAt: NOW - DAY, ingestedAt: NOW },
+    ]);
+    const all = await t.query(internal.intelHistory.embeddingModelInventory, {});
+    expect(all).toEqual({
+      current: INTEL_HISTORY_EMBED_MODEL,
+      scanned: 4,
+      partial: false,
+      models: { [INTEL_HISTORY_EMBED_MODEL]: 2, "other/model@512": 1, unstamped: 1 },
+    });
+
+    const newest = await t.query(internal.intelHistory.embeddingModelInventory, { limit: 2 });
+    expect(newest.scanned).toBe(2);
+    expect(newest.partial).toBe(true);
+    expect(newest.models).toEqual({ unstamped: 1, "other/model@512": 1 });
   });
 });
