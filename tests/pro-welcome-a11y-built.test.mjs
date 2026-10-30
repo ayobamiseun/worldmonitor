@@ -50,6 +50,10 @@ describe('welcome page a11y (#7382), built output', { skip }, () => {
         1,
         'one of the two links must be the Launch CTA',
       );
+      const lockup = [...topLevelLinks].find((a) => a.getAttribute('data-umami-event-target') !== 'welcome-nav');
+      for (const token of ['flex', 'items-center', 'gap-2']) {
+        assert.ok(lockup.classList.contains(token), `the lockup must have an unconditional ${token} class`);
+      }
     } finally {
       window.close();
     }
@@ -57,7 +61,6 @@ describe('welcome page a11y (#7382), built output', { skip }, () => {
     assert.equal(lockups.length, 1, 'exactly one lockup anchor in the nav');
     const [lockup] = lockups;
     assert.doesNotMatch(lockup.full, /aria-label(?:ledby)?=/, 'neither the lockup nor its descendants may override the visible name');
-    assert.match(lockup.attrs, /class="[^"]*\bflex items-center gap-2\b/, 'the glyph and wordmark share one flex target');
     assert.match(lockup.attrs, /href="https:\/\/worldmonitor\.app"/);
     const glyphWrapper = lockup.inner.match(/<span\b[^>]*>/);
     assert.ok(glyphWrapper && /aria-hidden="true"/.test(glyphWrapper[0]), 'the glyph wrapper is decorative');
@@ -68,14 +71,18 @@ describe('welcome page a11y (#7382), built output', { skip }, () => {
     it(`keeps the ${locale.id} Launch CTA aria-label equal to its visible copy`, () => {
       const page = readFileSync(new URL(`../${landingBuiltOutputPath(locale)}`, import.meta.url), 'utf8');
       const nav = section(page, '<nav data-wm-nav="primary"', '</nav>');
-      const launch = anchors(nav).filter((a) => /data-umami-event-target="welcome-nav"/.test(a.attrs));
-      assert.equal(launch.length, 1, 'one Launch CTA in the nav');
-      const label = launch[0].attrs.match(/aria-label="([^"]*)"/)?.[1];
-      assert.ok(label, 'the Launch CTA must have an aria-label');
       const copy = JSON.parse(readFileSync(new URL(`../pro-test/src/locales/${locale.id}.json`, import.meta.url), 'utf8'));
       const expected = copy.welcome.nav.launch;
-      assert.equal(label, expected, 'the label must use the locale copy');
-      assert.equal(textOf(launch[0].inner), expected, 'the visible CTA must use the locale copy');
+      const window = new Window();
+      try {
+        window.document.body.innerHTML = nav;
+        const launch = window.document.querySelectorAll('a[data-umami-event-target="welcome-nav"]');
+        assert.equal(launch.length, 1, 'one Launch CTA in the nav');
+        assert.equal(launch[0].getAttribute('aria-label'), expected, 'the label must use the locale copy');
+        assert.equal(launch[0].textContent.replace(/\s+/g, ' ').trim(), expected, 'the visible CTA must use the locale copy');
+      } finally {
+        window.close();
+      }
     });
   }
 
