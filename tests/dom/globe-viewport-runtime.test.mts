@@ -131,6 +131,7 @@ describe('Globe viewport runtime', () => {
     release();
     await Promise.resolve();
     expect(setCenter).toHaveBeenCalledTimes(destroyed ? 0 : 1);
+    if (!destroyed) expect(setCenter).toHaveBeenCalledWith(26.5, 56.5, 5);
     expect(show).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1500);
     expect(show).toHaveBeenCalledTimes(destroyed ? 0 : 1);
