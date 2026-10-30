@@ -84,6 +84,9 @@ type AppInternals = {
   viewportHydrationReadyAt: number;
   viewportTriggersArmed: boolean;
   handleViewportPrime: (event?: Event) => void;
+  runVisibleDataFanout: () => Promise<void>;
+  primeVisiblePanelData: () => Promise<void>;
+  dataLoader: { loadAllData: (forceAll?: boolean, trigger?: 'full' | 'viewport') => Promise<void> };
   initFindingsBadge: () => Promise<void>;
 };
 
@@ -145,14 +148,24 @@ describe('App.destroy', () => {
     expect(internals.state.findingsBadge).toBeNull();
   });
 
-  it('removes the capture-phase scroll listener and the resize listener, and cancels a queued hydration frame', () => {
+  it('removes the capture-phase scroll listener and the resize listener, and cancels a queued hydration frame', async () => {
     const { app, internals } = makeApp();
+    const add = vi.spyOn(window, 'addEventListener');
     const remove = vi.spyOn(window, 'removeEventListener');
     const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
-    internals.visiblePanelPrimeRaf = 42;
-    internals.viewportHydrationReady = true;
-    internals.viewportHydrationReadyAt = 1234;
-    internals.viewportTriggersArmed = true;
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(42);
+    vi.spyOn(internals, 'primeVisiblePanelData').mockResolvedValue(undefined);
+    vi.spyOn(internals.dataLoader, 'loadAllData').mockResolvedValue(undefined);
+    const scroller = document.createElement('div');
+    scroller.className = 'main-content';
+    document.body.appendChild(scroller);
+
+    await internals.runVisibleDataFanout();
+    expect(add).toHaveBeenCalledWith('scroll', internals.handleViewportPrime, { passive: true, capture: true });
+    expect(add).toHaveBeenCalledWith('resize', internals.handleViewportPrime);
+    scroller.dispatchEvent(new Event('scroll'));
+    expect(raf).toHaveBeenCalledTimes(1);
+    expect(internals.visiblePanelPrimeRaf).toBe(42);
 
     app.destroy();
 
@@ -163,18 +176,23 @@ describe('App.destroy', () => {
     expect(internals.viewportHydrationReady).toBe(false);
     expect(internals.viewportHydrationReadyAt).toBe(0);
     expect(internals.viewportTriggersArmed).toBe(false);
+    raf.mockClear();
+    scroller.dispatchEvent(new Event('scroll'));
+    window.dispatchEvent(new Event('resize'));
+    expect(raf).not.toHaveBeenCalled();
   });
 
   it('ignores a findings badge chunk that resolves after destroy', async () => {
     const { app, internals } = makeApp();
+    const pending = internals.initFindingsBadge();
     app.destroy();
-    await internals.initFindingsBadge();
+    await pending;
     expect(internals.state.findingsBadge).toBeNull();
   });
 });
 
 describe('viewport prime handler', () => {
-  function armed(): { app: App; internals: AppInternals; raf: ReturnType<typeof vi.spyOn> } {
+  function armed() {
     const { app, internals } = makeApp();
     let nextId = 1;
     const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => nextId++);
@@ -192,11 +210,24 @@ describe('viewport prime handler', () => {
 
   it('coalesces repeated scrolls of the dashboard scroller into one frame', () => {
     const { internals, raf } = armed();
+    const prime = vi.spyOn(internals, 'primeVisiblePanelData').mockResolvedValue(undefined);
+    const load = vi.spyOn(internals.dataLoader, 'loadAllData').mockResolvedValue(undefined);
     const scroller = mainContent();
     internals.handleViewportPrime(scrollFrom(scroller, 2000));
     internals.handleViewportPrime(scrollFrom(scroller, 2001));
     expect(raf).toHaveBeenCalledTimes(1);
     expect(internals.visiblePanelPrimeRaf).toBe(1);
+    expect(prime).not.toHaveBeenCalled();
+    expect(load).not.toHaveBeenCalled();
+
+    raf.mock.calls[0]![0](0);
+
+    expect(internals.visiblePanelPrimeRaf).toBeNull();
+    expect(prime).toHaveBeenCalledTimes(1);
+    expect(load).toHaveBeenCalledWith(false, 'viewport');
+    internals.handleViewportPrime(scrollFrom(scroller, 2002));
+    expect(raf).toHaveBeenCalledTimes(2);
+    expect(internals.visiblePanelPrimeRaf).toBe(2);
   });
 
   it('ignores nested scrollers, pre-arm timestamps, and a disarmed or unready app', () => {
