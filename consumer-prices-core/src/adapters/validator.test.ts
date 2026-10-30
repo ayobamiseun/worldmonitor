@@ -676,3 +676,21 @@ describe('validateSearchHit — India multipacks and wrong products', () => {
     expect(r.ok).toBe(true);
   });
 });
+
+
+describe('comma-decimal title multipacks', () => {
+  it.each([
+    ['Full Fat Fresh Milk 2 x 1,5 Litros', '1,5 Litros', 1400, 1600, 3000, false],
+    ['Full Fat Fresh Milk 0,5 Litros (Pack of 2)', '0,5 Litros', 900, 1100, 1000, true],
+    ['Full Fat Fresh Milk 0,500 litro (Pack of 2)', '0,500 litro', 900, 1100, 1000, true],
+  ])('uses the total quantity from %s', (productName, sizeText, minBaseQty, maxBaseQty, total, accepted) => {
+    const canonicalName = 'Full Fat Fresh Milk';
+    const result = validateSearchHit({
+      canonicalName, productName, sizeText, marketCode: 'br',
+      item: item({ canonicalName, baseUnit: 'ml', minBaseQty, maxBaseQty }),
+    });
+    expect(result.ok).toBe(accepted);
+    expect(result.signals.extractedBaseQty).toBe(total);
+    expect(result.signals.sizeWindow).toBe(accepted ? 'pass' : 'fail');
+  });
+});

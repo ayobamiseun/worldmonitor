@@ -12,6 +12,8 @@ describe('parseSize decimal separators (#5445)', () => {
     ['1,5Kg', 1500, 'g'],
     ['1,4 kg', 1400, 'g'],
     ['0,9 l', 900, 'ml'],
+    ['0,500 litro', 500, 'ml'],
+    ['0,125 litros', 125, 'ml'],
     ['1,5 Litros', 1500, 'ml'],
     ['1 Litro', 1000, 'ml'],
   ])('parses the comma decimal in %s as %d %s', (raw, baseQuantity, baseUnit) => {
